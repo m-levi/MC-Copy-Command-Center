@@ -116,3 +116,4 @@ Potential improvements:
 - Multi-email campaign planning
 - Visual planning canvas
 
+

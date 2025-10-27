@@ -194,3 +194,4 @@ ChatInput (renders mode-specific UI)
 - ✅ Migration assigns appropriate modes based on message count
 - ✅ No breaking changes to existing functionality
 
+
