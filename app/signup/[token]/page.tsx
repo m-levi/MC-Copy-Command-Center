@@ -97,37 +97,23 @@ export default function InviteSignupPage() {
         throw new Error('Failed to create account');
       }
 
-      // Update profile with full name
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ full_name: fullName })
-        .eq('user_id', authData.user.id);
+      // Wait a moment for the profile trigger to complete
+      // (Profile is auto-created via database trigger)
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      if (profileError) {
-        console.error('Profile update error:', profileError);
-      }
+      // Accept invitation via API (handles RLS properly on server-side)
+      const acceptResponse = await fetch('/api/organizations/invites/accept', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ token }),
+      });
 
-      // Add user to organization
-      const { error: memberError } = await supabase
-        .from('organization_members')
-        .insert({
-          organization_id: inviteData.organization.id,
-          user_id: authData.user.id,
-          role: inviteData.role,
-          invited_by: authData.user.id, // Will be updated by trigger if needed
-          joined_at: new Date().toISOString()
-        });
+      const acceptData = await acceptResponse.json();
 
-      if (memberError) throw memberError;
-
-      // Mark invitation as used
-      const { error: inviteError } = await supabase
-        .from('organization_invites')
-        .update({ used_at: new Date().toISOString() })
-        .eq('invite_token', token);
-
-      if (inviteError) {
-        console.error('Invite update error:', inviteError);
+      if (!acceptResponse.ok) {
+        throw new Error(acceptData.error || 'Failed to accept invitation');
       }
 
       // Redirect to home page
