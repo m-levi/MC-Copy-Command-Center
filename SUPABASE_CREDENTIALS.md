@@ -17,7 +17,7 @@ Copy these into your `.env.local` file:
 ```env
 # Supabase Configuration
 NEXT_PUBLIC_SUPABASE_URL=https://swmijewkwwsbbccfzexe.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3bWlqZXdrd3dzYmJjY2Z6ZXhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MTI1MzEsImV4cCI6MjA3Njk4ODUzMX0.Z2GL1BFn_MQcKeM0TnNJQD-tbbI4-WmCD-1hCsvCNRk
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
 
 # AI API Keys (Server-side only)
 OPENAI_API_KEY=your_openai_api_key_here

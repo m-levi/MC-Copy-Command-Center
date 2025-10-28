@@ -47,7 +47,7 @@ Then add these credentials:
 ```env
 # Supabase Configuration (✅ Ready to use)
 NEXT_PUBLIC_SUPABASE_URL=https://swmijewkwwsbbccfzexe.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3bWlqZXdrd3dzYmJjY2Z6ZXhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MTI1MzEsImV4cCI6MjA3Njk4ODUzMX0.Z2GL1BFn_MQcKeM0TnNJQD-tbbI4-WmCD-1hCsvCNRk
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
 
 # AI API Keys (Add your keys here)
 OPENAI_API_KEY=sk-proj-your-key-here
@@ -195,7 +195,7 @@ When you're ready to deploy to Vercel:
 1. Add these environment variables in Vercel dashboard:
    ```
    NEXT_PUBLIC_SUPABASE_URL=https://swmijewkwwsbbccfzexe.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3bWlqZXdrd3dzYmJjY2Z6ZXhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MTI1MzEsImV4cCI6MjA3Njk4ODUzMX0.Z2GL1BFn_MQcKeM0TnNJQD-tbbI4-WmCD-1hCsvCNRk
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
    OPENAI_API_KEY=your-key
    ANTHROPIC_API_KEY=your-key
    ```
