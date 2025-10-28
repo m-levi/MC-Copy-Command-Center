@@ -99,18 +99,37 @@ export default function InviteSignupPage() {
 
       // Wait a moment for the profile trigger to complete
       // (Profile is auto-created via database trigger)
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Accept invitation via API (handles RLS properly on server-side)
-      const acceptResponse = await fetch('/api/organizations/invites/accept', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ token }),
-      });
+      // Retry logic in case profile creation is still in progress
+      let acceptResponse;
+      let acceptData;
+      let retries = 0;
+      const maxRetries = 3;
 
-      const acceptData = await acceptResponse.json();
+      while (retries < maxRetries) {
+        acceptResponse = await fetch('/api/organizations/invites/accept', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ token }),
+        });
+
+        acceptData = await acceptResponse.json();
+
+        // If profile not found, wait and retry
+        if (!acceptResponse.ok && acceptData.error?.includes('profile not found')) {
+          retries++;
+          if (retries < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+            continue;
+          }
+        }
+        
+        break;
+      }
 
       if (!acceptResponse.ok) {
         throw new Error(acceptData.error || 'Failed to accept invitation');
