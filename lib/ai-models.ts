@@ -7,18 +7,8 @@ export const AI_MODELS: AIModelOption[] = [
     provider: 'openai',
   },
   {
-    id: 'o1',
-    name: 'O1',
-    provider: 'openai',
-  },
-  {
     id: 'claude-4.5-sonnet',
     name: 'Claude 4.5 Sonnet',
-    provider: 'anthropic',
-  },
-  {
-    id: 'claude-opus-3.5',
-    name: 'Claude Opus 3.5',
     provider: 'anthropic',
   },
 ];

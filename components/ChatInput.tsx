@@ -3,6 +3,7 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import { PROMPT_TEMPLATES, QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
 import { ConversationMode } from '@/types';
+import VoiceInput from './VoiceInput';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -13,6 +14,9 @@ interface ChatInputProps {
   mode?: ConversationMode;
   draftContent?: string;
   onDraftChange?: (content: string) => void;
+  onModeChange?: (mode: ConversationMode) => void;
+  selectedModel?: string;
+  onModelChange?: (model: string) => void;
 }
 
 export default function ChatInput({ 
@@ -21,15 +25,20 @@ export default function ChatInput({
   disabled, 
   isGenerating, 
   conversationId,
-  mode = 'planning',
+  mode = 'email_copy',
   draftContent = '',
-  onDraftChange
+  onDraftChange,
+  onModeChange,
+  selectedModel = 'claude-4.5-sonnet',
+  onModelChange
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState<string[]>([]);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
 
   const slashCommands = [
     { command: '/shorten', label: 'Make it shorter', icon: '📏' },
@@ -39,6 +48,15 @@ export default function ChatInput({
     { command: '/proof', label: 'Add social proof', icon: '⭐' },
     { command: '/cta', label: 'Improve CTAs', icon: '🎯' },
   ];
+
+  const models = [
+    { id: 'gpt-5', name: 'GPT-5' },
+    { id: 'claude-4.5-sonnet', name: 'SONNET 4.5' },
+  ];
+
+  const getModelName = (modelId: string) => {
+    return models.find(m => m.id === modelId)?.name || 'SONNET 4.5';
+  };
 
   // Sync with draft content from parent
   useEffect(() => {
@@ -50,6 +68,20 @@ export default function ChatInput({
       }
     }
   }, [draftContent]);
+
+  // Close model picker on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(event.target as Node)) {
+        setShowModelPicker(false);
+      }
+    };
+
+    if (showModelPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showModelPicker]);
 
   // Check for slash commands
   useEffect(() => {
@@ -137,14 +169,28 @@ export default function ChatInput({
 
   const getPlaceholder = () => {
     if (mode === 'planning') {
-      return "Discuss your email ideas, strategy, and structure...";
+      return "Ask a question, explore ideas, or plan a campaign...";
     }
     return "Describe the email you'd like to create...";
   };
 
+  const handleVoiceTranscript = (transcript: string) => {
+    // Append transcript to current message
+    const newMessage = message ? `${message} ${transcript}` : transcript;
+    setMessage(newMessage);
+    if (onDraftChange) {
+      onDraftChange(newMessage);
+    }
+    // Auto-expand textarea
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  };
+
   return (
-    <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3">
-      <div className="max-w-4xl mx-auto">
+    <div className="bg-[#fcfcfc] dark:bg-gray-900 px-8 py-6">
+      <div className="max-w-5xl mx-auto">
         {/* Slash Command Suggestions */}
         {showSlashCommands && (
           <div className="mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden">
@@ -176,46 +222,140 @@ export default function ChatInput({
           </div>
         )}
 
-        <div className="relative">
-          <textarea
-            ref={textareaRef}
-            value={message}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            placeholder={getPlaceholder()}
-            disabled={disabled || isGenerating}
-            rows={1}
-            className="w-full px-3 py-2.5 pr-24 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none max-h-32 text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-          />
-          <div className="absolute right-2 bottom-2 flex items-center gap-2">
-            {charCount > 0 && (
-              <span className="text-xs text-gray-400 dark:text-gray-500">{charCount}</span>
-            )}
-            {isGenerating && onStop ? (
-              <button
-                onClick={onStop}
-                className="p-1.5 bg-red-500 hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700 text-white rounded transition-colors"
-                title="Stop generating"
-              >
-                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                  <rect x="6" y="6" width="12" height="12" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                onClick={handleSend}
-                disabled={!message.trim() || disabled}
-                className="p-1.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Send message"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              </button>
-            )}
+        {/* Main Input Card - matching Figma design */}
+        <div className="bg-white dark:bg-gray-800 border border-[#e3e3e3] dark:border-gray-700 rounded-[20px] shadow-sm overflow-visible">
+          <div className="px-6 pt-4 pb-3">
+            <textarea
+              ref={textareaRef}
+              value={message}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              placeholder={getPlaceholder()}
+              disabled={disabled || isGenerating}
+              rows={1}
+              className="w-full text-base leading-relaxed font-normal bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 resize-none max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+          </div>
+          
+          {/* Bottom Controls Bar */}
+          <div className="flex items-center justify-between px-6 pb-4">
+            {/* Left: Mode Toggle */}
+            <div className="flex items-center gap-2.5">
+              <div className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full p-0.5 flex items-center gap-0.5">
+                <button
+                  onClick={() => onModeChange?.('planning')}
+                  className={`
+                    px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 cursor-pointer
+                    ${mode === 'planning'
+                      ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105'
+                    }
+                  `}
+                  title="Planning mode - brainstorm and strategize"
+                >
+                  PLAN
+                </button>
+                <button
+                  onClick={() => onModeChange?.('email_copy')}
+                  className={`
+                    px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 cursor-pointer
+                    ${mode === 'email_copy'
+                      ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105'
+                    }
+                  `}
+                  title="Email copy mode - generate email content"
+                >
+                  WRITE
+                </button>
+              </div>
+              
+              {/* Model Selector Dropdown */}
+              <div className="relative" ref={modelPickerRef}>
+                <button
+                  onClick={() => setShowModelPicker(!showModelPicker)}
+                  className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-4 py-1.5 flex items-center gap-1.5 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                >
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                    {getModelName(selectedModel)}
+                  </span>
+                  <svg 
+                    className={`w-2 h-2 text-gray-600 dark:text-gray-400 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} 
+                    fill="currentColor" 
+                    viewBox="0 0 10 5"
+                  >
+                    <path d="M0 0L5 5L10 0H0Z" />
+                  </svg>
+                </button>
+                
+                {/* Dropdown Menu */}
+                {showModelPicker && (
+                  <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[160px] z-50">
+                    {models.map((model) => (
+                      <button
+                        key={model.id}
+                        onClick={() => {
+                          onModelChange?.(model.id);
+                          setShowModelPicker(false);
+                        }}
+                        className={`
+                          w-full px-4 py-2.5 text-left text-xs font-semibold transition-colors duration-150 cursor-pointer
+                          ${selectedModel === model.id
+                            ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                          }
+                        `}
+                      >
+                        {model.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right: Voice Input & Send Button */}
+            <div className="flex items-center gap-2">
+              {charCount > 0 && (
+                <span className="text-xs text-gray-400 dark:text-gray-500">{charCount}</span>
+              )}
+              
+              {/* Voice Input Button */}
+              {!isGenerating && (
+                <VoiceInput
+                  onTranscript={handleVoiceTranscript}
+                  disabled={disabled}
+                />
+              )}
+              
+              {isGenerating && onStop ? (
+                <button
+                  onClick={onStop}
+                  className="w-9 h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 hover:scale-105 dark:bg-red-600 dark:hover:bg-red-700 text-white rounded-full transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer"
+                  title="Stop generating"
+                >
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="6" width="12" height="12" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!message.trim() || disabled}
+                  className="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 hover:scale-105 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-full transition-all duration-150 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100"
+                  title="Send message"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         </div>
-        <div className="flex items-center justify-between mt-1.5">
+        
+        {/* Helper text */}
+        <div className="flex items-center justify-between mt-2 px-2">
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Press <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded text-xs">Enter</kbd> to send · <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded text-xs">Shift+Enter</kbd> for new line
           </p>

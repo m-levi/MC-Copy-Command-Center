@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Brand } from '@/types';
+import { Brand, Organization, OrganizationRole } from '@/types';
 import BrandCard from '@/components/BrandCard';
 import BrandModal from '@/components/BrandModal';
 import { useRouter } from 'next/navigation';
@@ -15,6 +15,10 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+  const [organization, setOrganization] = useState<Organization | null>(null);
+  const [userRole, setUserRole] = useState<OrganizationRole | null>(null);
+  const [canManageBrands, setCanManageBrands] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState('');
   const supabase = createClient();
   const router = useRouter();
 
@@ -31,18 +35,88 @@ export default function HomePage() {
         return;
       }
 
+      setCurrentUserId(user.id);
+
+      console.log('Fetching org membership for user:', user.id);
+
+      // Get user's organization membership
+      const { data: memberData, error: memberError } = await supabase
+        .from('organization_members')
+        .select('role, organization_id')
+        .eq('user_id', user.id)
+        .single();
+
+      console.log('Organization membership query result:', {
+        data: memberData,
+        error: memberError,
+        hasData: !!memberData,
+        hasError: !!memberError
+      });
+
+      if (memberError || !memberData) {
+        console.error('Organization membership error:', memberError);
+        console.error('User ID being queried:', user.id);
+        console.error('Full error object:', JSON.stringify(memberError, null, 2));
+        toast.error('You are not part of any organization. Please contact an admin.');
+        await supabase.auth.signOut();
+        router.push('/login');
+        return;
+      }
+
+      // Get organization details separately
+      const { data: orgData, error: orgError } = await supabase
+        .from('organizations')
+        .select('*')
+        .eq('id', memberData.organization_id)
+        .single();
+
+      if (orgError || !orgData) {
+        console.error('Organization fetch error:', orgError);
+        toast.error('Failed to load organization details.');
+        await supabase.auth.signOut();
+        router.push('/login');
+        return;
+      }
+
+      const org = orgData as Organization;
+      const role = memberData.role as OrganizationRole;
+      
+      setOrganization(org);
+      setUserRole(role);
+      setCanManageBrands(role === 'admin' || role === 'brand_manager');
+
+      // Load all brands for the organization (not just user's brands)
       const { data, error } = await supabase
         .from('brands')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('organization_id', org.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Brands fetch error:', error);
+        throw error;
+      }
 
-      setBrands(data || []);
-    } catch (error) {
+      // Fetch creator profiles separately for each brand
+      const brandsWithCreators = await Promise.all(
+        (data || []).map(async (brand) => {
+          if (brand.created_by) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('full_name, email')
+              .eq('user_id', brand.created_by)
+              .single();
+            
+            return { ...brand, creator: profile };
+          }
+          return brand;
+        })
+      );
+
+      setBrands(brandsWithCreators);
+    } catch (error: any) {
       console.error('Error loading brands:', error);
-      toast.error('Failed to load brands');
+      toast.error(error.message || 'Failed to load brands');
     } finally {
       setLoading(false);
     }
@@ -60,34 +134,42 @@ export default function HomePage() {
 
   const handleSaveBrand = async (brandData: Partial<Brand>) => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user || !organization) return;
 
-    if (editingBrand) {
-      // Update existing brand
-      const { error } = await supabase
-        .from('brands')
-        .update({
-          ...brandData,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', editingBrand.id);
+    try {
+      if (editingBrand) {
+        // Update existing brand
+        const { error } = await supabase
+          .from('brands')
+          .update({
+            ...brandData,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingBrand.id);
 
-      if (error) throw error;
-      toast.success('Brand updated successfully');
-    } else {
-      // Create new brand
-      const { error } = await supabase
-        .from('brands')
-        .insert({
-          ...brandData,
-          user_id: user.id,
-        });
+        if (error) throw error;
+        toast.success('Brand updated successfully');
+      } else {
+        // Create new brand
+        const { error } = await supabase
+          .from('brands')
+          .insert({
+            ...brandData,
+            user_id: user.id,
+            organization_id: organization.id,
+            created_by: user.id,
+          });
 
-      if (error) throw error;
-      toast.success('Brand created successfully');
+        if (error) throw error;
+        toast.success('Brand created successfully');
+      }
+
+      setIsModalOpen(false);
+      await loadBrands();
+    } catch (error: any) {
+      console.error('Error saving brand:', error);
+      toast.error(error.message || 'Failed to save brand');
     }
-
-    await loadBrands();
   };
 
   const handleDeleteBrand = async (brandId: string) => {
@@ -124,19 +206,34 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <Toaster position="top-right" />
       
       {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-800">Email Copywriter AI</h1>
-          <button
-            onClick={handleLogout}
-            className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
-          >
-            Logout
-          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Email Copywriter AI</h1>
+            {organization && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{organization.name}</p>
+            )}
+          </div>
+          <div className="flex items-center gap-4">
+            {userRole === 'admin' && (
+              <button
+                onClick={() => router.push('/admin')}
+                className="px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors cursor-pointer hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+              >
+                Team Management
+              </button>
+            )}
+            <button
+              onClick={handleLogout}
+              className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-all duration-150 cursor-pointer hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 rounded px-2 py-1"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </header>
 
@@ -144,22 +241,24 @@ export default function HomePage() {
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h2 className="text-3xl font-bold text-gray-800">Your Brands</h2>
-            <p className="text-gray-600 mt-1">Select a brand to start writing email copy</p>
+            <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100">Brands</h2>
+            <p className="text-gray-600 dark:text-gray-400 mt-1">Select a brand to start writing email copy</p>
           </div>
-          <button
-            onClick={handleCreateBrand}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors shadow-md"
-          >
-            + Create New Brand
-          </button>
+          {canManageBrands && (
+            <button
+              onClick={handleCreateBrand}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-semibold rounded-lg transition-all duration-150 shadow-md hover:shadow-lg hover:scale-105 active:scale-95 cursor-pointer focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
+            >
+              + Create New Brand
+            </button>
+          )}
         </div>
 
         {brands.length === 0 ? (
           <div className="text-center py-16">
-            <div className="bg-white rounded-lg shadow-md p-12 max-w-md mx-auto">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-12 max-w-md mx-auto border border-gray-200 dark:border-gray-700">
               <svg
-                className="w-16 h-16 text-gray-400 mx-auto mb-4"
+                className="w-16 h-16 text-gray-400 dark:text-gray-600 mx-auto mb-4"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -171,11 +270,11 @@ export default function HomePage() {
                   d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
                 />
               </svg>
-              <h3 className="text-xl font-semibold text-gray-800 mb-2">No brands yet</h3>
-              <p className="text-gray-600 mb-6">Get started by creating your first brand</p>
+              <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-2">No brands yet</h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">Get started by creating your first brand</p>
               <button
                 onClick={handleCreateBrand}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-semibold rounded-lg transition-all duration-150 cursor-pointer hover:scale-105 active:scale-95 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
               >
                 Create Your First Brand
               </button>
@@ -187,6 +286,8 @@ export default function HomePage() {
               <BrandCard
                 key={brand.id}
                 brand={brand}
+                currentUserId={currentUserId}
+                canManage={canManageBrands}
                 onEdit={handleEditBrand}
                 onDelete={handleDeleteBrand}
               />

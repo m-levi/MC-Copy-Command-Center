@@ -30,15 +30,15 @@ export default function EmailSectionCard({
   };
 
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-2 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
+    <div className="border-2 border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden mb-2 bg-white dark:bg-gray-800 hover:border-blue-400 dark:hover:border-blue-500 transition-all shadow-sm hover:shadow-md">
       {/* Section Header */}
       <div
-        className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+        className="flex items-center justify-between px-3 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 border-b-2 border-gray-300 dark:border-gray-600 cursor-pointer hover:from-blue-50 hover:to-blue-100 dark:hover:from-blue-900/30 dark:hover:to-blue-800/30 transition-all"
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <svg
-            className={`w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform ${
+            className={`w-4 h-4 text-blue-600 dark:text-blue-400 transition-transform ${
               isExpanded ? 'rotate-90' : ''
             }`}
             fill="none"
@@ -52,17 +52,24 @@ export default function EmailSectionCard({
               d="M9 5l7 7-7 7"
             />
           </svg>
-          <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
-            {section.title}
-          </span>
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 bg-blue-500 rounded flex items-center justify-center flex-shrink-0">
+              <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+              </svg>
+            </div>
+            <span className="text-sm font-bold text-gray-900 dark:text-gray-100 tracking-wide">
+              {section.title}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={(e) => {
               e.stopPropagation();
               handleCopy();
             }}
-            className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+            className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-md transition-all hover:scale-105"
             title="Copy section"
           >
             {copied ? (
@@ -101,7 +108,7 @@ export default function EmailSectionCard({
               handleRegenerate();
             }}
             disabled={isRegenerating}
-            className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-md transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             title="Regenerate section"
           >
             <svg
@@ -125,8 +132,18 @@ export default function EmailSectionCard({
 
       {/* Section Content */}
       {isExpanded && (
-        <div className="px-3 py-2">
-          <div className="prose prose-sm max-w-none prose-pre:bg-gray-50 dark:prose-pre:bg-gray-900 prose-pre:border prose-pre:border-gray-200 dark:prose-pre:border-gray-700 text-gray-900 dark:text-gray-100">
+        <div className="px-4 py-3 bg-white dark:bg-gray-900">
+          <div className="prose prose-sm max-w-none
+            prose-headings:font-bold prose-headings:text-gray-900 dark:prose-headings:text-gray-100
+            prose-p:text-gray-800 dark:prose-p:text-gray-200 prose-p:leading-relaxed
+            prose-li:text-gray-800 dark:prose-li:text-gray-200
+            prose-strong:text-gray-900 dark:prose-strong:text-gray-100 prose-strong:font-bold
+            prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
+            prose-code:text-pink-600 dark:prose-code:text-pink-400 prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs
+            prose-pre:bg-gray-50 dark:prose-pre:bg-gray-800 prose-pre:border prose-pre:border-gray-200 dark:prose-pre:border-gray-700
+            prose-blockquote:border-l-4 prose-blockquote:border-blue-500 prose-blockquote:bg-blue-50 dark:prose-blockquote:bg-blue-950/30 prose-blockquote:py-2 prose-blockquote:px-4
+            text-gray-900 dark:text-gray-100
+          ">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {section.content}
             </ReactMarkdown>

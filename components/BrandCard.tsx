@@ -5,14 +5,18 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface BrandCardProps {
-  brand: Brand;
+  brand: Brand & { creator?: { full_name?: string; email: string } };
+  currentUserId: string;
+  canManage: boolean;
   onEdit: (brand: Brand) => void;
   onDelete: (brandId: string) => void;
 }
 
-export default function BrandCard({ brand, onEdit, onDelete }: BrandCardProps) {
+export default function BrandCard({ brand, currentUserId, canManage, onEdit, onDelete }: BrandCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const router = useRouter();
+
+  const creatorName = brand.creator?.full_name || brand.creator?.email || 'Unknown';
 
   const handleCardClick = () => {
     router.push(`/brands/${brand.id}/chat`);
@@ -45,36 +49,39 @@ export default function BrandCard({ brand, onEdit, onDelete }: BrandCardProps) {
   return (
     <div
       onClick={handleCardClick}
-      className="relative bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow cursor-pointer p-6 border border-gray-200"
+      className="relative bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer p-6 border border-gray-200 dark:border-gray-700 hover:-translate-y-1 group"
     >
-      {/* Three-dot menu button */}
-      <button
-        onClick={handleMenuClick}
-        className="absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-full transition-colors"
-      >
-        <svg
-          className="w-5 h-5 text-gray-600"
-          fill="currentColor"
-          viewBox="0 0 16 16"
+      {/* Three-dot menu button - only show if user can manage brands */}
+      {canManage && (
+        <button
+          onClick={handleMenuClick}
+          className="absolute top-4 right-4 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 focus:ring-2 focus:ring-blue-500"
+          aria-label="Brand menu"
         >
-          <circle cx="8" cy="2" r="1.5" />
-          <circle cx="8" cy="8" r="1.5" />
-          <circle cx="8" cy="14" r="1.5" />
-        </svg>
-      </button>
+          <svg
+            className="w-5 h-5 text-gray-600 dark:text-gray-400"
+            fill="currentColor"
+            viewBox="0 0 16 16"
+          >
+            <circle cx="8" cy="2" r="1.5" />
+            <circle cx="8" cy="8" r="1.5" />
+            <circle cx="8" cy="14" r="1.5" />
+          </svg>
+        </button>
+      )}
 
       {/* Dropdown menu */}
-      {showMenu && (
-        <div className="absolute top-12 right-4 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10 min-w-[150px]">
+      {showMenu && canManage && (
+        <div className="absolute top-12 right-4 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-10 min-w-[150px]">
           <button
             onClick={handleEdit}
-            className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-gray-700"
+            className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 cursor-pointer transition-colors"
           >
             Edit Brand Details
           </button>
           <button
             onClick={handleDelete}
-            className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-red-600"
+            className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm text-red-600 dark:text-red-400 cursor-pointer transition-colors"
           >
             Delete Brand
           </button>
@@ -82,12 +89,22 @@ export default function BrandCard({ brand, onEdit, onDelete }: BrandCardProps) {
       )}
 
       {/* Brand content */}
-      <h3 className="text-xl font-bold text-gray-800 mb-3 pr-8">
+      <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2 pr-8">
         {brand.name}
       </h3>
-      <p className="text-sm text-gray-600 line-clamp-3">
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+        Created by {creatorName}
+      </p>
+      <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3">
         {truncateText(brand.brand_details || 'No details provided', 150)}
       </p>
+      
+      {/* Hover indicator */}
+      <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+        <svg className="w-5 h-5 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+        </svg>
+      </div>
     </div>
   );
 }

@@ -1,16 +1,21 @@
 export interface Profile {
   user_id: string;
   email: string;
+  full_name?: string;
+  avatar_url?: string;
   created_at: string;
 }
 
 export interface Brand {
   id: string;
   user_id: string;
+  organization_id: string;
+  created_by: string;
   name: string;
   brand_details: string;
   brand_guidelines: string;
   copywriting_style_guide: string;
+  website_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -22,6 +27,7 @@ export interface Conversation {
   id: string;
   brand_id: string;
   user_id: string;
+  created_by_name?: string;
   title: string;
   model: string;
   conversation_type: ConversationType;
@@ -56,11 +62,18 @@ export interface ConversationContext {
   keyPoints?: string[];
 }
 
+export interface ProductLink {
+  name: string;
+  url: string;
+  description?: string;
+}
+
 export interface MessageMetadata {
   sections?: EmailSection[];
   hasEmailStructure?: boolean;
   context?: ConversationContext;
   editedFrom?: string; // Original message ID if this was edited
+  productLinks?: ProductLink[]; // Products mentioned in the message
 }
 
 export interface Message {
@@ -142,6 +155,46 @@ export interface AIModelOption {
   id: AIModel;
   name: string;
   provider: 'openai' | 'anthropic';
+}
+
+// Organization and Multi-Tenancy Types
+export type OrganizationRole = 'admin' | 'brand_manager' | 'member';
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationMember {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  role: OrganizationRole;
+  invited_by: string;
+  joined_at: string;
+  created_at: string;
+  profile?: Profile;
+}
+
+export interface OrganizationInvite {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: OrganizationRole;
+  invite_token: string;
+  invited_by: string;
+  expires_at: string;
+  used_at?: string;
+  created_at: string;
+}
+
+export interface UserWithOrganization {
+  user: any;
+  organization: Organization | null;
+  role: OrganizationRole | null;
 }
 
 
