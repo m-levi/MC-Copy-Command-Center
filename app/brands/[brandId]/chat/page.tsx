@@ -1420,9 +1420,11 @@ Please generate the complete email copy following all the guidelines we discusse
       if (aiError) throw aiError;
 
       // Replace placeholder with saved message
-      setMessages((prev) =>
-        prev.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg))
-      );
+      setMessages((prev) => {
+        // Remove any duplicates and replace placeholder
+        const filtered = prev.filter(msg => msg.id !== savedAiMessage.id);
+        return filtered.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg));
+      });
       
       // Update cache with new messages
       if (userMessage && savedAiMessage) {
