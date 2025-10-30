@@ -253,6 +253,12 @@ export default function HomePage() {
               </button>
             )}
             <button
+              onClick={() => router.push('/settings')}
+              className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-all duration-150 cursor-pointer hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 rounded px-2 py-1"
+            >
+              Settings
+            </button>
+            <button
               onClick={handleLogout}
               className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-all duration-150 cursor-pointer hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 rounded px-2 py-1"
             >

@@ -6,9 +6,9 @@ import remarkGfm from 'remark-gfm';
 
 interface EmailPreviewProps {
   content: string;
-  onStar?: () => void;
   isStarred?: boolean;
-  showStarButton?: boolean;
+  onToggleStar?: () => void;
+  isStarring?: boolean;
 }
 
 /**
@@ -16,9 +16,9 @@ interface EmailPreviewProps {
  */
 export default function EmailPreview({
   content,
-  onStar,
   isStarred = false,
-  showStarButton = true,
+  onToggleStar,
+  isStarring = false,
 }: EmailPreviewProps) {
   const [copied, setCopied] = useState(false);
 
@@ -51,20 +51,25 @@ export default function EmailPreview({
           </div>
           
           <div className="flex items-center gap-2">
-            {/* Star Button */}
-            {showStarButton && onStar && (
+            {/* Star Toggle - Click to star/unstar */}
+            {onToggleStar && (
               <button
-                onClick={onStar}
-                className={`p-2 rounded-lg transition-all cursor-pointer hover:scale-110 active:scale-95 ${
-                  isStarred
-                    ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-200 dark:hover:bg-yellow-900/50 shadow-sm'
-                    : 'text-gray-400 hover:text-yellow-500 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-                title={isStarred ? '⭐ Starred - Click to remove' : '☆ Star this email - AI will learn from it'}
+                onClick={onToggleStar}
+                disabled={isStarring}
+                className="p-2 text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 rounded-lg transition-all cursor-pointer hover:scale-110 disabled:opacity-50"
+                title={isStarred ? 'Click to unstar' : 'Click to star'}
               >
-                <svg className={`w-5 h-5 ${isStarred ? 'fill-current' : ''}`} fill={isStarred ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" strokeWidth={isStarred ? 0 : 2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                </svg>
+                {isStarred ? (
+                  // Filled star - starred
+                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                  </svg>
+                ) : (
+                  // Outline star - not starred
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                  </svg>
+                )}
               </button>
             )}
             

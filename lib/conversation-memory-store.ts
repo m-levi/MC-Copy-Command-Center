@@ -5,6 +5,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { createEdgeClient } from '@/lib/supabase/edge';
 
 export interface MemoryEntry {
   id: string;
@@ -27,6 +28,22 @@ export interface MemoryContext {
 }
 
 /**
+ * Helper to get the appropriate Supabase client based on runtime
+ */
+async function getSupabaseClient() {
+  // Check if we're in Edge runtime by checking for the edge-specific API
+  const isEdge = typeof (globalThis as any).EdgeRuntime !== 'undefined' || process.env.NEXT_RUNTIME === 'edge';
+  
+  if (isEdge) {
+    console.log('[Memory] Using Edge runtime client');
+    return createEdgeClient();
+  } else {
+    console.log('[Memory] Using server client');
+    return await createClient();
+  }
+}
+
+/**
  * Save a memory entry for a conversation
  */
 export async function saveMemory(
@@ -36,55 +53,65 @@ export async function saveMemory(
   category: MemoryEntry['category'] = 'fact',
   expiresInDays?: number
 ): Promise<MemoryEntry | null> {
-  const supabase = createClient();
-  
-  const expiresAt = expiresInDays 
-    ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
-    : null;
+  try {
+    const supabase = await getSupabaseClient();
+    
+    const expiresAt = expiresInDays 
+      ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
+      : null;
 
-  // Upsert: Update if exists, insert if not
-  const { data, error } = await supabase
-    .from('conversation_memories')
-    .upsert({
-      conversation_id: conversationId,
-      key,
-      value,
-      category,
-      expires_at: expiresAt,
-      updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'conversation_id,key',
-    })
-    .select()
-    .single();
+    // Upsert: Update if exists, insert if not
+    const { data, error } = await supabase
+      .from('conversation_memories')
+      .upsert({
+        conversation_id: conversationId,
+        key,
+        value,
+        category,
+        expires_at: expiresAt,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'conversation_id,key',
+      })
+      .select()
+      .single();
 
-  if (error) {
-    console.error('Error saving memory:', error);
+    if (error) {
+      console.error('Error saving memory:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Exception saving memory:', error);
     return null;
   }
-
-  return data;
 }
 
 /**
  * Load all memories for a conversation
  */
 export async function loadMemories(conversationId: string): Promise<MemoryEntry[]> {
-  const supabase = createClient();
-  
-  const { data, error } = await supabase
-    .from('conversation_memories')
-    .select('*')
-    .eq('conversation_id', conversationId)
-    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
-    .order('updated_at', { ascending: false });
+  try {
+    const supabase = await getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('conversation_memories')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+      .order('updated_at', { ascending: false });
 
-  if (error) {
-    console.error('Error loading memories:', error);
+    if (error) {
+      console.error('Error loading memories:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Exception loading memories:', error);
     return [];
   }
-
-  return data || [];
 }
 
 /**
@@ -183,8 +210,32 @@ You can reference these memories to provide more personalized and consistent res
 `;
 }
 
+// Whitelist of allowed memory keys (security measure)
+const ALLOWED_MEMORY_KEYS = [
+  'tone_preference',
+  'target_audience',
+  'campaign_type',
+  'product_focus',
+  'urgency_level',
+  'brand_voice',
+  'promo_code',
+  'special_offer',
+  'messaging_angle',
+  'content_style',
+];
+
+const ALLOWED_CATEGORIES: MemoryEntry['category'][] = [
+  'user_preference',
+  'brand_context',
+  'campaign_info',
+  'product_details',
+  'decision',
+  'fact',
+];
+
 /**
  * Parse memory instructions from AI response
+ * SECURITY: Validates keys, categories, and value lengths
  * Looks for patterns like [REMEMBER:key=value:category]
  */
 export function parseMemoryInstructions(content: string): Array<{
@@ -196,11 +247,50 @@ export function parseMemoryInstructions(content: string): Array<{
   const instructions: Array<{ key: string; value: string; category: MemoryEntry['category'] }> = [];
   
   let match;
+  let matchCount = 0;
+  const MAX_MATCHES = 10; // Prevent DoS via massive memory instructions
+  
   while ((match = pattern.exec(content)) !== null) {
-    const [, key, value, category] = match;
+    matchCount++;
+    if (matchCount > MAX_MATCHES) {
+      console.warn(`[Memory] Too many memory instructions (>${MAX_MATCHES}), stopping parse`);
+      break;
+    }
+    
+    const [, rawKey, rawValue, rawCategory] = match;
+    const key = rawKey.trim();
+    const value = rawValue.trim();
+    const category = rawCategory.trim();
+    
+    // SECURITY: Validate key is whitelisted
+    if (!ALLOWED_MEMORY_KEYS.includes(key)) {
+      console.warn(`[Memory] Rejected non-whitelisted key: ${key}`);
+      continue;
+    }
+    
+    // SECURITY: Validate category
+    if (!ALLOWED_CATEGORIES.includes(category as MemoryEntry['category'])) {
+      console.warn(`[Memory] Rejected invalid category: ${category}`);
+      continue;
+    }
+    
+    // SECURITY: Validate value length (prevent storage abuse)
+    if (value.length > 500) {
+      console.warn(`[Memory] Rejected overly long value for key: ${key}`);
+      continue;
+    }
+    
+    // SECURITY: Sanitize value (no HTML/scripts)
+    const sanitizedValue = value.replace(/<[^>]*>/g, '').trim();
+    
+    if (!sanitizedValue) {
+      console.warn(`[Memory] Rejected empty value after sanitization for key: ${key}`);
+      continue;
+    }
+    
     instructions.push({
-      key: key.trim(),
-      value: value.trim(),
+      key,
+      value: sanitizedValue,
       category: category as MemoryEntry['category'],
     });
   }
@@ -212,7 +302,7 @@ export function parseMemoryInstructions(content: string): Array<{
  * Delete a specific memory
  */
 export async function deleteMemory(conversationId: string, key: string): Promise<boolean> {
-  const supabase = createClient();
+  const supabase = await getSupabaseClient();
   
   const { error } = await supabase
     .from('conversation_memories')
@@ -232,7 +322,7 @@ export async function deleteMemory(conversationId: string, key: string): Promise
  * Clear all expired memories (cleanup function)
  */
 export async function clearExpiredMemories(): Promise<number> {
-  const supabase = createClient();
+  const supabase = await getSupabaseClient();
   
   const { data, error } = await supabase
     .from('conversation_memories')

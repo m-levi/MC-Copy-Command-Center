@@ -81,20 +81,15 @@ export default function ConversationCard({
       onClick={onSelect}
       className={`
         group relative
-        bg-white dark:bg-gray-800
-        border-2 rounded-xl
+        rounded-xl
         transition-all duration-200
         cursor-pointer overflow-hidden
         ${isActive 
-          ? 'border-blue-500 dark:border-blue-400 shadow-lg scale-[1.02]' 
-          : 'border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md hover:scale-[1.01]'
+          ? 'bg-blue-600 dark:bg-blue-700 shadow-lg ring-2 ring-blue-400 dark:ring-blue-500' 
+          : 'bg-white dark:bg-gray-800 shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-750'
         }
       `}
     >
-      {/* Active indicator bar */}
-      {isActive && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 to-purple-500"></div>
-      )}
 
       {/* Thumbnail/Header with gradient */}
       <div className={`h-20 bg-gradient-to-br ${getGradient()} relative`}>
@@ -119,19 +114,27 @@ export default function ConversationCard({
       {/* Content */}
       <div className="p-4">
         {/* Title */}
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2 mb-2 min-h-[2.5rem]">
+        <h3 className={`text-sm font-semibold line-clamp-2 mb-2 min-h-[2.5rem] ${
+          isActive ? 'text-white' : 'text-gray-900 dark:text-gray-100'
+        }`}>
           {conversation.title || 'New Conversation'}
         </h3>
 
         {/* Preview */}
         {conversation.last_message_preview && (
-          <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-3 mb-3 leading-relaxed">
+          <p className={`text-xs line-clamp-3 mb-3 leading-relaxed ${
+            isActive ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'
+          }`}>
             {conversation.last_message_preview}
           </p>
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-100 dark:border-gray-700">
+        <div className={`flex items-center justify-between text-xs pt-2 border-t ${
+          isActive 
+            ? 'text-blue-100 border-blue-500' 
+            : 'text-gray-500 dark:text-gray-400 border-gray-100 dark:border-gray-700'
+        }`}>
           <div className="flex items-center gap-1.5">
             {conversation.created_by_name && (
               <>

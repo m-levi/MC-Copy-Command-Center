@@ -1,7 +1,7 @@
 'use client';
 
 import { Message, ConversationMode } from '@/types';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import EmailSectionCard, { parseEmailSections } from './EmailSectionCard';
 import MessageEditor from './MessageEditor';
 import EmailRenderer from './EmailRenderer';
@@ -85,9 +85,33 @@ export default function ChatMessage({
     }
   };
 
-  const handleStar = async () => {
+  // Check if this email is starred on mount
+  useEffect(() => {
+    const checkIfStarred = async () => {
+      if (!brandId) return;
+      
+      try {
+        const { data } = await supabase
+          .from('brand_documents')
+          .select('id')
+          .eq('brand_id', brandId)
+          .eq('doc_type', 'example')
+          .eq('content', message.content)
+          .limit(1);
+
+        setIsStarred(!!(data && data.length > 0));
+      } catch (error) {
+        console.error('Error checking starred status:', error);
+      }
+    };
+
+    checkIfStarred();
+  }, [brandId, message.content, supabase]);
+
+  // Toggle star status
+  const handleToggleStar = async () => {
     if (!brandId) {
-      toast.error('Unable to star email - brand ID missing');
+      toast.error('Unable to star email');
       return;
     }
 
@@ -95,7 +119,7 @@ export default function ChatMessage({
 
     try {
       if (isStarred) {
-        // Unstar - find and delete the document
+        // Unstar
         const { data: existingDocs } = await supabase
           .from('brand_documents')
           .select('id')
@@ -112,9 +136,26 @@ export default function ChatMessage({
         }
 
         setIsStarred(false);
-        toast.success('Email removed from favorites');
+        toast.success('Email unstarred');
       } else {
-        // Star - generate title from first line
+        // Check limit before starring
+        const { data: starredEmails } = await supabase
+          .from('brand_documents')
+          .select('id')
+          .eq('brand_id', brandId)
+          .eq('doc_type', 'example');
+
+        const count = starredEmails?.length || 0;
+        
+        if (count >= 10) {
+          toast.error('You\'ve reached the limit of 10 starred emails. Go to Settings to remove some.', {
+            duration: 5000,
+          });
+          setIsStarring(false);
+          return;
+        }
+
+        // Star the email
         const firstLine = message.content.split('\n')[0]
           .replace(/^#+\s*/, '')
           .replace(/EMAIL SUBJECT LINE:|SUBJECT:/gi, '')
@@ -123,7 +164,6 @@ export default function ChatMessage({
 
         const title = firstLine || 'Email Copy';
 
-        // Generate embedding (this will happen in the API route we already have)
         const response = await fetch('/api/embeddings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -136,15 +176,15 @@ export default function ChatMessage({
         });
 
         if (!response.ok) {
-          throw new Error('Failed to save starred email');
+          throw new Error('Failed to star email');
         }
 
         setIsStarred(true);
-        toast.success('Email added to favorites! 🌟 AI will use this as a reference example.');
+        toast.success(`Email starred! (${count + 1}/10)`);
       }
     } catch (error) {
-      console.error('Error starring email:', error);
-      toast.error('Failed to save email');
+      console.error('Error toggling star:', error);
+      toast.error('Failed to update email');
     } finally {
       setIsStarring(false);
     }
@@ -154,11 +194,11 @@ export default function ChatMessage({
   const emailSections = !isUser ? parseEmailSections(message.content) : null;
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-6 group`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 sm:mb-6 group`}>
       <div
         className={`
           transition-all
-          ${isUser ? 'max-w-[650px] bg-white dark:bg-gray-800 border border-[#ececec] dark:border-gray-700 rounded-[20px] px-6 py-4 shadow-sm' : 'w-full'}
+          ${isUser ? 'max-w-full sm:max-w-[650px] bg-white dark:bg-gray-800 border border-[#ececec] dark:border-gray-700 rounded-2xl sm:rounded-[20px] px-4 sm:px-6 py-3 sm:py-4 shadow-sm' : 'w-full'}
         `}
       >
         {isUser ? (
@@ -171,12 +211,12 @@ export default function ChatMessage({
               />
             ) : (
               <div>
-                <p className="whitespace-pre-wrap break-words text-base leading-relaxed font-normal text-black dark:text-white">{message.content}</p>
+                <p className="whitespace-pre-wrap break-words text-sm sm:text-base leading-relaxed font-normal text-black dark:text-white">{message.content}</p>
                 <div className="flex items-center justify-end mt-2">
                   {onEdit && (
                     <button
                       onClick={handleEdit}
-                      className="text-xs font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                      className="text-xs font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors touch-manipulation"
                       title="Edit message"
                     >
                       EDIT
@@ -190,20 +230,20 @@ export default function ChatMessage({
           <div>
             {/* Action Toolbar for AI Messages */}
             <div className="flex items-center justify-between mb-3 px-1">
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">
                 {new Date(message.created_at).toLocaleTimeString()}
               </span>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5 sm:gap-1">
                 {/* Email Preview Toggle - Only in email_copy mode */}
                 {isEmailMode && emailSections && (
                   <>
                     <button
                       onClick={() => setUseEmailPreview(!useEmailPreview)}
-                      className="px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
+                      className="px-1.5 sm:px-2 py-1 text-[10px] sm:text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer touch-manipulation hidden sm:flex"
                       title={useEmailPreview ? 'Show raw markdown' : 'Show email preview'}
                     >
                       <span className="flex items-center gap-1">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3 h-3 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           {useEmailPreview ? (
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                           ) : (
@@ -240,15 +280,15 @@ export default function ChatMessage({
                 )}
                 <button
                   onClick={handleCopy}
-                  className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+                  className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors touch-manipulation"
                   title="Copy all"
                 >
                   {copied ? (
-                    <svg className="w-3.5 h-3.5 text-green-600 dark:text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-green-600 dark:text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   ) : (
-                    <svg className="w-3.5 h-3.5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                     </svg>
                   )}
@@ -257,11 +297,11 @@ export default function ChatMessage({
                   <button
                     onClick={onRegenerate}
                     disabled={isRegenerating}
-                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
                     title="Regenerate"
                   >
                     <svg
-                      className={`w-3.5 h-3.5 text-gray-600 dark:text-gray-400 ${isRegenerating ? 'animate-spin' : ''}`}
+                      className={`w-4 h-4 sm:w-3.5 sm:h-3.5 text-gray-600 dark:text-gray-400 ${isRegenerating ? 'animate-spin' : ''}`}
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -271,26 +311,26 @@ export default function ChatMessage({
                   </button>
                 )}
                 {onReaction && (
-                  <>
+                  <div className="hidden sm:flex items-center gap-0.5 sm:gap-1">
                     <button
                       onClick={() => handleReaction('thumbs_up')}
-                      className={`p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer ${reaction === 'thumbs_up' ? 'bg-green-100 dark:bg-green-900/30' : ''}`}
+                      className={`p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer touch-manipulation ${reaction === 'thumbs_up' ? 'bg-green-100 dark:bg-green-900/30' : ''}`}
                       title="👍 Helpful response - Mark as good"
                     >
-                      <svg className={`w-3.5 h-3.5 ${reaction === 'thumbs_up' ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400'}`} fill={reaction === 'thumbs_up' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${reaction === 'thumbs_up' ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400'}`} fill={reaction === 'thumbs_up' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
                       </svg>
                     </button>
                     <button
                       onClick={() => handleReaction('thumbs_down')}
-                      className={`p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer ${reaction === 'thumbs_down' ? 'bg-red-100 dark:bg-red-900/30' : ''}`}
+                      className={`p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer touch-manipulation ${reaction === 'thumbs_down' ? 'bg-red-100 dark:bg-red-900/30' : ''}`}
                       title="👎 Needs improvement - Suggest regenerating"
                     >
-                      <svg className={`w-3.5 h-3.5 ${reaction === 'thumbs_down' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`} fill={reaction === 'thumbs_down' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${reaction === 'thumbs_down' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`} fill={reaction === 'thumbs_down' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
                       </svg>
                     </button>
-                  </>
+                  </div>
                 )}
               </div>
             </div>
@@ -320,13 +360,13 @@ export default function ChatMessage({
               // Email Preview (only in email_copy mode)
               <EmailPreview
                 content={message.content}
-                onStar={brandId ? handleStar : undefined}
                 isStarred={isStarred}
-                showStarButton={!!brandId && !isRegenerating}
+                onToggleStar={brandId ? handleToggleStar : undefined}
+                isStarring={isStarring}
               />
             ) : (
               // Simple chat view (planning mode) or raw markdown (email_copy mode)
-              <div className="bg-white dark:bg-gray-800 border border-[#d2d2d2] dark:border-gray-700 rounded-[20px] px-7 py-6">
+              <div className="bg-white dark:bg-gray-800 border border-[#d2d2d2] dark:border-gray-700 rounded-2xl sm:rounded-[20px] px-4 sm:px-7 py-4 sm:py-6">
                 <EmailRenderer content={message.content} />
               </div>
             )}
@@ -335,7 +375,7 @@ export default function ChatMessage({
             <div className="mt-3 flex items-center justify-end gap-2">
               <button
                 onClick={handleCopyBottom}
-                className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 transition-all cursor-pointer flex items-center gap-1.5 hover:scale-105"
+                className="px-3 sm:px-4 py-2 sm:py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 sm:hover:scale-105 touch-manipulation"
                 title="Copy entire response"
               >
                 {copiedBottom ? (

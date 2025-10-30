@@ -83,7 +83,7 @@ export default function VirtualizedConversationList({
             ${isEditing ? 'cursor-default' : 'cursor-pointer'}
             ${
               isActive
-                ? 'bg-white dark:bg-gray-700 shadow-md border-l-4 border-l-blue-500'
+                ? 'bg-blue-600 dark:bg-blue-700 shadow-lg ring-2 ring-blue-400 dark:ring-blue-500'
                 : 'bg-white/60 dark:bg-gray-800/60 hover:bg-white dark:hover:bg-gray-700 hover:shadow-sm'
             }
           `}
@@ -119,7 +119,9 @@ export default function VirtualizedConversationList({
                 // Display mode
                 <>
                   <h3
-                    className="text-sm font-semibold truncate leading-tight text-black dark:text-white mb-1"
+                    className={`text-sm font-semibold truncate leading-tight mb-1 ${
+                      isActive ? 'text-white' : 'text-black dark:text-white'
+                    }`}
                     onDoubleClick={(e) => onStartRename(e, conversation)}
                     title="Double-click to rename"
                   >
@@ -128,7 +130,9 @@ export default function VirtualizedConversationList({
                   
                   {/* Preview snippet */}
                   {conversation.last_message_preview && (
-                    <p className="text-xs text-gray-600 dark:text-gray-400 truncate mb-1">
+                    <p className={`text-xs truncate mb-1 ${
+                      isActive ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'
+                    }`}>
                       {conversation.last_message_preview}
                     </p>
                   )}
@@ -137,12 +141,18 @@ export default function VirtualizedConversationList({
               
               <div className="flex items-center gap-1.5">
                 {conversation.created_by_name && (
-                  <span className="text-xs text-gray-600 dark:text-gray-500 truncate max-w-[100px]">
+                  <span className={`text-xs truncate max-w-[100px] ${
+                    isActive ? 'text-blue-100' : 'text-gray-600 dark:text-gray-500'
+                  }`}>
                     {conversation.created_by_name}
                   </span>
                 )}
-                {conversation.created_by_name && <span className="text-xs text-gray-500">•</span>}
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                {conversation.created_by_name && <span className={`text-xs ${
+                  isActive ? 'text-blue-200' : 'text-gray-500'
+                }`}>•</span>}
+                <span className={`text-xs ${
+                  isActive ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'
+                }`}>
                   {new Date(conversation.last_message_at || conversation.created_at).toLocaleDateString('en-US', {
                     month: 'short',
                     day: 'numeric',
@@ -233,10 +243,12 @@ export default function VirtualizedConversationList({
   return (
     <div 
       ref={containerRef} 
-      className="w-full overflow-y-auto"
-      style={{ height: `${height}px` }}
+      className="w-full h-full overflow-y-auto overflow-x-hidden"
+      style={{ maxHeight: `${height}px` }}
     >
-      {conversations.map((conversation, index) => renderConversation(conversation, index))}
+      <div className="pb-2">
+        {conversations.map((conversation, index) => renderConversation(conversation, index))}
+      </div>
     </div>
   );
 }

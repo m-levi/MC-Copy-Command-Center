@@ -2,7 +2,7 @@
 
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import { PROMPT_TEMPLATES, QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
-import { ConversationMode } from '@/types';
+import { ConversationMode, EmailType } from '@/types';
 import VoiceInput from './VoiceInput';
 
 interface ChatInputProps {
@@ -17,6 +17,9 @@ interface ChatInputProps {
   onModeChange?: (mode: ConversationMode) => void;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
+  emailType?: EmailType;
+  onEmailTypeChange?: (type: EmailType) => void;
+  hasMessages?: boolean; // Track if conversation has any messages
 }
 
 export default function ChatInput({ 
@@ -30,15 +33,20 @@ export default function ChatInput({
   onDraftChange,
   onModeChange,
   selectedModel = 'claude-4.5-sonnet',
-  onModelChange
+  onModelChange,
+  emailType = 'design',
+  onEmailTypeChange,
+  hasMessages = false
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState<string[]>([]);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showEmailTypePicker, setShowEmailTypePicker] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
+  const emailTypePickerRef = useRef<HTMLDivElement>(null);
 
   const slashCommands = [
     { command: '/shorten', label: 'Make it shorter', icon: '📏' },
@@ -54,8 +62,17 @@ export default function ChatInput({
     { id: 'claude-4.5-sonnet', name: 'SONNET 4.5' },
   ];
 
+  const emailTypes = [
+    { id: 'design' as const, name: 'Design Email', description: 'Full structured marketing email' },
+    { id: 'letter' as const, name: 'Letter Email', description: 'Short personal letter' },
+  ];
+
   const getModelName = (modelId: string) => {
     return models.find(m => m.id === modelId)?.name || 'SONNET 4.5';
+  };
+
+  const getEmailTypeName = (type: string) => {
+    return emailTypes.find(t => t.id === type)?.name || 'Design Email';
   };
 
   // Sync with draft content from parent
@@ -82,6 +99,20 @@ export default function ChatInput({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showModelPicker]);
+
+  // Close email type picker on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (emailTypePickerRef.current && !emailTypePickerRef.current.contains(event.target as Node)) {
+        setShowEmailTypePicker(false);
+      }
+    };
+
+    if (showEmailTypePicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showEmailTypePicker]);
 
   // Check for slash commands
   useEffect(() => {
@@ -189,7 +220,7 @@ export default function ChatInput({
   };
 
   return (
-    <div className="bg-[#fcfcfc] dark:bg-gray-900 px-8 py-6">
+    <div className="bg-[#fcfcfc] dark:bg-gray-900 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
       <div className="max-w-5xl mx-auto">
         {/* Slash Command Suggestions */}
         {showSlashCommands && (
@@ -223,8 +254,8 @@ export default function ChatInput({
         )}
 
         {/* Main Input Card - matching Figma design */}
-        <div className="bg-white dark:bg-gray-800 border border-[#e3e3e3] dark:border-gray-700 rounded-[20px] shadow-sm overflow-visible">
-          <div className="px-6 pt-4 pb-3">
+        <div className="bg-white dark:bg-gray-800 border border-[#e3e3e3] dark:border-gray-700 rounded-2xl sm:rounded-[20px] shadow-sm overflow-visible">
+          <div className="px-4 sm:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3">
             <textarea
               ref={textareaRef}
               value={message}
@@ -233,32 +264,35 @@ export default function ChatInput({
               placeholder={getPlaceholder()}
               disabled={disabled || isGenerating}
               rows={1}
-              className="w-full text-base leading-relaxed font-normal bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 resize-none max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full text-sm sm:text-base leading-relaxed font-normal bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 resize-none max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
           
           {/* Bottom Controls Bar */}
-          <div className="flex items-center justify-between px-6 pb-4">
-            {/* Left: Mode Toggle */}
-            <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-between px-4 sm:px-6 pb-3 sm:pb-4">
+            {/* Left: Mode Toggle & Dropdowns */}
+            <div className="flex items-center gap-1 sm:gap-1.5">
               <div className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full p-0.5 flex items-center gap-0.5">
                 <button
                   onClick={() => onModeChange?.('planning')}
+                  disabled={mode === 'email_copy' && hasMessages}
                   className={`
-                    px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 cursor-pointer
+                    px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-semibold transition-all duration-150
                     ${mode === 'planning'
-                      ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105'
+                      ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105 cursor-pointer'
+                      : mode === 'email_copy' && hasMessages
+                      ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105 cursor-pointer'
                     }
                   `}
-                  title="Planning mode - brainstorm and strategize"
+                  title={mode === 'email_copy' && hasMessages ? "Can't switch to planning mode after starting write mode" : "Planning mode - brainstorm and strategize"}
                 >
                   PLAN
                 </button>
                 <button
                   onClick={() => onModeChange?.('email_copy')}
                   className={`
-                    px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 cursor-pointer
+                    px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-semibold transition-all duration-150 cursor-pointer
                     ${mode === 'email_copy'
                       ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105'
                       : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105'
@@ -271,12 +305,12 @@ export default function ChatInput({
               </div>
               
               {/* Model Selector Dropdown */}
-              <div className="relative" ref={modelPickerRef}>
+              <div className="relative hidden sm:block" ref={modelPickerRef}>
                 <button
                   onClick={() => setShowModelPicker(!showModelPicker)}
-                  className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-4 py-1.5 flex items-center gap-1.5 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                  className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-2.5 py-1 flex items-center gap-1 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
                 >
-                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                  <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
                     {getModelName(selectedModel)}
                   </span>
                   <svg 
@@ -290,7 +324,7 @@ export default function ChatInput({
                 
                 {/* Dropdown Menu */}
                 {showModelPicker && (
-                  <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[160px] z-50">
+                  <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[140px] z-50">
                     {models.map((model) => (
                       <button
                         key={model.id}
@@ -299,7 +333,7 @@ export default function ChatInput({
                           setShowModelPicker(false);
                         }}
                         className={`
-                          w-full px-4 py-2.5 text-left text-xs font-semibold transition-colors duration-150 cursor-pointer
+                          w-full px-3 py-2 text-left text-[10px] font-semibold transition-colors duration-150 cursor-pointer
                           ${selectedModel === model.id
                             ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
                             : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
@@ -312,12 +346,58 @@ export default function ChatInput({
                   </div>
                 )}
               </div>
+
+              {/* Email Type Dropdown - Only in Write Mode */}
+              {mode === 'email_copy' && (
+                <div className="relative hidden sm:block" ref={emailTypePickerRef}>
+                  <button
+                    onClick={() => setShowEmailTypePicker(!showEmailTypePicker)}
+                    className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-2.5 py-1 flex items-center gap-1 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                  >
+                    <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                      {emailType === 'design' ? 'Design' : 'Letter'}
+                    </span>
+                    <svg 
+                      className={`w-2 h-2 text-gray-600 dark:text-gray-400 transition-transform duration-200 ${showEmailTypePicker ? 'rotate-180' : ''}`} 
+                      fill="currentColor" 
+                      viewBox="0 0 10 5"
+                    >
+                      <path d="M0 0L5 5L10 0H0Z" />
+                    </svg>
+                  </button>
+                  
+                  {/* Dropdown Menu */}
+                  {showEmailTypePicker && (
+                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[160px] z-50">
+                      {emailTypes.map((type) => (
+                        <button
+                          key={type.id}
+                          onClick={() => {
+                            onEmailTypeChange?.(type.id);
+                            setShowEmailTypePicker(false);
+                          }}
+                          className={`
+                            w-full px-3 py-2 text-left transition-colors duration-150 cursor-pointer
+                            ${emailType === type.id
+                              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            }
+                          `}
+                        >
+                          <div className="text-[10px] font-semibold">{type.name}</div>
+                          <div className="text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">{type.description}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Right: Voice Input & Send Button */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               {charCount > 0 && (
-                <span className="text-xs text-gray-400 dark:text-gray-500">{charCount}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500 hidden sm:inline">{charCount}</span>
               )}
               
               {/* Voice Input Button */}
@@ -331,10 +411,10 @@ export default function ChatInput({
               {isGenerating && onStop ? (
                 <button
                   onClick={onStop}
-                  className="w-9 h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 hover:scale-105 dark:bg-red-600 dark:hover:bg-red-700 text-white rounded-full transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer"
+                  className="w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 active:scale-95 sm:hover:scale-105 dark:bg-red-600 dark:hover:bg-red-700 text-white rounded-full transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer touch-manipulation"
                   title="Stop generating"
                 >
-                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="currentColor" viewBox="0 0 24 24">
                     <rect x="6" y="6" width="12" height="12" />
                   </svg>
                 </button>
@@ -342,10 +422,10 @@ export default function ChatInput({
                 <button
                   onClick={handleSend}
                   disabled={!message.trim() || disabled}
-                  className="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 hover:scale-105 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-full transition-all duration-150 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100"
+                  className="w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-95 sm:hover:scale-105 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-full transition-all duration-150 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100 touch-manipulation"
                   title="Send message"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <svg className="w-4.5 h-4.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                   </svg>
                 </button>
@@ -354,8 +434,8 @@ export default function ChatInput({
           </div>
         </div>
         
-        {/* Helper text */}
-        <div className="flex items-center justify-between mt-2 px-2">
+        {/* Helper text - desktop only */}
+        <div className="hidden sm:flex items-center justify-between mt-2 px-2">
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Press <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded text-xs">Enter</kbd> to send · <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded text-xs">Shift+Enter</kbd> for new line
           </p>

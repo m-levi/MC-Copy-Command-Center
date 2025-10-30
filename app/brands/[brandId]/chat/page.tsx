@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, use } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember } from '@/types';
+import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType } from '@/types';
 import { AI_MODELS } from '@/lib/ai-models';
 import ChatSidebarEnhanced from '@/components/ChatSidebarEnhanced';
 import { useSidebarState } from '@/hooks/useSidebarState';
@@ -18,7 +18,6 @@ import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 import { useDraftSave, loadDraft, clearDraft } from '@/hooks/useDraftSave';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
-import StarredEmailsManager from '@/components/StarredEmailsManager';
 import { 
   getCachedMessages, 
   cacheMessages, 
@@ -38,19 +37,32 @@ import {
   clearCheckpoint 
 } from '@/lib/stream-recovery';
 import { ChatPageSkeleton } from '@/components/SkeletonLoader';
+import DOMPurify from 'dompurify';
 
 export const dynamic = 'force-dynamic';
+
+// Sanitize AI-generated content before saving to database
+const sanitizeContent = (content: string): string => {
+  return DOMPurify.sanitize(content, {
+    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote'],
+    ALLOWED_ATTR: ['href', 'title', 'target'],
+    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  });
+};
 
 export default function ChatPage({ params }: { params: Promise<{ brandId: string }> }) {
   const resolvedParams = use(params);
   const brandId = resolvedParams.brandId;
   
   const [brand, setBrand] = useState<Brand | null>(null);
+  const [allBrands, setAllBrands] = useState<Brand[]>([]);
+  const [showBrandSwitcher, setShowBrandSwitcher] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [filteredConversations, setFilteredConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedModel, setSelectedModel] = useState<AIModel>('claude-4.5-sonnet');
+  const [emailType, setEmailType] = useState<EmailType>('design');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [aiStatus, setAiStatus] = useState<AIStatus>('idle');
@@ -62,9 +74,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState('');
   const [currentUserName, setCurrentUserName] = useState('');
-  const [showStarredEmails, setShowStarredEmails] = useState(false);
   const [showMemorySettings, setShowMemorySettings] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const brandSwitcherRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const requestCoalescerRef = useRef(new RequestCoalescer());
   const supabase = createClient();
@@ -88,6 +101,30 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   
   // Auto-save drafts
   useDraftSave(currentConversation?.id || null, draftContent);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Close brand switcher on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (brandSwitcherRef.current && !brandSwitcherRef.current.contains(event.target as Node)) {
+        setShowBrandSwitcher(false);
+      }
+    };
+
+    if (showBrandSwitcher) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showBrandSwitcher]);
 
   useEffect(() => {
     initializePage();
@@ -178,12 +215,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     
     // ESC key to go back to brands
     const handleEscKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !showStarredEmails) {
+      if (e.key === 'Escape') {
         router.push('/');
       }
     };
 
     window.addEventListener('keydown', handleEscKey);
+    
+    // Capture values for cleanup (avoid stale closure)
+    const cleanupConversationId = currentConversation?.id;
+    const cleanupMessageCount = messages.length;
     
     // Cleanup subscription on unmount or brand change
     return () => {
@@ -191,34 +232,47 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       window.removeEventListener('keydown', handleEscKey);
       
       // Auto-delete empty conversation when leaving the page/brand
-      const cleanupEmptyConversation = async () => {
-        const currentConv = currentConversation;
-        const currentMessages = messages;
-        
-        if (currentConv && currentMessages.length === 0) {
-          console.log('Auto-deleting empty conversation on page cleanup:', currentConv.id);
-          
-          try {
-            const { error: deleteError } = await supabase
-              .from('conversations')
-              .delete()
-              .eq('id', currentConv.id);
-            
-            if (!deleteError) {
-              trackEvent('conversation_auto_deleted', { 
-                conversationId: currentConv.id,
-                reason: 'empty_on_unmount' 
-              });
+      // Using captured values to avoid stale closure issues
+      if (cleanupConversationId && cleanupMessageCount === 0) {
+        // Small delay to avoid blocking navigation
+        setTimeout(() => {
+          (async () => {
+            try {
+              const { count, error: countError } = await supabase
+                .from('messages')
+                .select('id', { count: 'exact', head: true })
+                .eq('conversation_id', cleanupConversationId);
+              
+              if (countError) {
+                console.error('Error checking message count on cleanup:', countError);
+                return;
+              }
+              
+              if (count === 0) {
+                console.log('Auto-deleting empty conversation on cleanup:', cleanupConversationId);
+                
+                const { error: deleteError } = await supabase
+                  .from('conversations')
+                  .delete()
+                  .eq('id', cleanupConversationId);
+                
+                if (!deleteError) {
+                  trackEvent('conversation_auto_deleted', { 
+                    conversationId: cleanupConversationId,
+                    reason: 'empty_on_unmount' 
+                  });
+                } else {
+                  console.error('Error deleting conversation:', deleteError);
+                }
+              }
+            } catch (error) {
+              console.error('Error during conversation cleanup:', error);
             }
-          } catch (error) {
-            console.error('Error deleting empty conversation on cleanup:', error);
-          }
-        }
-      };
-      
-      cleanupEmptyConversation();
+          })();
+        }, 100);
+      }
     };
-  }, [brandId, showStarredEmails, router]);
+  }, [brandId, router, currentConversation?.id, messages.length]);
 
   useEffect(() => {
     applyConversationFilter();
@@ -369,6 +423,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       await loadBrand();
+      await loadAllBrands();
       await loadConversations();
     } catch (error) {
       console.error('Error initializing page:', error);
@@ -409,6 +464,20 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       router.push('/');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAllBrands = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('brands')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setAllBrands(data || []);
+    } catch (error) {
+      console.error('Error loading brands:', error);
     }
   };
 
@@ -529,23 +598,39 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       // Auto-delete current conversation if it's empty (no messages)
+      // CRITICAL: Check database first to avoid deleting conversations with messages
       if (currentConversation && messages.length === 0) {
-        console.log('Auto-deleting empty conversation:', currentConversation.id);
+        console.log('Checking if conversation is truly empty:', currentConversation.id);
         
-        // Delete silently in the background
-        const { error: deleteError } = await supabase
-          .from('conversations')
-          .delete()
-          .eq('id', currentConversation.id);
+        // Verify conversation is empty in database before deleting
+        const { count, error: countError } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', currentConversation.id);
         
-        if (deleteError) {
-          console.error('Error deleting empty conversation:', deleteError);
-          // Continue anyway - don't block creating new conversation
+        if (countError) {
+          console.error('Error checking message count:', countError);
+          // Don't delete if we can't verify - safer to keep it
+        } else if (count === 0) {
+          // Conversation is truly empty, safe to delete
+          console.log('Conversation is empty in database, auto-deleting:', currentConversation.id);
+          
+          const { error: deleteError } = await supabase
+            .from('conversations')
+            .delete()
+            .eq('id', currentConversation.id);
+          
+          if (deleteError) {
+            console.error('Error deleting empty conversation:', deleteError);
+            // Continue anyway - don't block creating new conversation
+          } else {
+            trackEvent('conversation_auto_deleted', { 
+              conversationId: currentConversation.id,
+              reason: 'empty_on_new_click' 
+            });
+          }
         } else {
-          trackEvent('conversation_auto_deleted', { 
-            conversationId: currentConversation.id,
-            reason: 'empty_on_new_click' 
-          });
+          console.log(`Conversation has ${count} messages in database, NOT deleting`, currentConversation.id);
         }
       }
 
@@ -591,23 +676,39 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
 
     // Auto-delete current conversation if it's empty (no messages)
+    // CRITICAL: Check database first to avoid deleting conversations with messages
     if (currentConversation && messages.length === 0 && currentConversation.id !== conversationId) {
-      console.log('Auto-deleting empty conversation on switch:', currentConversation.id);
+      console.log('Checking if conversation is truly empty on switch:', currentConversation.id);
       
-      // Delete silently in the background
-      const { error: deleteError } = await supabase
-        .from('conversations')
-        .delete()
-        .eq('id', currentConversation.id);
+      // Verify conversation is empty in database before deleting
+      const { count, error: countError } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversation_id', currentConversation.id);
       
-      if (deleteError) {
-        console.error('Error deleting empty conversation:', deleteError);
-        // Continue anyway - don't block switching conversations
+      if (countError) {
+        console.error('Error checking message count:', countError);
+        // Don't delete if we can't verify - safer to keep it
+      } else if (count === 0) {
+        // Conversation is truly empty, safe to delete
+        console.log('Conversation is empty in database, auto-deleting on switch:', currentConversation.id);
+        
+        const { error: deleteError } = await supabase
+          .from('conversations')
+          .delete()
+          .eq('id', currentConversation.id);
+        
+        if (deleteError) {
+          console.error('Error deleting empty conversation:', deleteError);
+          // Continue anyway - don't block switching conversations
+        } else {
+          trackEvent('conversation_auto_deleted', { 
+            conversationId: currentConversation.id,
+            reason: 'empty_on_switch' 
+          });
+        }
       } else {
-        trackEvent('conversation_auto_deleted', { 
-          conversationId: currentConversation.id,
-          reason: 'empty_on_switch' 
-        });
+        console.log(`Conversation has ${count} messages in database, NOT deleting on switch`, currentConversation.id);
       }
     }
 
@@ -789,12 +890,24 @@ Please generate the complete email copy following all the guidelines we discusse
           modelId: selectedModel,
           brandContext: brand,
           conversationMode: conversationMode,
+          conversationId: currentConversation.id,
         }),
         signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get AI response');
+        const errorText = await response.text();
+        let errorMessage = 'Failed to get AI response';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch {
+          if (errorText) {
+            errorMessage = `${errorMessage}: ${errorText}`;
+          }
+        }
+        console.error('API Error (regenerate):', { status: response.status, message: errorMessage });
+        throw new Error(errorMessage);
       }
 
       // Read streaming response
@@ -883,13 +996,25 @@ Please generate the complete email copy following all the guidelines we discusse
           modelId: selectedModel,
           brandContext: brand,
           conversationMode: conversationMode,
+          conversationId: currentConversation.id,
           regenerateSection: { type: sectionType, title: sectionTitle },
         }),
         signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
-        throw new Error('Failed to regenerate section');
+        const errorText = await response.text();
+        let errorMessage = 'Failed to regenerate section';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch {
+          if (errorText) {
+            errorMessage = `${errorMessage}: ${errorText}`;
+          }
+        }
+        console.error('API Error (regenerate section):', { status: response.status, message: errorMessage });
+        throw new Error(errorMessage);
       }
 
       const reader = response.body?.getReader();
@@ -1036,6 +1161,8 @@ Please generate the complete email copy following all the guidelines we discusse
     clearDraft(currentConversation.id);
     setDraftContent('');
 
+    let currentController: AbortController | null = null;
+
     try {
       let userMessage: Message | undefined;
       
@@ -1079,6 +1206,7 @@ Please generate the complete email copy following all the guidelines we discusse
 
       // Create abort controller for this request
       abortControllerRef.current = new AbortController();
+      currentController = abortControllerRef.current; // Capture reference
 
       // Call AI API with streaming
       const response = await fetch('/api/chat', {
@@ -1091,12 +1219,26 @@ Please generate the complete email copy following all the guidelines we discusse
           modelId: selectedModel,
           brandContext: brand,
           conversationMode: conversationMode,
+          conversationId: currentConversation.id,
+          emailType: emailType,
         }),
         signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get AI response');
+        const errorText = await response.text();
+        let errorMessage = 'Failed to get AI response';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch {
+          // If not JSON, use the raw text if available
+          if (errorText) {
+            errorMessage = `${errorMessage}: ${errorText}`;
+          }
+        }
+        console.error('API Error:', { status: response.status, message: errorMessage });
+        throw new Error(errorMessage);
       }
 
       // Create placeholder for AI message
@@ -1215,13 +1357,26 @@ Please generate the complete email copy following all the guidelines we discusse
           streamState = finalizeStream(streamState);
           
           // Extract product links from complete stream (after all chunks received)
-          const productMatch = rawStreamContent.match(/\[PRODUCTS:([\s\S]*?)\]/);
+          const productMatch = rawStreamContent.match(/\[PRODUCTS:([\s\S]*?)\](?:\s|$)/);
           if (productMatch) {
             try {
-              productLinks = JSON.parse(productMatch[1]);
+              const jsonString = productMatch[1].trim();
+              // Validate JSON before parsing
+              if (jsonString && jsonString.startsWith('[') && jsonString.endsWith(']')) {
+                productLinks = JSON.parse(jsonString);
+                // Validate structure
+                if (!Array.isArray(productLinks)) {
+                  console.warn('Product links is not an array, resetting');
+                  productLinks = [];
+                }
+              } else {
+                console.warn('Invalid product links format, skipping');
+                productLinks = [];
+              }
             } catch (e) {
               console.error('Failed to parse product links:', e);
               // Silent fail - product links are optional
+              productLinks = [];
             }
           }
           
@@ -1245,14 +1400,18 @@ Please generate the complete email copy following all the guidelines we discusse
       // Update sidebar status - completion
       sidebarState.updateConversationStatus(currentConversation.id, 'idle');
 
+      // Sanitize content before saving to database (XSS protection)
+      const sanitizedContent = sanitizeContent(fullContent);
+      const sanitizedThinking = thinkingContent ? sanitizeContent(thinkingContent) : null;
+
       // Save complete AI message to database with product links and thinking
       const { data: savedAiMessage, error: aiError } = await supabase
         .from('messages')
         .insert({
           conversation_id: currentConversation.id,
           role: 'assistant',
-          content: fullContent,
-          thinking: thinkingContent || null,
+          content: sanitizedContent,
+          thinking: sanitizedThinking,
           metadata: productLinks.length > 0 ? { productLinks } : null,
         })
         .select()
@@ -1291,14 +1450,26 @@ Please generate the complete email copy following all the guidelines we discusse
         toast.error('Generation stopped');
         sidebarState.updateConversationStatus(currentConversation.id, 'idle');
       } else {
-        console.error('Error sending message:', error);
-        toast.error('Failed to send message');
+        // Enhanced error logging for better debugging
+        console.error('Error sending message:', {
+          message: error?.message || 'Unknown error',
+          name: error?.name,
+          stack: error?.stack,
+          error: error
+        });
+        
+        // Show more specific error message to user
+        const errorMessage = error?.message || 'Failed to send message';
+        toast.error(errorMessage);
         sidebarState.updateConversationStatus(currentConversation.id, 'error');
       }
       setAiStatus('idle');
     } finally {
       setSending(false);
-      abortControllerRef.current = null;
+      // Only clear if this is still the current controller
+      if (abortControllerRef.current === currentController) {
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -1319,39 +1490,53 @@ Please generate the complete email copy following all the guidelines we discusse
   }
 
   return (
-    <div className="flex h-screen bg-[#fcfcfc] dark:bg-gray-950">
+    <div className="relative h-screen bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
       <Toaster position="top-right" />
 
-      {/* Enhanced Sidebar */}
-      <ChatSidebarEnhanced
-        brandName={brand.name}
-        brandId={brandId}
-        conversations={filteredConversationsWithStatus}
-        currentConversationId={currentConversation?.id || null}
-        teamMembers={teamMembers}
-        currentFilter={currentFilter}
-        selectedPersonId={selectedPersonId}
-        pinnedConversationIds={sidebarState.pinnedConversationIds}
-        viewMode={sidebarState.viewMode}
-        onFilterChange={handleFilterChange}
-        onNewConversation={handleNewConversation}
-        onSelectConversation={handleSelectConversation}
-        onDeleteConversation={handleDeleteConversation}
-        onRenameConversation={handleRenameConversation}
-        onPrefetchConversation={handlePrefetchConversation}
-        onQuickAction={sidebarState.handleQuickAction}
-        onViewModeChange={sidebarState.setViewMode}
-        onSidebarWidthChange={sidebarState.setSidebarWidth}
-        initialWidth={sidebarState.sidebarWidth}
-      />
+      {/* Enhanced Sidebar - Fixed overlay on mobile, in-flow on desktop */}
+      <div className="contents lg:flex lg:h-screen">
+        <ChatSidebarEnhanced
+          brandName={brand.name}
+          brandId={brandId}
+          conversations={filteredConversationsWithStatus}
+          currentConversationId={currentConversation?.id || null}
+          teamMembers={teamMembers}
+          currentFilter={currentFilter}
+          selectedPersonId={selectedPersonId}
+          pinnedConversationIds={sidebarState.pinnedConversationIds}
+          viewMode={sidebarState.viewMode}
+          isMobileOpen={isMobileSidebarOpen}
+          onMobileToggle={setIsMobileSidebarOpen}
+          onFilterChange={handleFilterChange}
+          onNewConversation={handleNewConversation}
+          onSelectConversation={handleSelectConversation}
+          onDeleteConversation={handleDeleteConversation}
+          onRenameConversation={handleRenameConversation}
+          onPrefetchConversation={handlePrefetchConversation}
+          onQuickAction={sidebarState.handleQuickAction}
+          onViewModeChange={sidebarState.setViewMode}
+          onSidebarWidthChange={sidebarState.setSidebarWidth}
+          initialWidth={sidebarState.sidebarWidth}
+        />
 
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col">
+        {/* Main chat area - Full width on mobile, flex-1 on desktop */}
+        <div className="flex flex-col h-screen w-full lg:flex-1 lg:w-auto min-w-0">
         {/* Enhanced Navigation Header */}
         <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
           {/* Breadcrumb Navigation */}
           <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
             <div className="flex items-center gap-2 text-sm">
+              {/* Mobile hamburger menu */}
+              <button
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="lg:hidden p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors mr-1 flex-shrink-0"
+                aria-label="Open sidebar"
+              >
+                <svg className="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+
               <button
                 onClick={() => router.push('/')}
                 className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors group cursor-pointer"
@@ -1359,14 +1544,60 @@ Please generate the complete email copy following all the guidelines we discusse
                 <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
-                <span className="font-medium">All Brands</span>
+                <span className="font-medium hidden sm:inline">All Brands</span>
               </button>
               <svg className="w-4 h-4 text-gray-400 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-              <span className="text-gray-900 dark:text-gray-100 font-semibold truncate">
-                {brand?.name || 'Brand'}
-              </span>
+              
+              {/* Brand Switcher Dropdown */}
+              <div className="relative" ref={brandSwitcherRef}>
+                <button
+                  onClick={() => setShowBrandSwitcher(!showBrandSwitcher)}
+                  className="flex items-center gap-1.5 text-gray-900 dark:text-gray-100 font-semibold hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer group"
+                >
+                  <span className="truncate">{brand?.name || 'Brand'}</span>
+                  <svg 
+                    className={`w-4 h-4 transition-transform duration-200 ${showBrandSwitcher ? 'rotate-180' : ''}`} 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Dropdown Menu */}
+                {showBrandSwitcher && allBrands.length > 0 && (
+                  <div className="absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[200px] max-w-[300px] z-50">
+                    <div className="max-h-[400px] overflow-y-auto">
+                      {allBrands.map((b) => (
+                        <button
+                          key={b.id}
+                          onClick={() => {
+                            router.push(`/brands/${b.id}/chat`);
+                            setShowBrandSwitcher(false);
+                          }}
+                          className={`
+                            w-full px-4 py-3 text-left transition-colors duration-150 cursor-pointer flex items-center justify-between
+                            ${b.id === brandId
+                              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            }
+                          `}
+                        >
+                          <span className="text-sm font-medium truncate">{b.name}</span>
+                          {b.id === brandId && (
+                            <svg className="w-4 h-4 flex-shrink-0 ml-2" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1375,7 +1606,7 @@ Please generate the complete email copy following all the guidelines we discusse
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <svg className="w-5 h-5 text-gray-400 dark:text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-gray-400 dark:text-gray-500 flex-shrink-0 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                   </svg>
                   <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">
@@ -1383,25 +1614,12 @@ Please generate the complete email copy following all the guidelines we discusse
                   </h2>
                 </div>
                 {currentConversation && messages.length > 0 && (
-                  <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full flex-shrink-0">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full flex-shrink-0 hidden md:inline-flex">
                     {messages.length} {messages.length === 1 ? 'message' : 'messages'}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {/* Starred Emails Button */}
-                {brand && (
-                  <button
-                    onClick={() => setShowStarredEmails(true)}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-yellow-50 dark:bg-yellow-950/30 hover:bg-yellow-100 dark:hover:bg-yellow-950/50 border border-yellow-200 dark:border-yellow-800 text-yellow-700 dark:text-yellow-300 rounded-lg text-xs font-medium transition-all duration-150 hover:scale-105 cursor-pointer"
-                    title="View starred emails (AI reference examples)"
-                  >
-                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                      <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                    </svg>
-                    <span className="hidden sm:inline">Starred</span>
-                  </button>
-                )}
+              <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
                 {currentConversation && (
                   <button
                     onClick={() => setShowMemorySettings(true)}
@@ -1421,7 +1639,7 @@ Please generate the complete email copy following all the guidelines we discusse
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-8 py-8 bg-[#fcfcfc] dark:bg-gray-950">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 bg-[#fcfcfc] dark:bg-gray-950">
           {!currentConversation ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
@@ -1449,7 +1667,7 @@ Please generate the complete email copy following all the guidelines we discusse
             </div>
           ) : messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-center max-w-2xl px-4">
+              <div className="text-center max-w-2xl px-4 sm:px-6">
                 <div className="mb-6 flex justify-center">
                   {conversationMode === 'planning' ? (
                     <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center">
@@ -1465,12 +1683,12 @@ Please generate the complete email copy following all the guidelines we discusse
                     </div>
                   )}
                 </div>
-                <h3 className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-2">
+                <h3 className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-2">
                   {conversationMode === 'planning' 
                     ? 'Let\'s Talk Strategy' 
                     : 'Create Your Email'}
                 </h3>
-                <p className="text-gray-600 dark:text-gray-400 mb-6">
+                <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mb-6">
                   {conversationMode === 'planning'
                     ? 'Ask questions, explore ideas, or plan your next campaign. This is your space to think and strategize.'
                     : 'Describe the email you want to create and I\'ll generate it for you with high-converting copy.'}
@@ -1513,7 +1731,7 @@ Please generate the complete email copy following all the guidelines we discusse
           ) : messages.length > 50 ? (
             /* Use virtualized list for long conversations (50+ messages) */
             <>
-              <div className="max-w-5xl mx-auto px-8 py-4">
+              <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
                 {/* Planning Stage Indicator (only in planning mode) */}
                 {conversationMode === 'planning' && (
                   <PlanningStageIndicator messages={messages} />
@@ -1534,7 +1752,7 @@ Please generate the complete email copy following all the guidelines we discusse
               
               {/* AI Status */}
               {sending && aiStatus !== 'idle' && (
-                <div className="max-w-5xl mx-auto px-8 mb-4">
+                <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mb-4">
                   <AIStatusIndicator status={aiStatus} />
                 </div>
               )}
@@ -1610,7 +1828,7 @@ Please generate the complete email copy following all the guidelines we discusse
                   messages[messages.length - 1].content.length > 100;
          })() && (
           <div className="border-t border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 px-4 py-3">
-            <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="flex-shrink-0 w-10 h-10 bg-blue-600 dark:bg-blue-500 rounded-full flex items-center justify-center">
                   <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1621,14 +1839,14 @@ Please generate the complete email copy following all the guidelines we discusse
                   <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                     Ready to create your email?
                   </p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                  <p className="text-xs text-gray-600 dark:text-gray-400 hidden sm:block">
                     Transfer this plan to Email Copy mode to generate your email
                   </p>
                 </div>
               </div>
               <button
                 onClick={handleTransferPlanToEmail}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg hover:scale-105 active:scale-95 cursor-pointer flex items-center gap-2"
+                className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center gap-2"
               >
                 <span>Transfer Plan</span>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1653,6 +1871,9 @@ Please generate the complete email copy following all the guidelines we discusse
             onModeChange={handleToggleMode}
             selectedModel={selectedModel}
             onModelChange={(model) => setSelectedModel(model as AIModel)}
+            emailType={emailType}
+            onEmailTypeChange={setEmailType}
+            hasMessages={messages.length > 0}
           />
         )}
 
@@ -1666,23 +1887,16 @@ Please generate the complete email copy following all the guidelines we discusse
         </div>
       )}
 
-      {/* Starred Emails Manager Modal */}
-      {showStarredEmails && brand && (
-        <StarredEmailsManager
-          brandId={brandId}
-          onClose={() => setShowStarredEmails(false)}
-        />
-      )}
-
-      {/* Memory Settings Modal */}
-      {showMemorySettings && currentConversation && (
-        <MemorySettings
-          conversationId={currentConversation.id}
-          onClose={() => setShowMemorySettings(false)}
-        />
-      )}
+        {/* Memory Settings Modal */}
+        {showMemorySettings && currentConversation && (
+          <MemorySettings
+            conversationId={currentConversation.id}
+            onClose={() => setShowMemorySettings(false)}
+          />
+        )}
+        </div>
+      </div>
     </div>
-  </div>
   );
 }
 

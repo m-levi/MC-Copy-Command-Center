@@ -18,6 +18,8 @@ interface ChatSidebarEnhancedProps {
   selectedPersonId: string | null;
   pinnedConversationIds: string[];
   viewMode: SidebarViewMode;
+  isMobileOpen?: boolean;
+  onMobileToggle?: (isOpen: boolean) => void;
   onFilterChange: (filter: FilterType, personId?: string) => void;
   onNewConversation: () => void;
   onSelectConversation: (conversationId: string) => void;
@@ -40,6 +42,8 @@ export default function ChatSidebarEnhanced({
   selectedPersonId,
   pinnedConversationIds,
   viewMode,
+  isMobileOpen = false,
+  onMobileToggle,
   onFilterChange,
   onNewConversation,
   onSelectConversation,
@@ -154,16 +158,77 @@ export default function ChatSidebarEnhanced({
   const unpinnedConversations = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
   const orderedConversations = [...pinnedConversations, ...unpinnedConversations];
 
+  // Close mobile sidebar when conversation is selected on mobile
+  const handleMobileSelectConversation = (conversationId: string) => {
+    onSelectConversation(conversationId);
+    if (onMobileToggle && window.innerWidth < 1024) {
+      onMobileToggle(false);
+    }
+  };
+
+  // Close mobile sidebar on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        isMobileOpen &&
+        sidebarRef.current &&
+        !sidebarRef.current.contains(event.target as Node) &&
+        window.innerWidth < 1024
+      ) {
+        onMobileToggle?.(false);
+      }
+    };
+
+    if (isMobileOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isMobileOpen, onMobileToggle]);
+
   return (
     <>
-      <div 
+      {/* Mobile overlay */}
+      {isMobileOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity duration-200"
+          onClick={() => onMobileToggle?.(false)}
+        />
+      )}
+
+      <aside 
         ref={sidebarRef}
-        className="bg-[#f0f0f0] dark:bg-gray-900 text-black dark:text-white flex flex-col h-screen border-r border-[#d8d8d8] dark:border-gray-700 relative transition-all duration-200"
-        style={{ width: `${sidebarWidth}px` }}
+        className={`
+          bg-[#f0f0f0] dark:bg-gray-900 text-black dark:text-white 
+          flex flex-col h-screen border-r border-[#d8d8d8] dark:border-gray-700 
+          transition-all duration-200
+          
+          /* Mobile: Fixed overlay sidebar (removed from flow) */
+          fixed lg:relative
+          top-0 left-0 bottom-0
+          z-50 lg:z-auto
+          ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          
+          /* Responsive width */
+          w-[85vw] sm:w-80 lg:w-auto
+        `}
+        style={{ 
+          width: window.innerWidth >= 1024 ? `${sidebarWidth}px` : undefined 
+        }}
       >
         {/* Brand header with view controls */}
         <div className="px-4 py-4 border-b border-[#d8d8d8] dark:border-gray-700">
           <div className="flex items-center justify-between mb-2">
+            {/* Mobile close button */}
+            <button
+              onClick={() => onMobileToggle?.(false)}
+              className="lg:hidden mr-3 p-2 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              aria-label="Close sidebar"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
             <div className="flex-1 min-w-0">
               <h2 className="text-base font-semibold truncate">{brandName}</h2>
               <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Email Copywriter</p>
@@ -254,7 +319,7 @@ export default function ChatSidebarEnhanced({
         </div>
 
         {/* Conversations list/grid */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {viewMode === 'list' ? (
             <VirtualizedConversationList
               conversations={orderedConversations}
@@ -262,7 +327,7 @@ export default function ChatSidebarEnhanced({
               pinnedConversationIds={pinnedConversationIds}
               editingId={editingId}
               editingTitle={editingTitle}
-              onSelect={onSelectConversation}
+              onSelect={handleMobileSelectConversation}
               onPrefetch={onPrefetchConversation}
               onStartRename={handleStartRename}
               onSaveRename={handleSaveRename}
@@ -289,7 +354,7 @@ export default function ChatSidebarEnhanced({
                       conversation={conversation}
                       isActive={conversation.id === currentConversationId}
                       isPinned={pinnedConversationIds.includes(conversation.id)}
-                      onSelect={() => onSelectConversation(conversation.id)}
+                      onSelect={() => handleMobileSelectConversation(conversation.id)}
                       onAction={(action) => onQuickAction(conversation.id, action)}
                       onPrefetch={() => onPrefetchConversation?.(conversation.id)}
                     />
@@ -300,32 +365,15 @@ export default function ChatSidebarEnhanced({
           )}
         </div>
 
-        {/* Back to brands - Enhanced */}
-        <div className="px-3 py-3 border-t border-[#d8d8d8] dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-          <a
-            href="/"
-            className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 dark:from-blue-600 dark:to-blue-700 dark:hover:from-blue-700 dark:hover:to-blue-800 text-white rounded-lg text-sm font-semibold transition-all duration-150 cursor-pointer hover:scale-105 hover:shadow-lg active:scale-95 group"
-          >
-            <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            <span>All Brands</span>
-          </a>
-          <div className="mt-2 text-center">
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              Press <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs font-mono">ESC</kbd> to go back
-            </span>
-          </div>
-        </div>
 
-        {/* Resize handle */}
+        {/* Resize handle - Desktop only */}
         <div
-          className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 dark:hover:bg-blue-400 transition-colors z-10 group"
+          className="hidden lg:block absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 dark:hover:bg-blue-400 transition-colors z-10 group"
           onMouseDown={startResizing}
         >
           <div className="absolute top-1/2 right-0 transform -translate-y-1/2 w-1 h-12 bg-gray-300 dark:bg-gray-600 group-hover:bg-blue-500 dark:group-hover:bg-blue-400 transition-colors rounded-full"></div>
         </div>
-      </div>
+      </aside>
 
       {/* Full-screen explorer */}
       <ConversationExplorer

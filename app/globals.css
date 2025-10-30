@@ -206,3 +206,31 @@ body {
 .dark .prose th {
   background-color: #1f2937;
 }
+
+/* AI Status Indicator Animations */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
+}
+
+/* Smoother bounce for status icons */
+@keyframes smooth-bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-smooth-bounce {
+  animation: smooth-bounce 1.5s ease-in-out infinite;
+}

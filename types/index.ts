@@ -22,6 +22,7 @@ export interface Brand {
 
 export type ConversationType = 'email' | 'automation';
 export type ConversationMode = 'planning' | 'email_copy';
+export type EmailType = 'design' | 'letter';
 
 export interface Conversation {
   id: string;

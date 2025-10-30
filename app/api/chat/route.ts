@@ -15,7 +15,8 @@ import {
   saveMemory 
 } from '@/lib/conversation-memory-store';
 
-export const runtime = 'edge';
+// Temporarily disable edge runtime to debug memory loading issues
+// export const runtime = 'edge';
 
 // Lazy-load AI clients to avoid build-time errors
 function getOpenAIClient() {
@@ -48,15 +49,27 @@ function constructProductLinks(
 
 export async function POST(req: Request) {
   try {
-    const { messages, modelId, brandContext, regenerateSection, conversationId, conversationMode } = await req.json();
+    console.log('[Chat API] Received request');
+    const { messages, modelId, brandContext, regenerateSection, conversationId, conversationMode, emailType } = await req.json();
+    console.log('[Chat API] Request params:', { 
+      modelId, 
+      conversationId, 
+      conversationMode,
+      emailType,
+      hasMessages: !!messages,
+      hasBrandContext: !!brandContext 
+    });
     
     // Store conversationId globally for memory saving in stream handlers
     (globalThis as any).__currentConversationId = conversationId;
 
     const model = getModelById(modelId);
     if (!model) {
+      console.error('[Chat API] Invalid model:', modelId);
       return new Response('Invalid model', { status: 400 });
     }
+    
+    console.log('[Chat API] Using model:', model.name, 'Provider:', model.provider);
 
     // Extract conversation context (fast, synchronous)
     const conversationContext = extractConversationContext(messages);
@@ -86,11 +99,18 @@ export async function POST(req: Request) {
         }
       })(),
       (async () => {
-        if (!conversationId) return [];
+        if (!conversationId) {
+          console.log('[Memory] No conversationId provided, skipping memory load');
+          return [];
+        }
         try {
-          return await loadMemories(conversationId);
+          console.log('[Memory] Loading memories for conversation:', conversationId);
+          const mems = await loadMemories(conversationId);
+          console.log('[Memory] Loaded', mems.length, 'memories');
+          return mems;
         } catch (error) {
-          console.error('Memory loading error:', error);
+          console.error('[Memory] Failed to load memories:', error);
+          // Don't fail the entire request if memory loading fails
           return [];
         }
       })(),
@@ -101,7 +121,7 @@ export async function POST(req: Request) {
     const memoryPrompt = formatMemoryForPrompt(memoryContext);
 
     // Build system prompt with brand context, RAG, and memory
-    const systemPrompt = buildSystemPrompt(brandContext, ragContext, regenerateSection, conversationContext, conversationMode, memoryPrompt);
+    const systemPrompt = buildSystemPrompt(brandContext, ragContext, regenerateSection, conversationContext, conversationMode, memoryPrompt, emailType);
 
     // Extract website URL from brand context
     const websiteUrl = brandContext?.website_url;
@@ -139,10 +159,18 @@ export async function POST(req: Request) {
 
     return new Response('Unsupported provider', { status: 400 });
   } catch (error) {
-    console.error('Chat API error:', error);
+    console.error('[Chat API] Error occurred:', error);
+    console.error('[Chat API] Error type:', typeof error);
+    console.error('[Chat API] Error details:', {
+      name: error instanceof Error ? error.name : 'N/A',
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : 'N/A'
+    });
+    
     return new Response(JSON.stringify({ 
       error: 'Failed to generate response. Please try again.',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: error instanceof Error ? error.message : 'Unknown error',
+      type: error instanceof Error ? error.name : typeof error
     }), { 
       status: 500,
       headers: { 'Content-Type': 'application/json' }
@@ -180,14 +208,14 @@ You have access to powerful tools to enhance your responses:
 
 **💭 Memory:** You can remember important facts, preferences, and decisions across the conversation. To save something to memory, use this format anywhere in your response (it will be invisible to the user):
 
-`[REMEMBER:key_name=value:category]`
+[REMEMBER:key_name=value:category]
 
 Categories: user_preference, brand_context, campaign_info, product_details, decision, fact
 
 Examples:
-- `[REMEMBER:tone_preference=casual and friendly:user_preference]`
-- `[REMEMBER:target_audience=millennials interested in tech:brand_context]`
-- `[REMEMBER:promo_code=SUMMER20:campaign_info]`
+- [REMEMBER:tone_preference=casual and friendly:user_preference]
+- [REMEMBER:target_audience=millennials interested in tech:brand_context]
+- [REMEMBER:promo_code=SUMMER20:campaign_info]
 
 The system will automatically parse these and save them to persistent memory. Use this when you learn something important that should be remembered for future messages.
 
@@ -351,13 +379,196 @@ You: "Exciting! Let's think through this strategically:
 **Remember**: You're helping them think and plan, NOT writing their email. That happens in Email Copy mode.`;
 }
 
+function buildLetterEmailPrompt(
+  brandInfo: string,
+  ragContext: string,
+  contextInfo: string,
+  memoryContext?: string
+): string {
+  return `You are an expert email copywriter specializing in short, direct response letter-style emails. You excel at writing personalized, conversational emails that feel like they come from a real person.
+
+<brand_info>
+${brandInfo}
+</brand_info>
+
+${ragContext}
+
+${contextInfo}
+
+${memoryContext || ''}
+
+## LETTER EMAIL CHARACTERISTICS
+
+Letter emails are:
+- Personal and conversational (3-5 short paragraphs maximum)
+- Direct, one-on-one communication style
+- Written like a real person, not a marketing department
+- Include sender name and signature
+- Focus on relationship and authentic communication
+
+## YOUR APPROACH
+
+**BE SMART AND CONTEXT-AWARE:**
+- Read what the user is asking for carefully
+- If they've provided details in their request, USE THEM - don't ask for what they already told you
+- Only ask follow-up questions if critical information is genuinely missing
+- Make reasonable assumptions based on context rather than asking obvious questions
+
+**WHAT YOU NEED TO WRITE THE EMAIL:**
+- Sender info (who it's from - if not specified, use brand name/team)
+- Recipient (who it's to - if not specified, assume "customers" or "subscribers")
+- Purpose (what the email is about - usually clear from their request)
+- Key message (what they want to communicate - usually in their prompt)
+- Tone (follow brand guidelines unless they specify otherwise)
+
+**SMART DEFAULTS:**
+- If sender not mentioned → Use "[Brand Name] Team" or "The Team at [Brand Name]"
+- If recipient not mentioned → Use generic greeting like "Hi there," or "Hey,"
+- If tone not specified → Match the brand voice from brand guidelines
+- If specific details needed → Make ONE concise request for what's truly missing
+
+## EXAMPLES OF BEING INTELLIGENT
+
+### Good Response (User provides context):
+User: "Write a thank you email to customers who just made their first purchase"
+You: Generate the email immediately using:
+- Sender: [Brand] Team (reasonable default)
+- Recipient: Generic "Hi there," (works for all first-time customers)
+- Purpose: Thank you (clearly stated)
+- Message: Appreciation + excitement (implied)
+
+### Good Response (Missing ONE critical detail):
+User: "Write a welcome email with a discount code"
+You: "I'll write that welcome email for you. What discount code and amount should I include? (e.g., WELCOME20 for 20% off)"
+Then immediately generate the email with their answer.
+
+### Bad Response (Asking too many questions):
+User: "Write a thank you email for new customers"
+You: ❌ "Who should this be from? Who is it to? What's the tone? What's the key message?"
+(All of this is obvious from context!)
+
+## OUTPUT FORMAT
+
+\`\`\`
+SUBJECT LINE:
+[Clear, personal subject line - 5-8 words]
+
+---
+
+[Greeting - "Hi [Name]," or "Hey there," or "Hi,"]
+
+[Opening paragraph - warm, personal, set context - 2-3 sentences max]
+
+[Body paragraph(s) - key message, offer, or update - 2-4 sentences each, 1-2 paragraphs max]
+
+[Call to action paragraph - what you want them to do - 1-2 sentences]
+
+[Sign off - "Thanks," "Best," "Cheers," etc.]
+[Sender name/role]
+[Brand name - optional if already in sender]
+
+P.S. [Optional - reinforcement or bonus detail]
+\`\`\`
+
+## WRITING GUIDELINES
+
+**DO:**
+- Write like a real person having a conversation
+- Use contractions (we're, you'll, it's, can't)
+- Keep paragraphs short (2-4 sentences max)
+- Be warm and genuine
+- Stay true to brand voice
+- Use specific details when available
+- Make it feel authentic, not templated
+
+**DON'T:**
+- Use corporate marketing speak
+- Write long paragraphs
+- Ask for information the user already provided
+- Make it sound robotic or automated
+- Ignore brand voice guidelines
+- Over-structure with headers and sections
+
+## EXAMPLE EMAILS
+
+### Thank You Email
+\`\`\`
+SUBJECT: Thanks for your first order!
+
+---
+
+Hi there,
+
+I just wanted to say thank you for ordering from us. It really means a lot when someone chooses to support our small business.
+
+Your order is being packed up right now and should ship out tomorrow. I think you're going to love what you ordered – it's one of our favorites too.
+
+If you have any questions or need anything at all, just hit reply. I'm here to help.
+
+Thanks again,
+Sarah
+The [Brand] Team
+
+P.S. Keep an eye out for a little surprise we tucked into your package. 😊
+\`\`\`
+
+### Product Update Email
+\`\`\`
+SUBJECT: Something new you might like
+
+---
+
+Hey,
+
+Quick heads up – we just launched something I think you'll be excited about.
+
+Our new [Product] just dropped, and based on what you've ordered before, I have a feeling it's right up your alley. We've been working on this for months and I'm pretty proud of how it turned out.
+
+Want to check it out? Here's 15% off just for you: EARLY15
+
+Let me know what you think!
+
+Best,
+Jamie
+[Brand]
+\`\`\`
+
+### Re-engagement Email
+\`\`\`
+SUBJECT: We miss you!
+
+---
+
+Hi,
+
+It's been a while since we've heard from you, and I wanted to reach out.
+
+I know inboxes get crazy and it's easy to miss emails. But if you're still interested in [product category], we've got some new stuff you might love. And if not, no worries – I totally get it.
+
+Either way, here's 20% off if you want to check out what's new: WELCOME20
+
+Hope you're doing well!
+
+Cheers,
+Alex
+Founder, [Brand]
+\`\`\`
+
+## KEY PRINCIPLE
+
+**Read the user's request carefully and generate the email using the information they provide.** Only ask follow-up questions if something critical is genuinely missing and can't be reasonably assumed. Be helpful and intelligent, not robotic and repetitive.
+
+The goal is authentic, personal communication that builds relationships while achieving the business objective. Make it sound human, not corporate.`;
+}
+
 function buildSystemPrompt(
   brandContext: any,
   ragContext: string,
   regenerateSection?: { type: string; title: string },
   conversationContext?: any,
   conversationMode?: string,
-  memoryContext?: string
+  memoryContext?: string,
+  emailType?: string
 ): string {
   const brandInfo = brandContext ? `
 Brand Name: ${brandContext.name}
@@ -385,6 +596,11 @@ Goals: ${conversationContext.goals?.join(', ') || 'Not specified'}
   // If in planning mode, use a completely different prompt
   if (conversationMode === 'planning') {
     return buildPlanningPrompt(brandInfo, ragContext, contextInfo, memoryContext);
+  }
+
+  // If letter email type, use letter email prompt
+  if (emailType === 'letter') {
+    return buildLetterEmailPrompt(brandInfo, ragContext, contextInfo, memoryContext);
   }
 
   // Section-specific prompts for regeneration
@@ -435,11 +651,11 @@ You have access to powerful tools to enhance your email copy:
 
 **💭 Memory:** The system remembers important facts and preferences from this conversation. To save something to memory, use:
 
-`[REMEMBER:key_name=value:category]`
+[REMEMBER:key_name=value:category]
 
 Categories: user_preference, brand_context, campaign_info, product_details, decision, fact
 
-Example: `[REMEMBER:tone_preference=professional:user_preference]`
+Example: [REMEMBER:tone_preference=professional:user_preference]
 
 This will be invisible to the user but saved for future reference. Use this when you learn preferences or important details that should persist across the conversation.
 
@@ -641,13 +857,14 @@ async function handleOpenAI(
     model: modelId,
     messages: formattedMessages,
     stream: true,
-    reasoning_effort: 'high', // Enable extended thinking for GPT-5
-    tools: [
-      {
-        type: 'web_search',
-      },
-    ],
-    tool_choice: 'auto', // Let GPT decide when to use web search
+    // reasoning_effort: 'high', // Enable extended thinking for GPT-5
+    // TODO: Re-enable tools with correct API syntax
+    // tools: [
+    //   {
+    //     type: 'web_search',
+    //   },
+    // ],
+    // tool_choice: 'auto', // Let GPT decide when to use web search
   });
   
   console.log('[OpenAI] Stream received, starting to read...');
@@ -677,7 +894,7 @@ async function handleOpenAI(
         console.log('[OpenAI] Starting to iterate stream chunks...');
         for await (const chunk of stream) {
           // Check for reasoning content (GPT-5 extended thinking)
-          const reasoningContent = chunk.choices[0]?.delta?.reasoning_content || '';
+          const reasoningContent = (chunk.choices[0]?.delta as any)?.reasoning_content || '';
           if (reasoningContent) {
             if (!isThinking) {
               controller.enqueue(encoder.encode('[THINKING:START]'));
@@ -823,29 +1040,27 @@ async function handleAnthropic(
       type: 'enabled',
       budget_tokens: 2000, // Enable extended thinking for Claude with budget
     },
-    tools: [
-      {
-        type: 'web_search_20250305',
-        name: 'web_search',
-        max_uses: 5,
-        // Allow search for brand website and general queries
-        ...(brandWebsiteUrl && {
-          allowed_domains: [
-            new URL(brandWebsiteUrl).hostname,
-            // Allow common e-commerce and product info sites
-            'shopify.com',
-            'amazon.com',
-            'yelp.com',
-            'trustpilot.com',
-          ],
-        }),
-      },
-      {
-        type: 'web_fetch_20250305',
-        name: 'web_fetch',
-        max_uses: 3,
-      },
-    ],
+    // TODO: Re-enable tools with correct API syntax
+    // The web_fetch_20250305 tool type is not supported according to the error
+    // Only web_search_20250305 is valid
+    // tools: [
+    //   {
+    //     type: 'web_search_20250305',
+    //     name: 'web_search',
+    //     max_uses: 5,
+    //     // Allow search for brand website and general queries
+    //     ...(brandWebsiteUrl && {
+    //       allowed_domains: [
+    //         new URL(brandWebsiteUrl).hostname,
+    //         // Allow common e-commerce and product info sites
+    //         'shopify.com',
+    //         'amazon.com',
+    //         'yelp.com',
+    //         'trustpilot.com',
+    //       ],
+    //     }),
+    //   },
+    // ],
   });
   
   console.log('[Anthropic] Stream received, starting to read...');
@@ -919,7 +1134,7 @@ async function handleAnthropic(
           }
           
           // Handle web fetch tool results
-          if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'web_fetch_tool_result') {
+          if (chunk.type === 'content_block_start' && (chunk.content_block as any)?.type === 'web_fetch_tool_result') {
             console.log('[Anthropic] Web fetch results received');
             controller.enqueue(encoder.encode('[TOOL:web_fetch:RESULTS]'));
             continue;
