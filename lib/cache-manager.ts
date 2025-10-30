@@ -13,12 +13,15 @@ interface CacheEntry<T> {
 
 const MESSAGE_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 const CONVERSATION_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+const CONVERSATION_METADATA_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const MAX_MESSAGE_CACHE_SIZE = 50; // conversations
 const MAX_CONVERSATION_CACHE_SIZE = 20; // brands
+const MAX_METADATA_CACHE_SIZE = 100; // conversation metadata entries
 
 // In-memory caches
 const messageCache = new Map<string, CacheEntry<Message[]>>();
 const conversationCache = new Map<string, CacheEntry<Conversation[]>>();
+const conversationMetadataCache = new Map<string, CacheEntry<{ preview: string; lastMessageAt: string }>>();
 
 /**
  * Get cached messages for a conversation
@@ -163,11 +166,52 @@ export async function prefetchMessages(
 }
 
 /**
+ * Get cached conversation metadata (preview and last message time)
+ */
+export function getCachedConversationMetadata(conversationId: string): { preview: string; lastMessageAt: string } | null {
+  const entry = conversationMetadataCache.get(conversationId);
+  
+  if (!entry) return null;
+  
+  // Check if expired
+  if (Date.now() - entry.timestamp > entry.ttl) {
+    conversationMetadataCache.delete(conversationId);
+    return null;
+  }
+  
+  return entry.data;
+}
+
+/**
+ * Cache conversation metadata
+ */
+export function cacheConversationMetadata(
+  conversationId: string, 
+  preview: string, 
+  lastMessageAt: string
+): void {
+  // LRU: If cache is full, remove oldest entry
+  if (conversationMetadataCache.size >= MAX_METADATA_CACHE_SIZE) {
+    const oldestKey = conversationMetadataCache.keys().next().value;
+    if (oldestKey) {
+      conversationMetadataCache.delete(oldestKey);
+    }
+  }
+  
+  conversationMetadataCache.set(conversationId, {
+    data: { preview, lastMessageAt },
+    timestamp: Date.now(),
+    ttl: CONVERSATION_METADATA_CACHE_TTL,
+  });
+}
+
+/**
  * Clear all caches
  */
 export function clearAllCaches(): void {
   messageCache.clear();
   conversationCache.clear();
+  conversationMetadataCache.clear();
 }
 
 /**
@@ -184,6 +228,11 @@ export function getCacheStats() {
       size: conversationCache.size,
       maxSize: MAX_CONVERSATION_CACHE_SIZE,
       ttl: CONVERSATION_CACHE_TTL,
+    },
+    metadata: {
+      size: conversationMetadataCache.size,
+      maxSize: MAX_METADATA_CACHE_SIZE,
+      ttl: CONVERSATION_METADATA_CACHE_TTL,
     },
   };
 }

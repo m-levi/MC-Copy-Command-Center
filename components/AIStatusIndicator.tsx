@@ -8,6 +8,7 @@ interface AIStatusIndicatorProps {
 
 const statusLabels: Record<AIStatus, string> = {
   idle: 'Ready',
+  thinking: 'Thinking deeply...',
   analyzing_brand: 'Analyzing brand voice...',
   crafting_subject: 'Crafting subject line...',
   writing_hero: 'Writing hero section...',

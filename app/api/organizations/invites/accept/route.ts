@@ -10,13 +10,6 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { token } = body;
 
@@ -24,19 +17,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Token is required' }, { status: 400 });
     }
 
-    // Get user's email from profiles
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('email')
-      .eq('user_id', user.id)
-      .single();
-
-    if (!profile) {
-      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
-    }
+    // Use service client to validate invitation and find user
+    // This is necessary because new users may not have an established session yet
+    const serviceSupabase = createServiceClient();
 
     // Find the invitation
-    const { data: invite, error: inviteError } = await supabase
+    const { data: invite, error: inviteError } = await serviceSupabase
       .from('organization_invites')
       .select('id, email, role, organization_id, expires_at, used_at, invited_by')
       .eq('invite_token', token)
@@ -46,13 +32,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ 
         error: 'Invalid invitation token' 
       }, { status: 404 });
-    }
-
-    // Verify email matches
-    if (invite.email !== profile.email) {
-      return NextResponse.json({ 
-        error: 'Email does not match invitation' 
-      }, { status: 403 });
     }
 
     // Check if already used
@@ -71,17 +50,30 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // Find user by email (works for both new signups and existing users)
+    const { data: profile, error: profileError } = await serviceSupabase
+      .from('profiles')
+      .select('user_id, email')
+      .eq('email', invite.email)
+      .single();
+
+    if (profileError || !profile) {
+      return NextResponse.json({ 
+        error: 'User profile not found. Please try again in a moment.' 
+      }, { status: 404 });
+    }
+
     // Check if user is already a member
-    const { data: existingMember } = await supabase
+    const { data: existingMember } = await serviceSupabase
       .from('organization_members')
       .select('id')
       .eq('organization_id', invite.organization_id)
-      .eq('user_id', user.id)
+      .eq('user_id', profile.user_id)
       .single();
 
     if (existingMember) {
       // Mark invitation as used anyway
-      await supabase
+      await serviceSupabase
         .from('organization_invites')
         .update({ used_at: new Date().toISOString() })
         .eq('id', invite.id);
@@ -91,15 +83,12 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Use service role client to bypass RLS for inserting the member
-    // This is necessary because the user is not yet a member, so RLS would block them
-    const serviceSupabase = createServiceClient();
-    
+    // Add user to organization
     const { error: memberError } = await serviceSupabase
       .from('organization_members')
       .insert({
         organization_id: invite.organization_id,
-        user_id: user.id,
+        user_id: profile.user_id,
         role: invite.role,
         invited_by: invite.invited_by,
         joined_at: new Date().toISOString()
@@ -110,7 +99,7 @@ export async function POST(request: NextRequest) {
       throw memberError;
     }
 
-    // Mark invitation as used (can use regular client since user can update their own invite)
+    // Mark invitation as used
     const { error: updateError } = await serviceSupabase
       .from('organization_invites')
       .update({ used_at: new Date().toISOString() })

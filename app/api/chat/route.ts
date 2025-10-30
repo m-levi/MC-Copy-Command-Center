@@ -7,6 +7,13 @@ import { retryWithBackoff } from '@/lib/retry-utils';
 import { buildMessageContext, extractConversationContext } from '@/lib/conversation-memory';
 import { searchRelevantDocuments, buildRAGContext } from '@/lib/rag-service';
 import { extractProductMentions, constructProductUrl } from '@/lib/web-search';
+import { 
+  loadMemories, 
+  buildMemoryContext, 
+  formatMemoryForPrompt,
+  parseMemoryInstructions,
+  saveMemory 
+} from '@/lib/conversation-memory-store';
 
 export const runtime = 'edge';
 
@@ -42,6 +49,9 @@ function constructProductLinks(
 export async function POST(req: Request) {
   try {
     const { messages, modelId, brandContext, regenerateSection, conversationId, conversationMode } = await req.json();
+    
+    // Store conversationId globally for memory saving in stream handlers
+    (globalThis as any).__currentConversationId = conversationId;
 
     const model = getModelById(modelId);
     if (!model) {
@@ -51,8 +61,8 @@ export async function POST(req: Request) {
     // Extract conversation context (fast, synchronous)
     const conversationContext = extractConversationContext(messages);
 
-    // Parallel execution: RAG search (don't block other operations)
-    const [ragContext] = await Promise.all([
+    // Parallel execution: RAG search and memory loading
+    const [ragContext, memories] = await Promise.all([
       (async () => {
         if (!brandContext?.id || !process.env.OPENAI_API_KEY) {
           return '';
@@ -75,10 +85,23 @@ export async function POST(req: Request) {
           return ''; // Continue without RAG if it fails
         }
       })(),
+      (async () => {
+        if (!conversationId) return [];
+        try {
+          return await loadMemories(conversationId);
+        } catch (error) {
+          console.error('Memory loading error:', error);
+          return [];
+        }
+      })(),
     ]);
 
-    // Build system prompt with brand context and RAG
-    const systemPrompt = buildSystemPrompt(brandContext, ragContext, regenerateSection, conversationContext, conversationMode);
+    // Build memory context
+    const memoryContext = buildMemoryContext(memories);
+    const memoryPrompt = formatMemoryForPrompt(memoryContext);
+
+    // Build system prompt with brand context, RAG, and memory
+    const systemPrompt = buildSystemPrompt(brandContext, ragContext, regenerateSection, conversationContext, conversationMode, memoryPrompt);
 
     // Extract website URL from brand context
     const websiteUrl = brandContext?.website_url;
@@ -127,7 +150,7 @@ export async function POST(req: Request) {
   }
 }
 
-function buildPlanningPrompt(brandInfo: string, ragContext: string, contextInfo: string): string {
+function buildPlanningPrompt(brandInfo: string, ragContext: string, contextInfo: string, memoryContext?: string): string {
   return `You are an expert email marketing strategist and brand consultant. You're in a flexible conversation space where users can explore ideas, ask questions, and plan their campaigns.
 
 <brand_info>
@@ -137,6 +160,36 @@ ${brandInfo}
 ${ragContext}
 
 ${contextInfo}
+
+${memoryContext || ''}
+
+## AVAILABLE TOOLS
+
+You have access to powerful tools to enhance your responses:
+
+**🔍 Web Search:** You can search the internet for current information, product details, market trends, competitor analysis, and more. Use this when you need:
+- Current pricing or product availability
+- Recent industry trends or statistics  
+- Competitor information
+- Real-time data beyond your knowledge cutoff
+
+**🌐 Web Fetch:** You can directly fetch and read content from specific URLs. Use this when the user provides a link or when you need to:
+- Analyze a specific webpage
+- Review a product page
+- Check current website content
+
+**💭 Memory:** You can remember important facts, preferences, and decisions across the conversation. To save something to memory, use this format anywhere in your response (it will be invisible to the user):
+
+`[REMEMBER:key_name=value:category]`
+
+Categories: user_preference, brand_context, campaign_info, product_details, decision, fact
+
+Examples:
+- `[REMEMBER:tone_preference=casual and friendly:user_preference]`
+- `[REMEMBER:target_audience=millennials interested in tech:brand_context]`
+- `[REMEMBER:promo_code=SUMMER20:campaign_info]`
+
+The system will automatically parse these and save them to persistent memory. Use this when you learn something important that should be remembered for future messages.
 
 ## YOUR ROLE IN PLANNING MODE
 
@@ -303,7 +356,8 @@ function buildSystemPrompt(
   ragContext: string,
   regenerateSection?: { type: string; title: string },
   conversationContext?: any,
-  conversationMode?: string
+  conversationMode?: string,
+  memoryContext?: string
 ): string {
   const brandInfo = brandContext ? `
 Brand Name: ${brandContext.name}
@@ -330,7 +384,7 @@ Goals: ${conversationContext.goals?.join(', ') || 'Not specified'}
 
   // If in planning mode, use a completely different prompt
   if (conversationMode === 'planning') {
-    return buildPlanningPrompt(brandInfo, ragContext, contextInfo);
+    return buildPlanningPrompt(brandInfo, ragContext, contextInfo, memoryContext);
   }
 
   // Section-specific prompts for regeneration
@@ -360,6 +414,34 @@ ${brandContext?.website_url ? `\nBrand Website: ${brandContext.website_url}` : '
 ${ragContext}
 
 ${contextInfo}
+
+${memoryContext || ''}
+
+## AVAILABLE TOOLS
+
+You have access to powerful tools to enhance your email copy:
+
+**🔍 Web Search:** Search the internet for current product information, pricing, reviews, and market trends. Use this to:
+- Verify current product availability and pricing
+- Find recent customer reviews or testimonials
+- Research competitor offers
+- Get up-to-date statistics or data
+
+**🌐 Web Fetch:** Directly fetch content from specific URLs (especially the brand website). Use this to:
+- Review current product pages for accurate details
+- Check website content for consistency
+- Analyze specific landing pages
+- Verify links and resources
+
+**💭 Memory:** The system remembers important facts and preferences from this conversation. To save something to memory, use:
+
+`[REMEMBER:key_name=value:category]`
+
+Categories: user_preference, brand_context, campaign_info, product_details, decision, fact
+
+Example: `[REMEMBER:tone_preference=professional:user_preference]`
+
+This will be invisible to the user but saved for future reference. Use this when you learn preferences or important details that should persist across the conversation.
 
 <email_brief>
 {{EMAIL_BRIEF}}
@@ -560,6 +642,12 @@ async function handleOpenAI(
     messages: formattedMessages,
     stream: true,
     reasoning_effort: 'high', // Enable extended thinking for GPT-5
+    tools: [
+      {
+        type: 'web_search',
+      },
+    ],
+    tool_choice: 'auto', // Let GPT decide when to use web search
   });
   
   console.log('[OpenAI] Stream received, starting to read...');
@@ -574,6 +662,8 @@ async function handleOpenAI(
         
         let chunkCount = 0;
         let fullResponse = '';
+        let thinkingContent = '';
+        let isThinking = false;
         const statusSequence = [
           { threshold: 0, status: 'crafting_subject' },
           { threshold: 5, status: 'writing_hero' },
@@ -586,6 +676,39 @@ async function handleOpenAI(
         
         console.log('[OpenAI] Starting to iterate stream chunks...');
         for await (const chunk of stream) {
+          // Check for reasoning content (GPT-5 extended thinking)
+          const reasoningContent = chunk.choices[0]?.delta?.reasoning_content || '';
+          if (reasoningContent) {
+            if (!isThinking) {
+              controller.enqueue(encoder.encode('[THINKING:START]'));
+              controller.enqueue(encoder.encode('[STATUS:thinking]'));
+              isThinking = true;
+            }
+            thinkingContent += reasoningContent;
+            controller.enqueue(encoder.encode(`[THINKING:CHUNK]${reasoningContent}`));
+            continue;
+          }
+          
+          // If we were thinking and now have content, end thinking
+          if (isThinking && chunk.choices[0]?.delta?.content) {
+            controller.enqueue(encoder.encode('[THINKING:END]'));
+            controller.enqueue(encoder.encode('[STATUS:analyzing_brand]'));
+            isThinking = false;
+          }
+          
+          // Handle tool calls (web search)
+          const toolCalls = chunk.choices[0]?.delta?.tool_calls;
+          if (toolCalls && toolCalls.length > 0) {
+            for (const toolCall of toolCalls) {
+              if (toolCall.type === 'function' && toolCall.function) {
+                const toolName = toolCall.function.name || 'unknown';
+                console.log(`[OpenAI] Tool call: ${toolName}`);
+                controller.enqueue(encoder.encode(`[TOOL:${toolName}:START]`));
+              }
+            }
+            continue;
+          }
+          
           const content = chunk.choices[0]?.delta?.content || '';
           if (content) {
             // Update status based on progress
@@ -608,7 +731,33 @@ async function handleOpenAI(
           }
         }
         
+        if (thinkingContent) {
+          console.log(`[OpenAI] Captured ${thinkingContent.length} chars of thinking content`);
+        }
+        
         console.log(`[OpenAI] Stream complete. Total chunks: ${chunkCount}, chars: ${fullResponse.length}`);
+        
+        // Parse and save memory instructions from AI response
+        const conversationId = (globalThis as any).__currentConversationId;
+        if (conversationId && fullResponse) {
+          const memoryInstructions = parseMemoryInstructions(fullResponse);
+          if (memoryInstructions.length > 0) {
+            console.log(`[OpenAI] Found ${memoryInstructions.length} memory instructions`);
+            for (const instruction of memoryInstructions) {
+              try {
+                await saveMemory(
+                  conversationId,
+                  instruction.key,
+                  instruction.value,
+                  instruction.category
+                );
+                console.log(`[Memory] Saved: ${instruction.key} = ${instruction.value}`);
+              } catch (error) {
+                console.error('[Memory] Error saving:', error);
+              }
+            }
+          }
+        }
         
         // After streaming is complete, search for product links
         if (brandWebsiteUrl && fullResponse) {
@@ -674,6 +823,29 @@ async function handleAnthropic(
       type: 'enabled',
       budget_tokens: 2000, // Enable extended thinking for Claude with budget
     },
+    tools: [
+      {
+        type: 'web_search_20250305',
+        name: 'web_search',
+        max_uses: 5,
+        // Allow search for brand website and general queries
+        ...(brandWebsiteUrl && {
+          allowed_domains: [
+            new URL(brandWebsiteUrl).hostname,
+            // Allow common e-commerce and product info sites
+            'shopify.com',
+            'amazon.com',
+            'yelp.com',
+            'trustpilot.com',
+          ],
+        }),
+      },
+      {
+        type: 'web_fetch_20250305',
+        name: 'web_fetch',
+        max_uses: 3,
+      },
+    ],
   });
   
   console.log('[Anthropic] Stream received, starting to read...');
@@ -688,6 +860,8 @@ async function handleAnthropic(
         
         let chunkCount = 0;
         let fullResponse = '';
+        let thinkingContent = '';
+        let isInThinkingBlock = false;
         const statusSequence = [
           { threshold: 0, status: 'crafting_subject' },
           { threshold: 5, status: 'writing_hero' },
@@ -700,6 +874,58 @@ async function handleAnthropic(
         
         console.log('[Anthropic] Starting to iterate stream chunks...');
         for await (const chunk of stream) {
+          // Handle thinking block start
+          if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'thinking') {
+            controller.enqueue(encoder.encode('[THINKING:START]'));
+            controller.enqueue(encoder.encode('[STATUS:thinking]'));
+            isInThinkingBlock = true;
+            console.log('[Anthropic] Started thinking block');
+            continue;
+          }
+          
+          // Handle thinking content
+          if (
+            chunk.type === 'content_block_delta' &&
+            chunk.delta.type === 'thinking_delta'
+          ) {
+            const thinkingText = chunk.delta.thinking || '';
+            thinkingContent += thinkingText;
+            controller.enqueue(encoder.encode(`[THINKING:CHUNK]${thinkingText}`));
+            continue;
+          }
+          
+          // Handle thinking block end
+          if (chunk.type === 'content_block_stop' && isInThinkingBlock) {
+            controller.enqueue(encoder.encode('[THINKING:END]'));
+            controller.enqueue(encoder.encode('[STATUS:analyzing_brand]'));
+            isInThinkingBlock = false;
+            console.log(`[Anthropic] Ended thinking block (${thinkingContent.length} chars)`);
+            continue;
+          }
+          
+          // Handle tool use (web search, web fetch)
+          if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'server_tool_use') {
+            const toolName = chunk.content_block.name;
+            console.log(`[Anthropic] Tool use started: ${toolName}`);
+            controller.enqueue(encoder.encode(`[TOOL:${toolName}:START]`));
+            continue;
+          }
+          
+          // Handle web search tool results
+          if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'web_search_tool_result') {
+            console.log('[Anthropic] Web search results received');
+            controller.enqueue(encoder.encode('[TOOL:web_search:RESULTS]'));
+            continue;
+          }
+          
+          // Handle web fetch tool results
+          if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'web_fetch_tool_result') {
+            console.log('[Anthropic] Web fetch results received');
+            controller.enqueue(encoder.encode('[TOOL:web_fetch:RESULTS]'));
+            continue;
+          }
+          
+          // Handle regular text content
           if (
             chunk.type === 'content_block_delta' &&
             chunk.delta.type === 'text_delta'
@@ -724,7 +950,33 @@ async function handleAnthropic(
           }
         }
         
+        if (thinkingContent) {
+          console.log(`[Anthropic] Total thinking content: ${thinkingContent.length} chars`);
+        }
+        
         console.log(`[Anthropic] Stream complete. Total chunks: ${chunkCount}, chars: ${fullResponse.length}`);
+        
+        // Parse and save memory instructions from AI response
+        const conversationId = (globalThis as any).__currentConversationId;
+        if (conversationId && fullResponse) {
+          const memoryInstructions = parseMemoryInstructions(fullResponse);
+          if (memoryInstructions.length > 0) {
+            console.log(`[Anthropic] Found ${memoryInstructions.length} memory instructions`);
+            for (const instruction of memoryInstructions) {
+              try {
+                await saveMemory(
+                  conversationId,
+                  instruction.key,
+                  instruction.value,
+                  instruction.category
+                );
+                console.log(`[Memory] Saved: ${instruction.key} = ${instruction.value}`);
+              } catch (error) {
+                console.error('[Memory] Error saving:', error);
+              }
+            }
+          }
+        }
         
         // After streaming is complete, search for product links
         if (brandWebsiteUrl && fullResponse) {

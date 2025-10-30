@@ -16,6 +16,46 @@ export function Skeleton({ className = '' }: SkeletonProps) {
 }
 
 /**
+ * Skeleton for brand card on home page
+ */
+export function BrandCardSkeleton() {
+  return (
+    <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700 animate-pulse">
+      {/* Header */}
+      <div className="mb-4">
+        <Skeleton className="h-6 w-3/4 mb-2" />
+        <Skeleton className="h-3 w-1/2" />
+      </div>
+      
+      {/* Content */}
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-4 w-4/5" />
+      </div>
+      
+      {/* Arrow indicator */}
+      <div className="absolute bottom-4 right-4">
+        <Skeleton className="h-5 w-5 rounded" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Skeleton grid for multiple brand cards
+ */
+export function BrandGridSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {[...Array(count)].map((_, i) => (
+        <BrandCardSkeleton key={i} />
+      ))}
+    </div>
+  );
+}
+
+/**
  * Skeleton for conversation list item
  */
 export function ConversationSkeleton() {
@@ -155,6 +195,158 @@ export function StreamingSkeleton({ lines = 3 }: { lines?: number }) {
           className={`h-4 ${i === lines - 1 ? 'w-2/3' : 'w-full'}`}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * Skeleton for admin page initial load
+ */
+export function AdminPageSkeleton() {
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 animate-in fade-in duration-300">
+      {/* Header Skeleton */}
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div>
+            <Skeleton className="h-8 w-48 mb-2" />
+            <Skeleton className="h-4 w-32" />
+          </div>
+          <Skeleton className="h-8 w-32 rounded" />
+        </div>
+      </header>
+
+      {/* Main Content Skeleton */}
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left column - Invite form skeleton */}
+          <div className="lg:col-span-1">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700">
+              <Skeleton className="h-6 w-32 mb-4" />
+              <div className="space-y-4">
+                <div>
+                  <Skeleton className="h-4 w-16 mb-2" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+                <div>
+                  <Skeleton className="h-4 w-12 mb-2" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+                <Skeleton className="h-10 w-full rounded-lg" />
+              </div>
+            </div>
+
+            {/* Pending invitations skeleton */}
+            <div className="mt-6 bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700">
+              <Skeleton className="h-6 w-40 mb-4" />
+              <div className="space-y-3">
+                {[...Array(2)].map((_, i) => (
+                  <div key={i} className="p-3 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg">
+                    <Skeleton className="h-4 w-full mb-2" />
+                    <Skeleton className="h-3 w-24 mb-1" />
+                    <Skeleton className="h-3 w-32" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right column - Team members skeleton */}
+          <div className="lg:col-span-2">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700">
+              <Skeleton className="h-6 w-32 mb-6" />
+              <div className="space-y-4">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div className="flex items-center gap-4 flex-1">
+                      <Skeleton className="h-12 w-12 rounded-full" />
+                      <div className="flex-1">
+                        <Skeleton className="h-5 w-40 mb-2" />
+                        <Skeleton className="h-3 w-48" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="h-8 w-24 rounded" />
+                      <Skeleton className="h-8 w-8 rounded" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/**
+ * Comprehensive skeleton for chat page initial load
+ */
+export function ChatPageSkeleton() {
+  return (
+    <div className="flex h-screen bg-[#fcfcfc] dark:bg-gray-950 animate-in fade-in duration-300">
+      {/* Sidebar Skeleton */}
+      <div className="w-80 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+        {/* Sidebar Header */}
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <Skeleton className="h-6 w-32 mb-3" />
+          <Skeleton className="h-10 w-full rounded-lg" />
+        </div>
+        
+        {/* Filter Dropdown */}
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <Skeleton className="h-9 w-full rounded-lg" />
+        </div>
+        
+        {/* Conversation List */}
+        <div className="flex-1 overflow-hidden p-2 space-y-2">
+          {[...Array(5)].map((_, i) => (
+            <ConversationSkeleton key={i} />
+          ))}
+        </div>
+        
+        {/* Sidebar Footer */}
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+          <Skeleton className="h-9 w-full rounded-lg mb-2" />
+          <Skeleton className="h-9 w-full rounded-lg" />
+        </div>
+      </div>
+
+      {/* Main Chat Area Skeleton */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Skeleton className="h-8 w-8 rounded-lg" />
+              <Skeleton className="h-6 w-48" />
+            </div>
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-9 w-32 rounded-lg" />
+              <Skeleton className="h-9 w-9 rounded-lg" />
+            </div>
+          </div>
+        </div>
+
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-4xl mx-auto space-y-6">
+            <StatsSkeleton />
+            <MessageSkeleton isUser />
+            <MessageSkeleton />
+            <MessageSkeleton isUser />
+            <MessageSkeleton />
+          </div>
+        </div>
+
+        {/* Input Area */}
+        <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
+          <div className="max-w-4xl mx-auto">
+            <Skeleton className="h-32 w-full rounded-xl" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

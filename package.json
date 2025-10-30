@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.67.0",
+    "@heroicons/react": "^2.2.0",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.76.1",
+    "@types/react-window": "^1.8.8",
     "next": "16.0.0",
     "next-themes": "^0.4.6",
     "openai": "^6.6.0",
@@ -19,6 +21,7 @@
     "react-dom": "19.2.0",
     "react-hot-toast": "^2.6.0",
     "react-markdown": "^10.1.0",
+    "react-window": "^2.2.2",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {

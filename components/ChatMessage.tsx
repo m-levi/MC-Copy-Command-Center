@@ -6,6 +6,7 @@ import EmailSectionCard, { parseEmailSections } from './EmailSectionCard';
 import MessageEditor from './MessageEditor';
 import EmailRenderer from './EmailRenderer';
 import EmailPreview from './EmailPreview';
+import ThoughtProcess from './ThoughtProcess';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 
@@ -293,6 +294,14 @@ export default function ChatMessage({
                 )}
               </div>
             </div>
+
+            {/* Thought Process - Show if available */}
+            {message.thinking && (
+              <ThoughtProcess 
+                thinking={message.thinking} 
+                isStreaming={false}
+              />
+            )}
 
             {/* Message Content */}
             {isEmailMode && emailSections && showSections ? (

@@ -14,11 +14,13 @@ interface BrandCardProps {
 
 export default function BrandCard({ brand, currentUserId, canManage, onEdit, onDelete }: BrandCardProps) {
   const [showMenu, setShowMenu] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const router = useRouter();
 
   const creatorName = brand.creator?.full_name || brand.creator?.email || 'Unknown';
 
   const handleCardClick = () => {
+    setIsNavigating(true);
     router.push(`/brands/${brand.id}/chat`);
   };
 
@@ -49,7 +51,9 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
   return (
     <div
       onClick={handleCardClick}
-      className="relative bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer p-6 border border-gray-200 dark:border-gray-700 hover:-translate-y-1 group"
+      className={`relative bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer p-6 border border-gray-200 dark:border-gray-700 hover:-translate-y-1 group ${
+        isNavigating ? 'opacity-50 scale-95 pointer-events-none' : ''
+      }`}
     >
       {/* Three-dot menu button - only show if user can manage brands */}
       {canManage && (
@@ -85,6 +89,16 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
           >
             Delete Brand
           </button>
+        </div>
+      )}
+
+      {/* Loading indicator */}
+      {isNavigating && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-gray-800/80 rounded-lg">
+          <div className="flex items-center gap-2">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 dark:border-blue-400"></div>
+            <span className="text-sm text-gray-600 dark:text-gray-400 font-medium">Loading...</span>
+          </div>
         </div>
       )}
 

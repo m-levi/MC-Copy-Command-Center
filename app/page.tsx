@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Brand, Organization, OrganizationRole } from '@/types';
 import BrandCard from '@/components/BrandCard';
 import BrandModal from '@/components/BrandModal';
+import { BrandGridSkeleton } from '@/components/SkeletonLoader';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -196,17 +197,41 @@ export default function HomePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading brands...</p>
-        </div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 animate-in fade-in duration-300">
+        <Toaster position="top-right" />
+        
+        {/* Header Skeleton */}
+        <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div>
+              <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-2"></div>
+              <div className="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="h-10 w-36 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+              <div className="h-8 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+            </div>
+          </div>
+        </header>
+
+        {/* Main content with skeleton */}
+        <main className="max-w-7xl mx-auto px-6 py-8">
+          <div className="mb-8 flex items-center justify-between">
+            <div>
+              <div className="h-9 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-2"></div>
+              <div className="h-5 w-64 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+            </div>
+            <div className="h-12 w-48 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse"></div>
+          </div>
+
+          <BrandGridSkeleton count={6} />
+        </main>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 animate-in fade-in duration-300">
       <Toaster position="top-right" />
       
       {/* Header */}
@@ -281,16 +306,23 @@ export default function HomePage() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {brands.map((brand) => (
-              <BrandCard
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {brands.map((brand, index) => (
+              <div
                 key={brand.id}
-                brand={brand}
-                currentUserId={currentUserId}
-                canManage={canManageBrands}
-                onEdit={handleEditBrand}
-                onDelete={handleDeleteBrand}
-              />
+                style={{
+                  animationDelay: `${index * 50}ms`,
+                }}
+                className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+              >
+                <BrandCard
+                  brand={brand}
+                  currentUserId={currentUserId}
+                  canManage={canManageBrands}
+                  onEdit={handleEditBrand}
+                  onDelete={handleDeleteBrand}
+                />
+              </div>
             ))}
           </div>
         )}

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { OrganizationMember, OrganizationInvite } from '@/types';
 import TeamMemberList from '@/components/TeamMemberList';
 import InviteForm from '@/components/InviteForm';
+import { AdminPageSkeleton } from '@/components/SkeletonLoader';
 import toast, { Toaster } from 'react-hot-toast';
 
 export const dynamic = 'force-dynamic';
@@ -132,30 +133,23 @@ export default function AdminPage() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading admin dashboard...</p>
-        </div>
-      </div>
-    );
+    return <AdminPageSkeleton />;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 animate-in fade-in duration-300">
       <Toaster position="top-right" />
       
       {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Team Management</h1>
-            <p className="text-sm text-gray-600 mt-1">{organizationName}</p>
+            <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Team Management</h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{organizationName}</p>
           </div>
           <button
             onClick={() => router.push('/')}
-            className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
+            className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors cursor-pointer"
           >
             ← Back to Brands
           </button>

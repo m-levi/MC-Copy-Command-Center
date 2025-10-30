@@ -34,12 +34,17 @@ export interface Conversation {
   mode?: ConversationMode; // Optional for backward compatibility
   created_at: string;
   updated_at: string;
+  is_pinned?: boolean;
+  is_archived?: boolean;
+  last_message_preview?: string;
+  last_message_at?: string;
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type AIStatus = 
   | 'idle'
+  | 'thinking'
   | 'analyzing_brand'
   | 'crafting_subject'
   | 'writing_hero'
@@ -81,6 +86,7 @@ export interface Message {
   conversation_id: string;
   role: MessageRole;
   content: string;
+  thinking?: string; // Extended thinking/reasoning content from AI
   created_at: string;
   metadata?: MessageMetadata;
   edited_at?: string;
@@ -196,5 +202,69 @@ export interface UserWithOrganization {
   organization: Organization | null;
   role: OrganizationRole | null;
 }
+
+// Sidebar View Modes
+export type SidebarViewMode = 'list' | 'grid';
+export type FilterType = 'all' | 'mine' | 'person';
+
+// Conversation Status for concurrent AI tracking
+export type ConversationStatus = 'idle' | 'loading' | 'ai_responding' | 'error';
+
+export interface ConversationWithStatus extends Conversation {
+  status?: ConversationStatus;
+  aiProgress?: number; // 0-100 for progress bar
+}
+
+// User Preferences
+export interface UserPreferences {
+  id: string;
+  user_id: string;
+  sidebar_view_mode: SidebarViewMode;
+  sidebar_width: number;
+  default_filter: FilterType;
+  default_filter_person_id?: string;
+  pinned_conversations: string[];
+  archived_conversations: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+// Quick Action Types
+export type ConversationQuickAction = 
+  | 'pin' 
+  | 'unpin' 
+  | 'archive' 
+  | 'unarchive'
+  | 'duplicate' 
+  | 'export' 
+  | 'rename' 
+  | 'delete';
+
+// Conversation Tags
+export interface ConversationTag {
+  id: string;
+  label: string;
+  color: 'blue' | 'purple' | 'pink' | 'green' | 'yellow' | 'red' | 'gray' | 'indigo' | 'cyan' | 'orange';
+}
+
+// Conversation with Extended Metadata
+export interface ConversationWithMetadata extends ConversationWithStatus {
+  tags?: ConversationTag[];
+  messageCount?: number;
+  wordCount?: number;
+  tokensUsed?: number;
+  lastActivityMinutesAgo?: number;
+}
+
+// Sidebar Section Type
+export type SidebarSection = 'pinned' | 'recent' | 'archived' | 'all';
+
+// Sort Options
+export type ConversationSortOption = 
+  | 'last_activity' 
+  | 'created_date' 
+  | 'title' 
+  | 'message_count' 
+  | 'creator';
 
 
