@@ -51,7 +51,7 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
   return (
     <div
       onClick={handleCardClick}
-      className={`relative bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer p-6 border border-gray-200 dark:border-gray-700 hover:-translate-y-1 group ${
+      className={`relative bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-2xl transition-all duration-300 cursor-pointer p-6 border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 hover:-translate-y-2 group ${
         isNavigating ? 'opacity-50 scale-95 pointer-events-none' : ''
       }`}
     >
@@ -103,21 +103,37 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
       )}
 
       {/* Brand content */}
-      <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2 pr-8">
-        {brand.name}
-      </h3>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-        Created by {creatorName}
-      </p>
-      <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3">
+      <div className="mb-4">
+        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-2 pr-8 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+          {brand.name}
+        </h3>
+        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-3">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+          <span>{creatorName}</span>
+        </div>
+      </div>
+      
+      <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3 leading-relaxed mb-4">
         {truncateText(brand.brand_details || 'No details provided', 150)}
       </p>
       
-      {/* Hover indicator */}
-      <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-        <svg className="w-5 h-5 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-        </svg>
+      {/* Footer with metadata */}
+      <div className="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-gray-700">
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          {new Date(brand.created_at).toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric', 
+            year: 'numeric' 
+          })}
+        </div>
+        {/* Hover indicator */}
+        <div className="opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:translate-x-1">
+          <svg className="w-5 h-5 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+          </svg>
+        </div>
       </div>
     </div>
   );

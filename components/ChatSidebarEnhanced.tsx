@@ -1,7 +1,7 @@
 'use client';
 
 import { ConversationWithStatus, OrganizationMember, SidebarViewMode, ConversationQuickAction } from '@/types';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import ConversationFilterDropdown, { FilterType } from './ConversationFilterDropdown';
 import ConversationSearch from './ConversationSearch';
 import ConversationCard from './ConversationCard';
@@ -64,20 +64,20 @@ export default function ChatSidebarEnhanced({
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(600);
 
-  const handleDelete = (e: React.MouseEvent, conversationId: string) => {
+  const handleDelete = useCallback((e: React.MouseEvent, conversationId: string) => {
     e.stopPropagation();
     if (confirm('Are you sure you want to delete this conversation?')) {
       onDeleteConversation(conversationId);
     }
-  };
+  }, [onDeleteConversation]);
 
-  const handleStartRename = (e: React.MouseEvent, conversation: ConversationWithStatus) => {
+  const handleStartRename = useCallback((e: React.MouseEvent, conversation: ConversationWithStatus) => {
     e.stopPropagation();
     setEditingId(conversation.id);
     setEditingTitle(conversation.title || 'New Conversation');
-  };
+  }, []);
 
-  const handleSaveRename = (e: React.FormEvent, conversationId: string) => {
+  const handleSaveRename = useCallback((e: React.FormEvent, conversationId: string) => {
     e.preventDefault();
     e.stopPropagation();
     
@@ -87,13 +87,13 @@ export default function ChatSidebarEnhanced({
     }
     setEditingId(null);
     setEditingTitle('');
-  };
+  }, [editingTitle, onRenameConversation]);
 
-  const handleCancelRename = (e: React.MouseEvent) => {
+  const handleCancelRename = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingId(null);
     setEditingTitle('');
-  };
+  }, []);
 
   // Resize handlers
   const startResizing = () => {
@@ -142,29 +142,33 @@ export default function ChatSidebarEnhanced({
     return () => window.removeEventListener('resize', calculateHeight);
   }, [searchQuery]);
 
-  // Filter conversations based on search
-  const filteredConversations = conversations.filter(conv => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      conv.title?.toLowerCase().includes(query) ||
-      conv.last_message_preview?.toLowerCase().includes(query) ||
-      conv.created_by_name?.toLowerCase().includes(query)
-    );
-  });
+  // Memoize filtered conversations to avoid unnecessary re-filters
+  const filteredConversations = useMemo(() => {
+    return conversations.filter(conv => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      return (
+        conv.title?.toLowerCase().includes(query) ||
+        conv.last_message_preview?.toLowerCase().includes(query) ||
+        conv.created_by_name?.toLowerCase().includes(query)
+      );
+    });
+  }, [conversations, searchQuery]);
 
-  // Separate pinned conversations
-  const pinnedConversations = filteredConversations.filter(c => pinnedConversationIds.includes(c.id));
-  const unpinnedConversations = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
-  const orderedConversations = [...pinnedConversations, ...unpinnedConversations];
+  // Memoize ordered conversations
+  const orderedConversations = useMemo(() => {
+    const pinnedConversations = filteredConversations.filter(c => pinnedConversationIds.includes(c.id));
+    const unpinnedConversations = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
+    return [...pinnedConversations, ...unpinnedConversations];
+  }, [filteredConversations, pinnedConversationIds]);
 
   // Close mobile sidebar when conversation is selected on mobile
-  const handleMobileSelectConversation = (conversationId: string) => {
+  const handleMobileSelectConversation = useCallback((conversationId: string) => {
     onSelectConversation(conversationId);
     if (onMobileToggle && window.innerWidth < 1024) {
       onMobileToggle(false);
     }
-  };
+  }, [onSelectConversation, onMobileToggle]);
 
   // Close mobile sidebar on outside click
   useEffect(() => {
@@ -328,11 +332,13 @@ export default function ChatSidebarEnhanced({
               editingId={editingId}
               editingTitle={editingTitle}
               onSelect={handleMobileSelectConversation}
+              onSelectChild={onSelectConversation}
               onPrefetch={onPrefetchConversation}
               onStartRename={handleStartRename}
               onSaveRename={handleSaveRename}
               onCancelRename={handleCancelRename}
               onDelete={handleDelete}
+              onQuickAction={onQuickAction}
               setEditingTitle={setEditingTitle}
               height={listHeight}
             />
@@ -354,7 +360,9 @@ export default function ChatSidebarEnhanced({
                       conversation={conversation}
                       isActive={conversation.id === currentConversationId}
                       isPinned={pinnedConversationIds.includes(conversation.id)}
+                      currentConversationId={currentConversationId}
                       onSelect={() => handleMobileSelectConversation(conversation.id)}
+                      onSelectChild={onSelectConversation}
                       onAction={(action) => onQuickAction(conversation.id, action)}
                       onPrefetch={() => onPrefetchConversation?.(conversation.id)}
                     />

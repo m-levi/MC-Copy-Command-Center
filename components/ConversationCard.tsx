@@ -1,13 +1,16 @@
 'use client';
 
-import { ConversationWithStatus, ConversationQuickAction } from '@/types';
+import { ConversationWithStatus, ConversationQuickAction, Conversation } from '@/types';
 import { useState, useRef, useEffect } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 interface ConversationCardProps {
   conversation: ConversationWithStatus;
   isActive: boolean;
   isPinned: boolean;
+  currentConversationId?: string | null; // To check if a child is active
   onSelect: () => void;
+  onSelectChild?: (childId: string) => void;
   onAction: (action: ConversationQuickAction) => void;
   onPrefetch?: () => void;
 }
@@ -16,12 +19,80 @@ export default function ConversationCard({
   conversation,
   isActive,
   isPinned,
+  currentConversationId = null,
   onSelect,
+  onSelectChild,
   onAction,
   onPrefetch
 }: ConversationCardProps) {
   const [showActions, setShowActions] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [flowChildren, setFlowChildren] = useState<Conversation[]>([]);
+  const [loadingChildren, setLoadingChildren] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  const supabase = createClient();
+
+  // Debug logging
+  useEffect(() => {
+    if (conversation.is_flow) {
+      console.log('[ConversationCard] Flow conversation rendered:', {
+        id: conversation.id,
+        title: conversation.title,
+        is_flow: conversation.is_flow,
+        flow_type: conversation.flow_type,
+        isExpanded,
+        childrenCount: flowChildren.length,
+        loadingChildren
+      });
+    }
+  }, [conversation.is_flow, isExpanded, flowChildren.length, loadingChildren]);
+
+  // Auto-expand if active flow or if a child is active
+  useEffect(() => {
+    const isChildActive = flowChildren.some(c => c.id === currentConversationId);
+    if ((isActive || isChildActive) && conversation.is_flow) {
+      setIsExpanded(true);
+    }
+  }, [isActive, conversation.is_flow, currentConversationId, flowChildren]);
+
+  // Load children when expanded
+  useEffect(() => {
+    if (isExpanded && conversation.is_flow && flowChildren.length === 0 && !loadingChildren) {
+      loadFlowChildren();
+    }
+  }, [isExpanded, conversation.is_flow]);
+
+  const loadFlowChildren = async () => {
+    if (!conversation.is_flow) return;
+    
+    console.log(`[ConversationCard] Loading children for flow:`, conversation.id);
+    setLoadingChildren(true);
+    try {
+      const { data } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('parent_conversation_id', conversation.id)
+        .order('flow_sequence_order', { ascending: true });
+
+      console.log(`[ConversationCard] Loaded ${data?.length || 0} children for flow ${conversation.id}`);
+      if (data) {
+        setFlowChildren(data);
+      }
+    } catch (error) {
+      console.error('Error loading flow children:', error);
+    } finally {
+      setLoadingChildren(false);
+    }
+  };
+
+  const handleToggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    console.log('[ConversationCard] Toggle expand clicked for', conversation.id, 'Current:', isExpanded);
+    if (conversation.is_flow) {
+      setIsExpanded(!isExpanded);
+      console.log('[ConversationCard] Setting expanded to:', !isExpanded);
+    }
+  };
 
   // Get status badge
   const getStatusBadge = () => {
@@ -107,7 +178,7 @@ export default function ConversationCard({
 
         {/* Mode badge */}
         <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm rounded-full text-[10px] font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
-          {conversation.mode === 'planning' ? '📋 Plan' : '✉️ Write'}
+          {conversation.is_flow ? '🔄 Flow' : conversation.mode === 'planning' ? '📋 Plan' : '✉️ Write'}
         </div>
       </div>
 
@@ -119,6 +190,41 @@ export default function ConversationCard({
         }`}>
           {conversation.title || 'New Conversation'}
         </h3>
+
+        {/* Flow info for parent flows */}
+        {conversation.is_flow && (
+          <div className={`text-xs mb-2 ${
+            isActive ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'
+          }`}>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span className="font-medium">
+                  {conversation.flow_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </span>
+              </div>
+              <button
+                onClick={handleToggleExpand}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-all ${
+                  isActive ? 'text-blue-100 bg-blue-500/20' : 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700'
+                }`}
+                title={isExpanded ? 'Collapse emails' : 'Show emails'}
+              >
+                <span className="font-semibold">{flowChildren.length || 0}</span>
+                <svg 
+                  className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Preview */}
         {conversation.last_message_preview && (
@@ -221,6 +327,68 @@ export default function ConversationCard({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
+        </div>
+      )}
+
+      {/* Child Emails - Expandable List */}
+      {isExpanded && conversation.is_flow && (
+        <div className="px-3 pb-2 pt-1">
+          <div className="ml-2 pl-3 border-l-2 border-blue-400 dark:border-blue-600 space-y-1.5 py-1">
+            {loadingChildren ? (
+              <div className="p-3 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <svg className="animate-spin h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Loading emails...</span>
+              </div>
+            ) : flowChildren.length === 0 ? (
+              <div className="p-3 text-xs text-gray-500 dark:text-gray-400 italic bg-gray-50 dark:bg-gray-800 rounded-lg text-center">
+                No emails generated yet
+              </div>
+            ) : (
+              flowChildren.map((child) => (
+              <button
+                key={child.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onSelectChild) {
+                    console.log('[ConversationCard] Selecting child:', child.id);
+                    onSelectChild(child.id);
+                  }
+                }}
+                className={`
+                  w-full text-left p-2.5 rounded-lg transition-all duration-150 flex items-center gap-2.5 border
+                  ${child.id === currentConversationId
+                    ? 'bg-blue-600 dark:bg-blue-700 text-white shadow-md border-blue-500 dark:border-blue-600 scale-[1.02]'
+                    : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-sm'
+                  }
+                `}
+              >
+                {/* Sequence number badge */}
+                <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold ${
+                  child.id === currentConversationId 
+                    ? 'bg-blue-500 dark:bg-blue-600 text-white' 
+                    : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                }`}>
+                  {child.flow_sequence_order}
+                </div>
+                
+                {/* Email title */}
+                <span className="text-xs font-medium flex-1 truncate">
+                  {child.flow_email_title || `Email ${child.flow_sequence_order}`}
+                </span>
+
+                {/* Indicator */}
+                <svg className={`w-3.5 h-3.5 flex-shrink-0 ${
+                  child.id === currentConversationId ? 'text-white' : 'text-gray-400'
+                }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>

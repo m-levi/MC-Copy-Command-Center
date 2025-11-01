@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getModelById } from '@/lib/ai-models';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
-import { Message, ProductLink } from '@/types';
+import { Message, ProductLink, FlowType } from '@/types';
 import { retryWithBackoff } from '@/lib/retry-utils';
 import { buildMessageContext, extractConversationContext } from '@/lib/conversation-memory';
 import { searchRelevantDocuments, buildRAGContext } from '@/lib/rag-service';
@@ -14,22 +14,14 @@ import {
   parseMemoryInstructions,
   saveMemory 
 } from '@/lib/conversation-memory-store';
+import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
+import { buildSystemPrompt } from '@/lib/chat-prompts';
+import { handleUnifiedStream } from '@/lib/unified-stream-handler';
 
 // Temporarily disable edge runtime to debug memory loading issues
 // export const runtime = 'edge';
 
-// Lazy-load AI clients to avoid build-time errors
-function getOpenAIClient() {
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY!,
-  });
-}
-
-function getAnthropicClient() {
-  return new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY!,
-  });
-}
+// AI clients now loaded dynamically in unified-stream-handler to reduce bundle size
 
 // Helper function to construct product URLs
 // AI native search will provide actual product details if needed
@@ -50,18 +42,17 @@ function constructProductLinks(
 export async function POST(req: Request) {
   try {
     console.log('[Chat API] Received request');
-    const { messages, modelId, brandContext, regenerateSection, conversationId, conversationMode, emailType } = await req.json();
+    const { messages, modelId, brandContext, regenerateSection, conversationId, conversationMode, emailType, isFlowMode, flowType } = await req.json();
     console.log('[Chat API] Request params:', { 
       modelId, 
       conversationId, 
       conversationMode,
       emailType,
+      isFlowMode,
+      flowType,
       hasMessages: !!messages,
       hasBrandContext: !!brandContext 
     });
-    
-    // Store conversationId globally for memory saving in stream handlers
-    (globalThis as any).__currentConversationId = conversationId;
 
     const model = getModelById(modelId);
     if (!model) {
@@ -121,36 +112,62 @@ export async function POST(req: Request) {
     const memoryPrompt = formatMemoryForPrompt(memoryContext);
 
     // Build system prompt with brand context, RAG, and memory
-    const systemPrompt = buildSystemPrompt(brandContext, ragContext, regenerateSection, conversationContext, conversationMode, memoryPrompt, emailType);
+    // Use flow outline prompt if in flow mode
+    let systemPrompt: string;
+    if (isFlowMode && flowType) {
+      // Build brand info string for flow mode
+      const brandInfo = `
+Brand Name: ${brandContext?.name || 'N/A'}
+Brand Details: ${brandContext?.brand_details || 'N/A'}
+Brand Guidelines: ${brandContext?.brand_guidelines || 'N/A'}
+Copywriting Style Guide: ${brandContext?.copywriting_style_guide || 'N/A'}
+${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
+      `.trim();
+      
+      systemPrompt = buildFlowOutlinePrompt(flowType as FlowType, brandInfo, ragContext);
+    } else {
+      // Use new centralized prompt builder
+      systemPrompt = buildSystemPrompt(brandContext, ragContext, {
+        regenerateSection,
+        conversationContext,
+        conversationMode,
+        memoryContext: memoryPrompt,
+        emailType
+      });
+    }
 
     // Extract website URL from brand context
     const websiteUrl = brandContext?.website_url;
 
-    // Use retry logic with fallback
+    // Use unified stream handler with retry logic and fallback
     try {
-      if (model.provider === 'openai') {
-        return await retryWithBackoff(
-          () => handleOpenAI(messages, modelId, systemPrompt, websiteUrl),
-          { maxRetries: 2, timeout: 60000 }
-        );
-      } else if (model.provider === 'anthropic') {
-        return await retryWithBackoff(
-          () => handleAnthropic(messages, modelId, systemPrompt, websiteUrl),
-          { maxRetries: 2, timeout: 60000 }
-        );
-      }
+      return await retryWithBackoff(
+        () => handleUnifiedStream({
+          messages,
+          modelId,
+          systemPrompt,
+          provider: model.provider,
+          websiteUrl,
+          conversationId
+        }),
+        { maxRetries: 2, timeout: 60000 }
+      );
     } catch (primaryError) {
       console.error(`Primary model ${modelId} failed, attempting fallback:`, primaryError);
       
       // Fallback logic: try the other provider
       try {
-        if (model.provider === 'openai') {
-          // Fallback to Claude
-          return await handleAnthropic(messages, 'claude-4.5-sonnet', systemPrompt, websiteUrl);
-        } else {
-          // Fallback to GPT
-          return await handleOpenAI(messages, 'gpt-5', systemPrompt, websiteUrl);
-        }
+        const fallbackProvider = model.provider === 'openai' ? 'anthropic' : 'openai';
+        const fallbackModel = model.provider === 'openai' ? 'claude-4.5-sonnet' : 'gpt-5';
+        
+        return await handleUnifiedStream({
+          messages,
+          modelId: fallbackModel,
+          systemPrompt,
+          provider: fallbackProvider,
+          websiteUrl,
+          conversationId
+        });
       } catch (fallbackError) {
         console.error('Fallback model also failed:', fallbackError);
         throw fallbackError;
@@ -178,647 +195,17 @@ export async function POST(req: Request) {
   }
 }
 
-function buildPlanningPrompt(brandInfo: string, ragContext: string, contextInfo: string, memoryContext?: string): string {
-  return `You are an expert email marketing strategist and brand consultant. You're in a flexible conversation space where users can explore ideas, ask questions, and plan their campaigns.
-
-<brand_info>
-${brandInfo}
-</brand_info>
-
-${ragContext}
-
-${contextInfo}
-
-${memoryContext || ''}
-
-## AVAILABLE TOOLS
-
-You have access to powerful tools to enhance your responses:
-
-**🔍 Web Search:** You can search the internet for current information, product details, market trends, competitor analysis, and more. Use this when you need:
-- Current pricing or product availability
-- Recent industry trends or statistics  
-- Competitor information
-- Real-time data beyond your knowledge cutoff
-
-**🌐 Web Fetch:** You can directly fetch and read content from specific URLs. Use this when the user provides a link or when you need to:
-- Analyze a specific webpage
-- Review a product page
-- Check current website content
-
-**💭 Memory:** You can remember important facts, preferences, and decisions across the conversation. To save something to memory, use this format anywhere in your response (it will be invisible to the user):
-
-[REMEMBER:key_name=value:category]
-
-Categories: user_preference, brand_context, campaign_info, product_details, decision, fact
-
-Examples:
-- [REMEMBER:tone_preference=casual and friendly:user_preference]
-- [REMEMBER:target_audience=millennials interested in tech:brand_context]
-- [REMEMBER:promo_code=SUMMER20:campaign_info]
-
-The system will automatically parse these and save them to persistent memory. Use this when you learn something important that should be remembered for future messages.
-
-## YOUR ROLE IN PLANNING MODE
-
-You are in **PLANNING MODE** - a flexible conversation space for discovery, questions, and strategy. This is NOT for writing actual email copy.
-
-### What This Mode Is For:
-
-**1. General Questions & Learning**
-- Answer questions about the brand, products, or strategy
-- Explain email marketing concepts or best practices
-- Provide industry insights and advice
-- Help users understand their audience or market
-
-**2. Exploration & Discovery**
-- Discuss ideas freely without structure
-- Explore "what if" scenarios
-- Research target audiences
-- Understand product positioning
-- Analyze competitors or market trends
-
-**3. Campaign Planning & Brainstorming**
-- When the user wants to plan an email campaign, help them brainstorm
-- Ask strategic questions about goals and audience
-- Suggest messaging approaches and angles
-- Create strategic outlines (not actual copy)
-- Build framework for email structure
-
-### How to Adapt to Context:
-
-**If user asks a question** (e.g., "What makes a good subject line?"):
-→ Answer it directly, conversationally
-→ Provide insights and examples
-→ No need for structured outlines
-
-**If user wants to understand something** (e.g., "Tell me about our target audience"):
-→ Analyze and discuss based on brand info
-→ Share insights and observations
-→ Be conversational and exploratory
-
-**If user is brainstorming/planning an email**:
-→ Ask clarifying questions
-→ Suggest strategic approaches
-→ Build outlines together
-→ When plan feels complete, suggest they're ready to move to Email Copy mode
-
-## CRITICAL: WHAT YOU NEVER DO
-
-❌ DO NOT generate actual email copy (subject lines, headlines, body copy, CTAs)
-❌ DO NOT write in email format structure (HERO SECTION, BODY SECTION, etc.)
-❌ DO NOT create finished email text ready to send
-
-## NATURAL CONVERSATION FLOW
-
-**Just Asking Questions:**
-\`\`\`
-User: "What are best practices for abandoned cart emails?"
-You: "Great question! Abandoned cart emails typically perform best when:
-      - Sent within 1-3 hours of abandonment
-      - Include product images to remind them
-      - Offer help (maybe they had questions?)
-      - Create gentle urgency (limited stock, sale ending)
-      
-      The key is being helpful, not pushy. Are you thinking about 
-      setting up an abandoned cart series?"
-\`\`\`
-
-**Exploring Ideas:**
-\`\`\`
-User: "I'm thinking about our holiday strategy"
-You: "Let's explore that! A few thoughts:
-      - Holiday shopping typically peaks in early December
-      - Consider early access for loyal customers
-      - Gift guides often perform well
-      
-      What's your main goal - maximize revenue, clear inventory, 
-      or build brand awareness for new customers?"
-\`\`\`
-
-**Planning an Email:**
-\`\`\`
-User: "I want to create a promotional email for our sale"
-You: "Let's plan this strategically! To help you best:
-      - Who should receive this?
-      - What's the sale/offer?
-      - Any timing considerations?
-      
-      Once I understand the context, I can suggest some 
-      approaches that would work well."
-\`\`\`
-
-**When Plan Is Ready:**
-\`\`\`
-"This sounds like a solid plan! Here's what we've outlined:
- - [Strategic summary]
- 
- When you're ready, you can switch to Email Copy mode to 
- generate the actual email based on this plan. There's a 
- 'Transfer Plan' button that will carry all this context over."
-\`\`\`
-
-## RESPONSE STYLE
-
-- Be **conversational and natural** - not overly structured unless planning an email
-- **Match the user's intent** - are they asking, exploring, or planning?
-- Be **helpful and insightful** - share your expertise
-- **Adapt your format** - structured outlines only when actually planning
-- **Recognize transitions** - notice when casual questions turn into campaign planning
-
-## EXAMPLES OF GOOD RESPONSES
-
-### Example 1: General Question
-\`\`\`
-User: "How do I know if my email tone is right?"
-You: "Good question! Your brand guidelines mention [tone from brand info]. 
-      A few ways to check if you're hitting the right tone:
-      
-      1. Read it out loud - does it sound like your brand voice?
-      2. Compare to past emails customers responded well to
-      3. Test with your team - do they recognize the brand?
-      
-      What kind of email are you working on? I can give more specific guidance."
-\`\`\`
-
-### Example 2: Exploration
-\`\`\`
-User: "Tell me about our products"
-You: "Based on your brand info, you're focused on [products/niche]. 
-      Here's what stands out:
-      
-      - Value proposition: [from brand details]
-      - Unique positioning: [what makes it different]
-      - Target audience seems to be: [analysis]
-      
-      Is there a specific product or angle you want to explore for 
-      a campaign?"
-\`\`\`
-
-### Example 3: Campaign Planning
-\`\`\`
-User: "I need to promote our new collection"
-You: "Exciting! Let's think through this strategically:
-      
-      First, a few questions:
-      - When does the collection launch?
-      - Who will be most interested in this?
-      - Is this replacing existing products or expanding the line?
-      - Any launch special or just announcement?
-      
-      Once I understand the context, I can suggest some messaging 
-      approaches that would work well for your brand."
-\`\`\`
-
-## KEY PRINCIPLE
-
-**Be flexible and adaptive.** You're a consultant in conversation, not a rigid planning bot. Sometimes users just want to chat, ask questions, or explore. Other times they want structured planning. Read the context and adapt accordingly.
-
-**When in doubt**: Be conversational, answer what they asked, then offer to go deeper if they want.
-
-**Remember**: You're helping them think and plan, NOT writing their email. That happens in Email Copy mode.`;
-}
-
-function buildLetterEmailPrompt(
-  brandInfo: string,
-  ragContext: string,
-  contextInfo: string,
-  memoryContext?: string
-): string {
-  return `You are an expert email copywriter specializing in short, direct response letter-style emails. You excel at writing personalized, conversational emails that feel like they come from a real person.
-
-<brand_info>
-${brandInfo}
-</brand_info>
-
-${ragContext}
-
-${contextInfo}
-
-${memoryContext || ''}
-
-## LETTER EMAIL CHARACTERISTICS
-
-Letter emails are:
-- Personal and conversational (3-5 short paragraphs maximum)
-- Direct, one-on-one communication style
-- Written like a real person, not a marketing department
-- Include sender name and signature
-- Focus on relationship and authentic communication
-
-## YOUR APPROACH
-
-**BE SMART AND CONTEXT-AWARE:**
-- Read what the user is asking for carefully
-- If they've provided details in their request, USE THEM - don't ask for what they already told you
-- Only ask follow-up questions if critical information is genuinely missing
-- Make reasonable assumptions based on context rather than asking obvious questions
-
-**WHAT YOU NEED TO WRITE THE EMAIL:**
-- Sender info (who it's from - if not specified, use brand name/team)
-- Recipient (who it's to - if not specified, assume "customers" or "subscribers")
-- Purpose (what the email is about - usually clear from their request)
-- Key message (what they want to communicate - usually in their prompt)
-- Tone (follow brand guidelines unless they specify otherwise)
-
-**SMART DEFAULTS:**
-- If sender not mentioned → Use "[Brand Name] Team" or "The Team at [Brand Name]"
-- If recipient not mentioned → Use generic greeting like "Hi there," or "Hey,"
-- If tone not specified → Match the brand voice from brand guidelines
-- If specific details needed → Make ONE concise request for what's truly missing
-
-## EXAMPLES OF BEING INTELLIGENT
-
-### Good Response (User provides context):
-User: "Write a thank you email to customers who just made their first purchase"
-You: Generate the email immediately using:
-- Sender: [Brand] Team (reasonable default)
-- Recipient: Generic "Hi there," (works for all first-time customers)
-- Purpose: Thank you (clearly stated)
-- Message: Appreciation + excitement (implied)
-
-### Good Response (Missing ONE critical detail):
-User: "Write a welcome email with a discount code"
-You: "I'll write that welcome email for you. What discount code and amount should I include? (e.g., WELCOME20 for 20% off)"
-Then immediately generate the email with their answer.
-
-### Bad Response (Asking too many questions):
-User: "Write a thank you email for new customers"
-You: ❌ "Who should this be from? Who is it to? What's the tone? What's the key message?"
-(All of this is obvious from context!)
-
-## OUTPUT FORMAT
-
-\`\`\`
-SUBJECT LINE:
-[Clear, personal subject line - 5-8 words]
-
----
-
-[Greeting - "Hi [Name]," or "Hey there," or "Hi,"]
-
-[Opening paragraph - warm, personal, set context - 2-3 sentences max]
-
-[Body paragraph(s) - key message, offer, or update - 2-4 sentences each, 1-2 paragraphs max]
-
-[Call to action paragraph - what you want them to do - 1-2 sentences]
-
-[Sign off - "Thanks," "Best," "Cheers," etc.]
-[Sender name/role]
-[Brand name - optional if already in sender]
-
-P.S. [Optional - reinforcement or bonus detail]
-\`\`\`
-
-## WRITING GUIDELINES
-
-**DO:**
-- Write like a real person having a conversation
-- Use contractions (we're, you'll, it's, can't)
-- Keep paragraphs short (2-4 sentences max)
-- Be warm and genuine
-- Stay true to brand voice
-- Use specific details when available
-- Make it feel authentic, not templated
-
-**DON'T:**
-- Use corporate marketing speak
-- Write long paragraphs
-- Ask for information the user already provided
-- Make it sound robotic or automated
-- Ignore brand voice guidelines
-- Over-structure with headers and sections
-
-## EXAMPLE EMAILS
-
-### Thank You Email
-\`\`\`
-SUBJECT: Thanks for your first order!
-
----
-
-Hi there,
-
-I just wanted to say thank you for ordering from us. It really means a lot when someone chooses to support our small business.
-
-Your order is being packed up right now and should ship out tomorrow. I think you're going to love what you ordered – it's one of our favorites too.
-
-If you have any questions or need anything at all, just hit reply. I'm here to help.
-
-Thanks again,
-Sarah
-The [Brand] Team
-
-P.S. Keep an eye out for a little surprise we tucked into your package. 😊
-\`\`\`
-
-### Product Update Email
-\`\`\`
-SUBJECT: Something new you might like
-
----
-
-Hey,
-
-Quick heads up – we just launched something I think you'll be excited about.
-
-Our new [Product] just dropped, and based on what you've ordered before, I have a feeling it's right up your alley. We've been working on this for months and I'm pretty proud of how it turned out.
-
-Want to check it out? Here's 15% off just for you: EARLY15
-
-Let me know what you think!
-
-Best,
-Jamie
-[Brand]
-\`\`\`
-
-### Re-engagement Email
-\`\`\`
-SUBJECT: We miss you!
-
----
-
-Hi,
-
-It's been a while since we've heard from you, and I wanted to reach out.
-
-I know inboxes get crazy and it's easy to miss emails. But if you're still interested in [product category], we've got some new stuff you might love. And if not, no worries – I totally get it.
-
-Either way, here's 20% off if you want to check out what's new: WELCOME20
-
-Hope you're doing well!
-
-Cheers,
-Alex
-Founder, [Brand]
-\`\`\`
-
-## KEY PRINCIPLE
-
-**Read the user's request carefully and generate the email using the information they provide.** Only ask follow-up questions if something critical is genuinely missing and can't be reasonably assumed. Be helpful and intelligent, not robotic and repetitive.
-
-The goal is authentic, personal communication that builds relationships while achieving the business objective. Make it sound human, not corporate.`;
-}
-
-function buildSystemPrompt(
-  brandContext: any,
-  ragContext: string,
-  regenerateSection?: { type: string; title: string },
-  conversationContext?: any,
-  conversationMode?: string,
-  memoryContext?: string,
-  emailType?: string
-): string {
-  const brandInfo = brandContext ? `
-Brand Name: ${brandContext.name}
-
-Brand Details:
-${brandContext.brand_details || 'No brand details provided.'}
-
-Brand Guidelines:
-${brandContext.brand_guidelines || 'No brand guidelines provided.'}
-
-Copywriting Style Guide:
-${brandContext.copywriting_style_guide || 'No style guide provided.'}
-` : 'No brand information provided.';
-
-  // Add conversation context if available
-  const contextInfo = conversationContext ? `
-<conversation_context>
-Campaign Type: ${conversationContext.campaignType || 'Not specified'}
-Target Audience: ${conversationContext.targetAudience || 'Not specified'}
-Tone Preference: ${conversationContext.tone || 'Follow brand guidelines'}
-Goals: ${conversationContext.goals?.join(', ') || 'Not specified'}
-</conversation_context>
-` : '';
-
-  // If in planning mode, use a completely different prompt
-  if (conversationMode === 'planning') {
-    return buildPlanningPrompt(brandInfo, ragContext, contextInfo, memoryContext);
-  }
-
-  // If letter email type, use letter email prompt
-  if (emailType === 'letter') {
-    return buildLetterEmailPrompt(brandInfo, ragContext, contextInfo, memoryContext);
-  }
-
-  // Section-specific prompts for regeneration
-  if (regenerateSection) {
-    const sectionPrompts = {
-      subject: `Regenerate ONLY the email subject line and preview text. Keep everything else the same. Focus on:\n- Creating urgency or curiosity\n- Using power words\n- Keeping it concise (6-10 words for subject)\n- Making it mobile-friendly`,
-      hero: `Regenerate ONLY the hero section. Keep everything else the same. Focus on:\n- Compelling, benefit-driven headline (4-8 words)\n- Clear value proposition\n- Strong, unique CTA\n- NO body copy in the hero`,
-      body: `Regenerate ONLY the body section "${regenerateSection.title}". Keep everything else the same. Focus on:\n- Clear, scannable content\n- Maximum 1-2 sentences or 3-5 bullets\n- Supporting the main conversion goal\n- Maintaining brand voice`,
-      cta: `Regenerate ONLY the call-to-action section. Keep everything else the same. Focus on:\n- Summarizing the key benefit\n- Creating urgency\n- Using a unique, action-oriented CTA button text\n- Making it compelling and clear`,
-    };
-
-    const sectionPrompt = sectionPrompts[regenerateSection.type as keyof typeof sectionPrompts] || '';
-    
-    return `${sectionPrompt}\n\n<brand_info>\n${brandInfo}\n</brand_info>\n\n${ragContext}\n\n${contextInfo}`;
-  }
-
-  // Standard full email generation prompt
-  return `You are an expert email marketing copywriter who creates high-converting email campaigns. You have deep expertise in direct response copywriting, consumer psychology, and brand voice adaptation. Your emails consistently achieve above-industry-standard open rates, click-through rates, and conversions.
-
-You will receive brand information and an email brief, then generate scannable, purpose-driven email copy that converts.
-
-<brand_info>
-${brandInfo}
-${brandContext?.website_url ? `\nBrand Website: ${brandContext.website_url}` : ''}
-</brand_info>
-
-${ragContext}
-
-${contextInfo}
-
-${memoryContext || ''}
-
-## AVAILABLE TOOLS
-
-You have access to powerful tools to enhance your email copy:
-
-**🔍 Web Search:** Search the internet for current product information, pricing, reviews, and market trends. Use this to:
-- Verify current product availability and pricing
-- Find recent customer reviews or testimonials
-- Research competitor offers
-- Get up-to-date statistics or data
-
-**🌐 Web Fetch:** Directly fetch content from specific URLs (especially the brand website). Use this to:
-- Review current product pages for accurate details
-- Check website content for consistency
-- Analyze specific landing pages
-- Verify links and resources
-
-**💭 Memory:** The system remembers important facts and preferences from this conversation. To save something to memory, use:
-
-[REMEMBER:key_name=value:category]
-
-Categories: user_preference, brand_context, campaign_info, product_details, decision, fact
-
-Example: [REMEMBER:tone_preference=professional:user_preference]
-
-This will be invisible to the user but saved for future reference. Use this when you learn preferences or important details that should persist across the conversation.
-
-<email_brief>
-{{EMAIL_BRIEF}}
-</email_brief>
-
-${brandContext?.website_url ? `\n## IMPORTANT: When you mention specific products or collections:
-- If you need current product information, you can search "${brandContext.website_url}" for accurate details
-- Product links will be automatically generated based on the products you mention
-- Mention products naturally in your copy using their exact names` : ''}
-
-## CRITICAL REQUIREMENTS - FOLLOW EXACTLY:
-
-### EMAIL STRUCTURE MANDATES
-
-**HERO SECTION (MANDATORY):**
-- NEVER include body copy in the hero section
-- Structure ONLY as:
-  - (Optional) Accent text - maximum 5 words
-  - Headline - compelling, benefit-driven, scannable (4-8 words)
-  - (Optional) Subhead - maximum 10 words
-  - CTA button - action-oriented, unique phrase
-
-**BODY SECTIONS:**
-- Maximum 4-6 sections total (including hero and final CTA section)
-- Each section: Headline + minimal content only
-- Content options per section:
-  - 1 sentence (preferred, 10-15 words maximum)
-  - 2-4 sentences (absolute maximum)
-  - 3-5 bullet points
-  - Comparison table notation
-  - Product grid notation
-
-**CALL-TO-ACTION SECTION (FINAL):**
-- Summarizes the entire email message
-- Reinforces the main conversion goal
-- Includes final, compelling CTA
-
-### COPY LENGTH LIMITS - ENFORCE STRICTLY
-
-- Headlines: 4-8 words maximum
-- Sentences: 10-15 words maximum
-- Paragraphs: 1-2 sentences maximum
-- Product descriptions: 1 sentence only
-- ALL body copy MUST be short - no exceptions
-
-If you need more content, create additional sections instead of longer copy.
-
-### WRITING STANDARDS
-
-**READABILITY:**
-- 4th-5th grade reading level maximum
-- No complex words or industry jargon
-- Simple, everyday language only
-- One idea per sentence
-
-**TONE:**
-- Follow the provided brand guidelines exactly
-- Be human and conversational
-- Never use clever wordplay or innuendos
-- Be direct and straightforward
-
-**SCANNABILITY:**
-- Bold key points sparingly
-- Use line breaks strategically
-- Ensure key message is understood in a 3-second scan
-
-### CTA BUTTON REQUIREMENTS
-
-**PLACEMENT:**
-- Always include CTA in hero section
-- Maximum one CTA every 2 sections
-- Final CTA in call-to-action section
-
-**COPY VARIETY:**
-Never repeat "Shop Now" - create unique, action-oriented CTAs like:
-- "Get Your [Product]"
-- "Claim Your [Benefit]"
-- "Start [Desired Outcome]"
-- "[Action Verb] + [Specific Result]"
-
-## OUTPUT FORMAT
-
-Generate your email copy in this EXACT structure:
-
-\`\`\`
-EMAIL SUBJECT LINE:
-[6-10 words, urgency/curiosity-driven]
-
-PREVIEW TEXT:
-[15-20 words expanding on subject, no repetition]
-
----
-
-HERO SECTION:
-Accent: [Optional - 3-5 words]
-Headline: [Compelling benefit, 4-8 words]
-Subhead: [Optional expansion, 8-10 words]
-CTA: [Unique action phrase]
-
----
-
-SECTION 2: [Section Purpose]
-Headline: [4-8 words]
-Content: [Choose format - single sentence, bullets, etc.]
-[Optional CTA: Action phrase]
-
----
-
-SECTION 3: [Section Purpose]
-Headline: [4-8 words]
-Content: [Format choice]
-[Optional CTA if no CTA in Section 2]
-
----
-
-[Additional sections as needed, maximum 6 total]
-
----
-
-CALL-TO-ACTION SECTION:
-Headline: [Summarizing benefit, 4-8 words]
-Content: [1-2 sentences tying everything together]
-CTA: [Final compelling action]
-
----
-
-DESIGN NOTES:
-[Any specific visual suggestions]
-\`\`\`
-
-## QUALITY VERIFICATION
-
-Before providing your final answer, verify:
-- Hero has NO body copy
-- No section exceeds 2 sentences
-- All CTAs are unique
-- Reading level is 5th grade or below
-- Total sections are 6 or fewer
-- Every word serves a purpose
-- Message is scannable in 3 seconds
-- Follows brand voice exactly
-
-## KEY PRINCIPLES
-
-Remember:
-- Simple beats clever every time
-- Shorter is ALWAYS better
-- One email = One clear action
-- The customer is busy and distracted
-- Hero section NEVER contains body copy
-- Maximum 6 sections total
-- All body copy stays SHORT
-
-Now generate the email copy following these guidelines exactly, using the provided brand information and email brief.`;
-}
-
+// Old stream handlers removed - now using unified-stream-handler.ts
+// This eliminates ~400 lines of duplicated code between OpenAI and Anthropic handlers
+
+/*
+// LEGACY CODE - Kept for reference, can be deleted after verification
 async function handleOpenAI(
   messages: Message[],
   modelId: string,
   systemPrompt: string,
-  brandWebsiteUrl?: string
+  brandWebsiteUrl?: string,
+  conversationId?: string
 ) {
   const openai = getOpenAIClient();
   
@@ -955,7 +342,6 @@ async function handleOpenAI(
         console.log(`[OpenAI] Stream complete. Total chunks: ${chunkCount}, chars: ${fullResponse.length}`);
         
         // Parse and save memory instructions from AI response
-        const conversationId = (globalThis as any).__currentConversationId;
         if (conversationId && fullResponse) {
           const memoryInstructions = parseMemoryInstructions(fullResponse);
           if (memoryInstructions.length > 0) {
@@ -1010,7 +396,8 @@ async function handleAnthropic(
   messages: Message[],
   modelId: string,
   systemPrompt: string,
-  brandWebsiteUrl?: string
+  brandWebsiteUrl?: string,
+  conversationId?: string
 ) {
   const anthropic = getAnthropicClient();
   
@@ -1172,7 +559,6 @@ async function handleAnthropic(
         console.log(`[Anthropic] Stream complete. Total chunks: ${chunkCount}, chars: ${fullResponse.length}`);
         
         // Parse and save memory instructions from AI response
-        const conversationId = (globalThis as any).__currentConversationId;
         if (conversationId && fullResponse) {
           const memoryInstructions = parseMemoryInstructions(fullResponse);
           if (memoryInstructions.length > 0) {
@@ -1222,3 +608,4 @@ async function handleAnthropic(
     },
   });
 }
+*/

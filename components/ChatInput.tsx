@@ -65,6 +65,7 @@ export default function ChatInput({
   const emailTypes = [
     { id: 'design' as const, name: 'Design Email', description: 'Full structured marketing email' },
     { id: 'letter' as const, name: 'Letter Email', description: 'Short personal letter' },
+    { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation sequence' },
   ];
 
   const getModelName = (modelId: string) => {
@@ -72,6 +73,7 @@ export default function ChatInput({
   };
 
   const getEmailTypeName = (type: string) => {
+    if (type === 'flow') return 'Flow';
     return emailTypes.find(t => t.id === type)?.name || 'Design Email';
   };
 
@@ -201,6 +203,9 @@ export default function ChatInput({
   const getPlaceholder = () => {
     if (mode === 'planning') {
       return "Ask a question, explore ideas, or plan a campaign...";
+    }
+    if (mode === 'flow') {
+      return "Describe the automation flow you want to create...";
     }
     return "Describe the email you'd like to create...";
   };
@@ -355,7 +360,7 @@ export default function ChatInput({
                     className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-2.5 py-1 flex items-center gap-1 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
                   >
                     <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
-                      {emailType === 'design' ? 'Design' : 'Letter'}
+                      {getEmailTypeName(emailType)}
                     </span>
                     <svg 
                       className={`w-2 h-2 text-gray-600 dark:text-gray-400 transition-transform duration-200 ${showEmailTypePicker ? 'rotate-180' : ''}`} 

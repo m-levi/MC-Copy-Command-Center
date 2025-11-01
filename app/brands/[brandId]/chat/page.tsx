@@ -1,23 +1,31 @@
 'use client';
 
-import { useEffect, useState, useRef, use } from 'react';
+import { useEffect, useState, useRef, use, useMemo, useCallback, lazy, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType } from '@/types';
+import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType, FlowType, FlowOutline, FlowConversation, FlowOutlineData } from '@/types';
 import { AI_MODELS } from '@/lib/ai-models';
 import ChatSidebarEnhanced from '@/components/ChatSidebarEnhanced';
 import { useSidebarState } from '@/hooks/useSidebarState';
 import ChatMessage from '@/components/ChatMessage';
 import ChatInput from '@/components/ChatInput';
-import VirtualizedMessageList from '@/components/VirtualizedMessageList';
 import AIStatusIndicator from '@/components/AIStatusIndicator';
 import ThemeToggle from '@/components/ThemeToggle';
-import PlanningStageIndicator from '@/components/PlanningStageIndicator';
-import MemorySettings from '@/components/MemorySettings';
+
+// Lazy load heavy/optional components
+const VirtualizedMessageList = lazy(() => import('@/components/VirtualizedMessageList'));
+const PlanningStageIndicator = lazy(() => import('@/components/PlanningStageIndicator'));
+const MemorySettings = lazy(() => import('@/components/MemorySettings'));
+const FlowTypeSelector = lazy(() => import('@/components/FlowTypeSelector'));
+const FlowOutlineDisplay = lazy(() => import('@/components/FlowOutlineDisplay'));
+const FlowNavigation = lazy(() => import('@/components/FlowNavigation'));
+const ApproveOutlineButton = lazy(() => import('@/components/ApproveOutlineButton'));
+const FlowGenerationProgress = lazy(() => import('@/components/FlowGenerationProgress'));
 import { FilterType } from '@/components/ConversationFilterDropdown';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 import { useDraftSave, loadDraft, clearDraft } from '@/hooks/useDraftSave';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
+import { useConversationCleanup } from '@/hooks/useConversationCleanup';
 import { 
   getCachedMessages, 
   cacheMessages, 
@@ -38,6 +46,8 @@ import {
 } from '@/lib/stream-recovery';
 import { ChatPageSkeleton } from '@/components/SkeletonLoader';
 import DOMPurify from 'dompurify';
+import { detectFlowOutline, isOutlineApprovalMessage } from '@/lib/flow-outline-parser';
+import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +86,17 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [currentUserName, setCurrentUserName] = useState('');
   const [showMemorySettings, setShowMemorySettings] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  
+  // Flow-related state
+  const [showFlowTypeSelector, setShowFlowTypeSelector] = useState(false);
+  const [selectedFlowType, setSelectedFlowType] = useState<FlowType | null>(null);
+  const [flowOutline, setFlowOutline] = useState<FlowOutline | null>(null);
+  const [flowChildren, setFlowChildren] = useState<Conversation[]>([]);
+  const [parentFlow, setParentFlow] = useState<FlowConversation | null>(null);
+  const [pendingOutlineApproval, setPendingOutlineApproval] = useState<FlowOutlineData | null>(null);
+  const [isGeneratingFlow, setIsGeneratingFlow] = useState(false);
+  const [flowGenerationProgress, setFlowGenerationProgress] = useState(0);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const brandSwitcherRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -101,6 +122,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   
   // Auto-save drafts
   useDraftSave(currentConversation?.id || null, draftContent);
+
+  // Auto-cleanup empty conversations on unmount
+  const { cleanupIfEmpty } = useConversationCleanup({
+    conversationId: currentConversation?.id || null,
+    messageCount: messages.length,
+    isFlow: currentConversation?.is_flow || false,
+    isChild: !!currentConversation?.parent_conversation_id,
+    shouldAutoDelete: true
+  });
 
   // Cleanup abort controller on unmount
   useEffect(() => {
@@ -222,57 +252,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
     window.addEventListener('keydown', handleEscKey);
     
-    // Capture values for cleanup (avoid stale closure)
-    const cleanupConversationId = currentConversation?.id;
-    const cleanupMessageCount = messages.length;
-    
     // Cleanup subscription on unmount or brand change
     return () => {
       conversationChannel.unsubscribe();
       window.removeEventListener('keydown', handleEscKey);
-      
-      // Auto-delete empty conversation when leaving the page/brand
-      // Using captured values to avoid stale closure issues
-      if (cleanupConversationId && cleanupMessageCount === 0) {
-        // Small delay to avoid blocking navigation
-        setTimeout(() => {
-          (async () => {
-            try {
-              const { count, error: countError } = await supabase
-                .from('messages')
-                .select('id', { count: 'exact', head: true })
-                .eq('conversation_id', cleanupConversationId);
-              
-              if (countError) {
-                console.error('Error checking message count on cleanup:', countError);
-                return;
-              }
-              
-              if (count === 0) {
-                console.log('Auto-deleting empty conversation on cleanup:', cleanupConversationId);
-                
-                const { error: deleteError } = await supabase
-                  .from('conversations')
-                  .delete()
-                  .eq('id', cleanupConversationId);
-                
-                if (!deleteError) {
-                  trackEvent('conversation_auto_deleted', { 
-                    conversationId: cleanupConversationId,
-                    reason: 'empty_on_unmount' 
-                  });
-                } else {
-                  console.error('Error deleting conversation:', deleteError);
-                }
-              }
-            } catch (error) {
-              console.error('Error during conversation cleanup:', error);
-            }
-          })();
-        }, 100);
-      }
+      // Note: Auto-delete cleanup is handled by useConversationCleanup hook
     };
-  }, [brandId, router, currentConversation?.id, messages.length]);
+  }, [brandId, router]);
 
   useEffect(() => {
     applyConversationFilter();
@@ -363,6 +349,23 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     scrollToBottom();
   }, [messages]);
 
+  // Detect flow outline in AI responses
+  useEffect(() => {
+    if (!currentConversation?.is_flow || !currentConversation.flow_type) return;
+    if (flowOutline?.approved) return; // Don't detect if already approved
+    if (messages.length === 0) return;
+
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage.role !== 'assistant') return;
+
+    // Try to detect and parse outline
+    const outline = detectFlowOutline(lastMessage.content, currentConversation.flow_type);
+    if (outline) {
+      console.log('Detected flow outline:', outline);
+      setPendingOutlineApproval(outline);
+    }
+  }, [messages, currentConversation?.is_flow, currentConversation?.flow_type, flowOutline?.approved]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -431,7 +434,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   };
 
-  const applyConversationFilter = () => {
+  const applyConversationFilter = useCallback(() => {
     if (currentFilter === 'all') {
       setFilteredConversations(conversations);
     } else if (currentFilter === 'mine') {
@@ -441,7 +444,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     } else {
       setFilteredConversations(conversations);
     }
-  };
+  }, [currentFilter, conversations, currentUserId, selectedPersonId]);
 
   const handleFilterChange = (filter: FilterType, personId?: string) => {
     setCurrentFilter(filter);
@@ -520,6 +523,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     if (error) throw error;
     
     if (data) {
+      console.log('[LoadConversations] Loaded conversations:', data.length);
+      console.log('[LoadConversations] Flow conversations:', data.filter(c => c.is_flow).map(c => ({
+        title: c.title,
+        is_flow: c.is_flow,
+        flow_type: c.flow_type,
+        id: c.id
+      })));
+      console.log('[LoadConversations] Child conversations:', data.filter(c => c.parent_conversation_id).length);
+      
       cacheConversations(brandId, data);
       setConversations(data);
       
@@ -597,41 +609,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         toast('Previous generation stopped', { icon: '⏹️' });
       }
 
-      // Auto-delete current conversation if it's empty (no messages)
-      // CRITICAL: Check database first to avoid deleting conversations with messages
+      // Auto-delete current conversation if it's empty
       if (currentConversation && messages.length === 0) {
-        console.log('Checking if conversation is truly empty:', currentConversation.id);
-        
-        // Verify conversation is empty in database before deleting
-        const { count, error: countError } = await supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', currentConversation.id);
-        
-        if (countError) {
-          console.error('Error checking message count:', countError);
-          // Don't delete if we can't verify - safer to keep it
-        } else if (count === 0) {
-          // Conversation is truly empty, safe to delete
-          console.log('Conversation is empty in database, auto-deleting:', currentConversation.id);
-          
-          const { error: deleteError } = await supabase
-            .from('conversations')
-            .delete()
-            .eq('id', currentConversation.id);
-          
-          if (deleteError) {
-            console.error('Error deleting empty conversation:', deleteError);
-            // Continue anyway - don't block creating new conversation
-          } else {
-            trackEvent('conversation_auto_deleted', { 
-              conversationId: currentConversation.id,
-              reason: 'empty_on_new_click' 
-            });
-          }
-        } else {
-          console.log(`Conversation has ${count} messages in database, NOT deleting`, currentConversation.id);
-        }
+        await cleanupIfEmpty(currentConversation.id, 'empty_on_new_click');
       }
 
       const { data: { user } } = await supabase.auth.getUser();
@@ -656,6 +636,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setCurrentConversation(data);
       setConversationMode('email_copy');
       setMessages([]);
+      setEmailType('design'); // Always default to design email
       setDraftContent(''); // Clear draft when switching
       await loadConversations();
       toast.success('New conversation created');
@@ -675,41 +656,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       toast('Generation stopped - switching conversations', { icon: '⏹️' });
     }
 
-    // Auto-delete current conversation if it's empty (no messages)
-    // CRITICAL: Check database first to avoid deleting conversations with messages
-    if (currentConversation && messages.length === 0 && currentConversation.id !== conversationId) {
-      console.log('Checking if conversation is truly empty on switch:', currentConversation.id);
-      
-      // Verify conversation is empty in database before deleting
-      const { count, error: countError } = await supabase
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('conversation_id', currentConversation.id);
-      
-      if (countError) {
-        console.error('Error checking message count:', countError);
-        // Don't delete if we can't verify - safer to keep it
-      } else if (count === 0) {
-        // Conversation is truly empty, safe to delete
-        console.log('Conversation is empty in database, auto-deleting on switch:', currentConversation.id);
-        
-        const { error: deleteError } = await supabase
-          .from('conversations')
-          .delete()
-          .eq('id', currentConversation.id);
-        
-        if (deleteError) {
-          console.error('Error deleting empty conversation:', deleteError);
-          // Continue anyway - don't block switching conversations
-        } else {
-          trackEvent('conversation_auto_deleted', { 
-            conversationId: currentConversation.id,
-            reason: 'empty_on_switch' 
-          });
-        }
-      } else {
-        console.log(`Conversation has ${count} messages in database, NOT deleting on switch`, currentConversation.id);
-      }
+    // Auto-delete current conversation if it's empty
+    if (currentConversation && 
+        messages.length === 0 && 
+        currentConversation.id !== conversationId) {
+      await cleanupIfEmpty(currentConversation.id, 'empty_on_switch');
     }
 
     const conversation = conversations.find((c) => c.id === conversationId);
@@ -718,6 +669,23 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setSelectedModel(conversation.model as AIModel);
       setConversationMode(conversation.mode || 'planning');
       setDraftContent(''); // Clear draft when switching
+      
+      // Set email type based on conversation
+      if (conversation.is_flow) {
+        setEmailType('flow');
+        setSelectedFlowType(conversation.flow_type || null);
+      }
+      
+      // Load flow data if this is a flow conversation
+      if (conversation.is_flow) {
+        loadFlowData(conversation.id);
+      }
+      
+      // Load parent flow if this is a child conversation
+      if (conversation.parent_conversation_id) {
+        loadParentFlow(conversation.parent_conversation_id);
+      }
+      
       trackEvent('conversation_selected', { conversationId });
     }
   };
@@ -796,6 +764,194 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     } catch (error) {
       console.error('Error updating mode:', error);
       toast.error('Failed to update mode');
+    }
+  };
+
+  // Handle email type change with Flow type selector
+  const handleEmailTypeChange = (type: EmailType) => {
+    if (type === 'flow') {
+      // Show flow type selector modal
+      setShowFlowTypeSelector(true);
+    } else {
+      setEmailType(type);
+    }
+  };
+
+  // Handle flow type selection
+  const handleSelectFlowType = async (flowType: FlowType) => {
+    try {
+      console.log('[Flow] Creating flow conversation for type:', flowType);
+      setShowFlowTypeSelector(false);
+      setSelectedFlowType(flowType);
+      
+      // Create new flow conversation
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) {
+        console.error('[Flow] No user found');
+        return;
+      }
+
+      const flowData = {
+        brand_id: brandId,
+        user_id: user.user.id,
+        title: `New ${flowType.replace(/_/g, ' ')} Flow`,
+        model: selectedModel,
+        conversation_type: 'email' as const,
+        mode: 'email_copy' as const,
+        is_flow: true,
+        flow_type: flowType
+      };
+
+      console.log('[Flow] Inserting conversation with data:', flowData);
+
+      const { data: newConversation, error } = await supabase
+        .from('conversations')
+        .insert(flowData)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[Flow] Error creating conversation:', error);
+        throw error;
+      }
+
+      console.log('[Flow] Created conversation:', newConversation);
+      console.log('[Flow] is_flow value:', newConversation.is_flow);
+      console.log('[Flow] flow_type value:', newConversation.flow_type);
+
+      // Set emailType to flow
+      setEmailType('flow');
+      
+      // Load the new conversation
+      setCurrentConversation(newConversation);
+      setMessages([]);
+      await loadConversations();
+      
+      console.log('[Flow] Conversation loaded, check sidebar for is_flow:', newConversation.is_flow);
+      toast.success('Flow conversation created! Describe your automation needs.');
+    } catch (error) {
+      console.error('Error creating flow:', error);
+      toast.error('Failed to create flow');
+      // Reset email type
+      setEmailType('design');
+    }
+  };
+
+  // Load flow data for flow conversations
+  const loadFlowData = async (conversationId: string) => {
+    try {
+      const response = await fetch(`/api/flows/${conversationId}`);
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (data.outline) {
+        setFlowOutline(data.outline);
+      }
+      if (data.children) {
+        setFlowChildren(data.children);
+      }
+    } catch (error) {
+      console.error('Error loading flow data:', error);
+    }
+  };
+
+  // Load parent flow data for child conversations
+  const loadParentFlow = async (parentId: string) => {
+    try {
+      const { data: parent } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('id', parentId)
+        .single();
+
+      if (parent) {
+        setParentFlow(parent as FlowConversation);
+        await loadFlowData(parentId);
+      }
+    } catch (error) {
+      console.error('Error loading parent flow:', error);
+    }
+  };
+
+  // Handle outline approval
+  const handleApproveOutline = async (outline: FlowOutlineData) => {
+    if (!currentConversation) return;
+    
+    try {
+      setSending(true);
+      setIsGeneratingFlow(true);
+      setFlowGenerationProgress(0);
+      
+      // Simulate progress for better UX (actual generation happens on server)
+      const progressInterval = setInterval(() => {
+        setFlowGenerationProgress(prev => {
+          if (prev >= outline.emails.length) {
+            clearInterval(progressInterval);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 5000); // Update every 5 seconds (approximate)
+      
+      const response = await fetch('/api/flows/generate-emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: currentConversation.id,
+          flowType: currentConversation.flow_type,
+          outline,
+          model: selectedModel,
+          emailType: 'design' // Default to design emails for flows
+        })
+      });
+
+      clearInterval(progressInterval);
+      setFlowGenerationProgress(outline.emails.length);
+
+      const result = await response.json();
+      
+      if (result.success) {
+        toast.success(`Generated ${result.generated} emails successfully!`, {
+          duration: 4000,
+          icon: '🎉'
+        });
+        
+        // Reload flow data to show children
+        await loadFlowData(currentConversation.id);
+        
+        // Reload conversations to show new children in sidebar
+        await loadConversations();
+        
+        // Clear pending approval
+        setPendingOutlineApproval(null);
+        
+        // Add a system message about the generation (local only, not saved to DB)
+        const systemMessage: Message = {
+          id: `system-flow-complete-${currentConversation.id}-${Date.now()}-${Math.random()}`,
+          conversation_id: currentConversation.id,
+          role: 'assistant',
+          content: `✅ Successfully generated ${result.generated} emails! Click on any email in the outline above to view and edit it.`,
+          created_at: new Date().toISOString()
+        };
+        
+        setMessages(prev => {
+          // Only add if not already there
+          const exists = prev.some(m => m.content.includes('Successfully generated') && m.content.includes('emails!'));
+          if (!exists) {
+            return [...prev, systemMessage];
+          }
+          return prev;
+        });
+      } else {
+        toast.error(`Generated ${result.generated} emails, but ${result.failed} failed`);
+      }
+    } catch (error) {
+      console.error('Error approving outline:', error);
+      toast.error('Failed to generate emails');
+    } finally {
+      setSending(false);
+      setIsGeneratingFlow(false);
+      setFlowGenerationProgress(0);
     }
   };
 
@@ -1208,6 +1364,14 @@ Please generate the complete email copy following all the guidelines we discusse
       abortControllerRef.current = new AbortController();
       currentController = abortControllerRef.current; // Capture reference
 
+      // Check if user is approving an outline
+      if (currentConversation.is_flow && pendingOutlineApproval && isOutlineApprovalMessage(content)) {
+        // User approved the outline! Don't send message, just approve
+        setSending(false);
+        await handleApproveOutline(pendingOutlineApproval);
+        return;
+      }
+
       // Call AI API with streaming
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -1221,6 +1385,9 @@ Please generate the complete email copy following all the guidelines we discusse
           conversationMode: conversationMode,
           conversationId: currentConversation.id,
           emailType: emailType,
+          // Add flow parameters if in flow mode
+          isFlowMode: currentConversation.is_flow && !flowOutline?.approved,
+          flowType: currentConversation.flow_type,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -1419,11 +1586,12 @@ Please generate the complete email copy following all the guidelines we discusse
 
       if (aiError) throw aiError;
 
-      // Replace placeholder with saved message
+      // Replace placeholder with saved message and remove any duplicates
       setMessages((prev) => {
-        // Remove any duplicates and replace placeholder
-        const filtered = prev.filter(msg => msg.id !== savedAiMessage.id);
-        return filtered.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg));
+        // First, filter out any existing instances of the saved message ID
+        const withoutDuplicates = prev.filter(msg => msg.id !== savedAiMessage.id);
+        // Then replace the placeholder with the saved message
+        return withoutDuplicates.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg));
       });
       
       // Update cache with new messages
@@ -1478,10 +1646,26 @@ Please generate the complete email copy following all the guidelines we discusse
   // Assign loadConversations to ref after it's defined
   loadConversationsRef.current = loadConversations;
   
-  // Merge filtered conversations with status information
-  const filteredConversationsWithStatus = sidebarState.conversationsWithStatus.filter(conv => 
-    filteredConversations.some(fc => fc.id === conv.id)
-  );
+  // Memoize filtered conversations with status to reduce re-renders
+  const filteredConversationsWithStatus = useMemo(() => {
+    return sidebarState.conversationsWithStatus.filter(conv => 
+      filteredConversations.some(fc => fc.id === conv.id) && 
+      !conv.parent_conversation_id // Don't show children in main list
+    );
+  }, [sidebarState.conversationsWithStatus, filteredConversations]);
+
+  // Debug: Log what's being shown in sidebar
+  useEffect(() => {
+    const flowConvs = filteredConversationsWithStatus.filter(c => c.is_flow);
+    if (flowConvs.length > 0) {
+      console.log('[Sidebar] Flow conversations to display:', flowConvs.map(c => ({
+        id: c.id,
+        title: c.title,
+        is_flow: c.is_flow,
+        flow_type: c.flow_type
+      })));
+    }
+  }, [filteredConversationsWithStatus]);
 
   if (loading) {
     return <ChatPageSkeleton />;
@@ -1494,6 +1678,30 @@ Please generate the complete email copy following all the guidelines we discusse
   return (
     <div className="relative h-screen bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
       <Toaster position="top-right" />
+      
+      {/* Flow Generation Progress Modal */}
+      {isGeneratingFlow && pendingOutlineApproval && (
+        <Suspense fallback={<div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"><div className="text-white">Loading...</div></div>}>
+          <FlowGenerationProgress
+            totalEmails={pendingOutlineApproval.emails.length}
+            currentEmail={flowGenerationProgress}
+            isGenerating={isGeneratingFlow}
+          />
+        </Suspense>
+      )}
+      
+      {/* Flow Type Selector Modal */}
+      {showFlowTypeSelector && (
+        <Suspense fallback={<div className="fixed inset-0 bg-black/50 z-50" />}>
+          <FlowTypeSelector
+            onSelect={handleSelectFlowType}
+            onCancel={() => {
+              setShowFlowTypeSelector(false);
+              setEmailType('design'); // Reset to design if cancelled
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* Enhanced Sidebar - Fixed overlay on mobile, in-flow on desktop */}
       <div className="contents lg:flex lg:h-screen">
@@ -1602,6 +1810,21 @@ Please generate the complete email copy following all the guidelines we discusse
               </div>
             </div>
           </div>
+
+          {/* Flow Navigation for child conversations */}
+          {currentConversation?.parent_conversation_id && parentFlow && (
+            <FlowNavigation
+              parentFlow={parentFlow}
+              currentConversation={currentConversation}
+              brandId={brandId}
+              onNavigateToParent={() => {
+                const parent = conversations.find(c => c.id === currentConversation.parent_conversation_id);
+                if (parent) {
+                  handleSelectConversation(parent.id);
+                }
+              }}
+            />
+          )}
 
           {/* Conversation Info Bar */}
           <div className="px-4 py-3">
@@ -1764,6 +1987,16 @@ Please generate the complete email copy following all the guidelines we discusse
           ) : (
             /* Regular rendering for shorter conversations */
             <div className="max-w-5xl mx-auto">
+              {/* Flow Outline Display for parent flow conversations */}
+              {currentConversation?.is_flow && flowOutline && flowOutline.approved && (
+                <FlowOutlineDisplay
+                  outline={flowOutline.outline_data}
+                  children={flowChildren}
+                  onSelectChild={(childId) => handleSelectConversation(childId)}
+                  currentChildId={currentConversation.id}
+                />
+              )}
+
               {/* Planning Stage Indicator (only in planning mode) */}
               {conversationMode === 'planning' && (
                 <PlanningStageIndicator messages={messages} />
@@ -1772,7 +2005,7 @@ Please generate the complete email copy following all the guidelines we discusse
               {/* Messages */}
               {messages.map((message, index) => (
                 <ChatMessage
-                  key={message.id}
+                  key={`${message.id}-${index}`}
                   message={message}
                   brandId={brandId}
                   mode={conversationMode}
@@ -1807,6 +2040,23 @@ Please generate the complete email copy following all the guidelines we discusse
             </div>
           )}
         </div>
+
+        {/* Approve Outline Button (Flow Mode) */}
+        {currentConversation?.is_flow && 
+         pendingOutlineApproval && 
+         !flowOutline?.approved && 
+         !sending && (
+          <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+            <div className="max-w-4xl mx-auto">
+              <ApproveOutlineButton
+                outline={pendingOutlineApproval}
+                conversationId={currentConversation.id}
+                onApprove={() => handleApproveOutline(pendingOutlineApproval)}
+                disabled={sending}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Transfer Plan Button (Planning Mode) - Only show after meaningful planning */}
         {currentConversation && 
@@ -1874,7 +2124,7 @@ Please generate the complete email copy following all the guidelines we discusse
             selectedModel={selectedModel}
             onModelChange={(model) => setSelectedModel(model as AIModel)}
             emailType={emailType}
-            onEmailTypeChange={setEmailType}
+            onEmailTypeChange={handleEmailTypeChange}
             hasMessages={messages.length > 0}
           />
         )}

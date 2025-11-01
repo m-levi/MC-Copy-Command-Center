@@ -21,8 +21,55 @@ export interface Brand {
 }
 
 export type ConversationType = 'email' | 'automation';
-export type ConversationMode = 'planning' | 'email_copy';
-export type EmailType = 'design' | 'letter';
+export type ConversationMode = 'planning' | 'email_copy' | 'flow';
+export type EmailType = 'design' | 'letter' | 'flow';
+
+// Flow Types
+export type FlowType = 
+  | 'welcome_series'
+  | 'abandoned_cart'
+  | 'post_purchase'
+  | 'winback'
+  | 'product_launch'
+  | 'educational_series';
+
+export interface FlowTemplate {
+  id: FlowType;
+  name: string;
+  description: string;
+  icon: string;
+  defaultEmailCount: number;
+  category: 'transactional' | 'promotional' | 'nurture';
+}
+
+export interface FlowOutlineEmail {
+  sequence: number;
+  title: string;
+  purpose: string;
+  timing: string;
+  keyPoints: string[];
+  cta: string;
+}
+
+export interface FlowOutlineData {
+  flowType: FlowType;
+  flowName: string;
+  goal: string;
+  targetAudience: string;
+  emails: FlowOutlineEmail[];
+}
+
+export interface FlowOutline {
+  id: string;
+  conversation_id: string;
+  flow_type: FlowType;
+  outline_data: FlowOutlineData;
+  approved: boolean;
+  approved_at?: string;
+  email_count: number;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface Conversation {
   id: string;
@@ -39,6 +86,21 @@ export interface Conversation {
   is_archived?: boolean;
   last_message_preview?: string;
   last_message_at?: string;
+  
+  // Flow-specific fields
+  parent_conversation_id?: string | null;
+  is_flow?: boolean;
+  flow_type?: FlowType | null;
+  flow_sequence_order?: number | null;
+  flow_email_title?: string | null;
+}
+
+// Extended conversation with children
+export interface FlowConversation extends Conversation {
+  is_flow: true;
+  flow_type: FlowType;
+  outline?: FlowOutline;
+  children?: Conversation[];
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';
