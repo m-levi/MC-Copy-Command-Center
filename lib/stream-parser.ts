@@ -176,9 +176,21 @@ export function processStreamChunk(
 }
 
 /**
- * Finalize stream - mark all sections as complete
+ * Finalize stream - mark all sections as complete and clean up content
  */
 export function finalizeStream(state: StreamState): StreamState {
+  // Clean up any stray markers or formatting issues at the end
+  state.fullContent = state.fullContent
+    // Remove any stray closing brackets that might be left from marker removal
+    .replace(/\s*\]\s*$/g, '')
+    // Remove any trailing marker remnants
+    .replace(/\[PRODUCTS:.*?\]\s*$/g, '')
+    .replace(/\[REMEMBER:.*?\]\s*$/g, '')
+    .replace(/\[STATUS:.*?\]\s*$/g, '')
+    // Clean up excessive whitespace at the end
+    .replace(/\s{3,}$/g, '\n\n')
+    .trim();
+  
   // Mark current section as complete if exists
   if (state.currentSection) {
     state.currentSection.complete = true;
@@ -295,6 +307,9 @@ export function extractMarkers(
       console.error('Failed to parse products:', e);
     }
   }
+
+  // Remove memory instruction markers (invisible to user)
+  cleanChunk = cleanChunk.replace(/\[REMEMBER:[^\]]+\]/g, '');
 
   return { cleanChunk, status, products };
 }

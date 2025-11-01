@@ -303,6 +303,15 @@ export type ConversationQuickAction =
   | 'rename' 
   | 'delete';
 
+// Bulk Action Types
+export type BulkActionType =
+  | 'delete'
+  | 'archive'
+  | 'unarchive'
+  | 'pin'
+  | 'unpin'
+  | 'export';
+
 // Conversation Tags
 export interface ConversationTag {
   id: string;
@@ -317,6 +326,7 @@ export interface ConversationWithMetadata extends ConversationWithStatus {
   wordCount?: number;
   tokensUsed?: number;
   lastActivityMinutesAgo?: number;
+  isSelected?: boolean; // For bulk selection
 }
 
 // Sidebar Section Type

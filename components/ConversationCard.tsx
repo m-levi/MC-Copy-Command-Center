@@ -13,6 +13,9 @@ interface ConversationCardProps {
   onSelectChild?: (childId: string) => void;
   onAction: (action: ConversationQuickAction) => void;
   onPrefetch?: () => void;
+  bulkSelectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 }
 
 export default function ConversationCard({
@@ -23,29 +26,42 @@ export default function ConversationCard({
   onSelect,
   onSelectChild,
   onAction,
-  onPrefetch
+  onPrefetch,
+  bulkSelectMode = false,
+  isSelected = false,
+  onToggleSelect
 }: ConversationCardProps) {
   const [showActions, setShowActions] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [flowChildren, setFlowChildren] = useState<Conversation[]>([]);
+  const [flowChildrenCount, setFlowChildrenCount] = useState<number>(0);
   const [loadingChildren, setLoadingChildren] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
-  // Debug logging
+  // Load flow children count on mount for flows
   useEffect(() => {
-    if (conversation.is_flow) {
-      console.log('[ConversationCard] Flow conversation rendered:', {
-        id: conversation.id,
-        title: conversation.title,
-        is_flow: conversation.is_flow,
-        flow_type: conversation.flow_type,
-        isExpanded,
-        childrenCount: flowChildren.length,
-        loadingChildren
-      });
+    if (conversation.is_flow && flowChildrenCount === 0) {
+      loadFlowChildrenCount();
     }
-  }, [conversation.is_flow, isExpanded, flowChildren.length, loadingChildren]);
+  }, [conversation.is_flow]);
+
+  const loadFlowChildrenCount = async () => {
+    if (!conversation.is_flow) return;
+    
+    try {
+      const { count } = await supabase
+        .from('conversations')
+        .select('id', { count: 'exact', head: true })
+        .eq('parent_conversation_id', conversation.id);
+
+      if (count !== null) {
+        setFlowChildrenCount(count);
+      }
+    } catch (error) {
+      console.error('Error loading flow children count:', error);
+    }
+  };
 
   // Auto-expand if active flow or if a child is active
   useEffect(() => {
@@ -149,23 +165,54 @@ export default function ConversationCard({
         onPrefetch?.();
       }}
       onMouseLeave={() => setShowActions(false)}
-      onClick={onSelect}
+      onClick={() => {
+        if (bulkSelectMode && onToggleSelect) {
+          onToggleSelect();
+        } else {
+          onSelect();
+        }
+      }}
       className={`
         group relative
         rounded-xl
         transition-all duration-200
         cursor-pointer overflow-hidden
-        ${isActive 
-          ? 'bg-blue-600 dark:bg-blue-700 shadow-lg ring-2 ring-blue-400 dark:ring-blue-500' 
-          : 'bg-white dark:bg-gray-800 shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-750'
+        ${isSelected
+          ? 'bg-blue-100 dark:bg-blue-900/30 shadow-lg ring-2 ring-blue-500 dark:ring-blue-400'
+          : isActive 
+            ? 'bg-blue-600 dark:bg-blue-700 shadow-lg ring-2 ring-blue-400 dark:ring-blue-500' 
+            : 'bg-white dark:bg-gray-800 shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-750'
         }
       `}
     >
 
       {/* Thumbnail/Header with gradient */}
       <div className={`h-20 bg-gradient-to-br ${getGradient()} relative`}>
+        {/* Bulk selection checkbox */}
+        {bulkSelectMode && (
+          <div 
+            className="absolute top-2 left-2 z-10"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect?.();
+            }}
+          >
+            <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all cursor-pointer ${
+              isSelected 
+                ? 'bg-blue-600 border-blue-600' 
+                : 'bg-white/90 dark:bg-gray-900/90 border-gray-300 dark:border-gray-600 hover:border-blue-500'
+            }`}>
+              {isSelected && (
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+          </div>
+        )}
+        
         {/* Pin indicator */}
-        {isPinned && (
+        {!bulkSelectMode && isPinned && (
           <div className="absolute top-2 left-2 p-1 bg-white/90 dark:bg-gray-900/90 rounded-full">
             <svg className="w-3.5 h-3.5 text-yellow-500 fill-current" viewBox="0 0 24 24">
               <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z" />
@@ -176,9 +223,17 @@ export default function ConversationCard({
         {/* Status badge */}
         {getStatusBadge()}
 
-        {/* Mode badge */}
+        {/* Type badge */}
         <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm rounded-full text-[10px] font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
-          {conversation.is_flow ? '🔄 Flow' : conversation.mode === 'planning' ? '📋 Plan' : '✉️ Write'}
+          {conversation.is_flow 
+            ? conversation.flow_type === 'campaign' ? '📧 Campaign'
+            : conversation.flow_type === 'drip_sequence' ? '💧 Drip'
+            : conversation.flow_type === 'abandoned_cart' ? '🛒 Cart'
+            : conversation.flow_type === 'welcome_series' ? '👋 Welcome'
+            : '🔄 Flow'
+            : conversation.mode === 'planning' ? '📋 Planning'
+            : conversation.conversation_type === 'letter' ? '✉️ Letter'
+            : '✉️ Email'}
         </div>
       </div>
 
@@ -212,7 +267,7 @@ export default function ConversationCard({
                 }`}
                 title={isExpanded ? 'Collapse emails' : 'Show emails'}
               >
-                <span className="font-semibold">{flowChildren.length || 0}</span>
+                <span className="font-semibold">{flowChildren.length || flowChildrenCount}</span>
                 <svg 
                   className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
                   fill="none" 
@@ -271,7 +326,7 @@ export default function ConversationCard({
       </div>
 
       {/* Quick Actions Overlay */}
-      {showActions && !isActive && (
+      {showActions && !isActive && !bulkSelectMode && (
         <div 
           className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent flex items-end justify-center p-3 gap-1"
           onClick={(e) => e.stopPropagation()}

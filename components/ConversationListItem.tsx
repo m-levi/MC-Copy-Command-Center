@@ -1,8 +1,9 @@
 'use client';
 
-import { ConversationWithStatus, Conversation } from '@/types';
-import { useState, useEffect } from 'react';
+import { ConversationWithStatus, Conversation, ConversationQuickAction } from '@/types';
+import { useState, useEffect, useCallback, memo } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import ConversationContextMenu from './ConversationContextMenu';
 
 interface ConversationListItemProps {
   conversation: ConversationWithStatus;
@@ -11,20 +12,55 @@ interface ConversationListItemProps {
   currentConversationId?: string | null;
   onSelect: () => void;
   onSelectChild?: (childId: string) => void;
+  onAction?: (action: ConversationQuickAction) => void;
+  bulkSelectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 }
 
-export default function ConversationListItem({
+function ConversationListItem({
   conversation,
   isActive,
   isPinned,
   currentConversationId = null,
   onSelect,
-  onSelectChild
+  onSelectChild,
+  onAction,
+  bulkSelectMode = false,
+  isSelected = false,
+  onToggleSelect
 }: ConversationListItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [flowChildren, setFlowChildren] = useState<Conversation[]>([]);
+  const [flowChildrenCount, setFlowChildrenCount] = useState<number>(0);
   const [loadingChildren, setLoadingChildren] = useState(false);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [showThreeDotMenu, setShowThreeDotMenu] = useState(false);
   const supabase = createClient();
+
+  // Load flow children count on mount for flows
+  useEffect(() => {
+    if (conversation.is_flow && flowChildrenCount === 0) {
+      loadFlowChildrenCount();
+    }
+  }, [conversation.is_flow]);
+
+  const loadFlowChildrenCount = async () => {
+    if (!conversation.is_flow) return;
+    
+    try {
+      const { count } = await supabase
+        .from('conversations')
+        .select('id', { count: 'exact', head: true })
+        .eq('parent_conversation_id', conversation.id);
+
+      if (count !== null) {
+        setFlowChildrenCount(count);
+      }
+    } catch (error) {
+      console.error('Error loading flow children count:', error);
+    }
+  };
 
   // Auto-expand if active flow or if a child is active
   useEffect(() => {
@@ -62,14 +98,14 @@ export default function ConversationListItem({
     }
   };
 
-  const handleToggleExpand = (e: React.MouseEvent) => {
+  const handleToggleExpand = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (conversation.is_flow) {
-      setIsExpanded(!isExpanded);
+      setIsExpanded(prev => !prev);
     }
-  };
+  }, [conversation.is_flow]);
 
-  const formatDate = (dateString: string) => {
+  const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -81,28 +117,95 @@ export default function ConversationListItem({
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
+  }, []);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
+    setShowThreeDotMenu(false);
+  }, []);
+
+  const handleThreeDotClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setContextMenuPosition({ x: rect.left, y: rect.bottom + 4 });
+    setShowThreeDotMenu(true);
+  }, []);
+
+  const handleAction = useCallback((action: ConversationQuickAction) => {
+    if (onAction) {
+      onAction(action);
+    }
+  }, [onAction]);
+
+  const handleClick = useCallback(() => {
+    if (bulkSelectMode && onToggleSelect) {
+      onToggleSelect();
+    } else {
+      onSelect();
+    }
+  }, [bulkSelectMode, onToggleSelect, onSelect]);
+
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenuPosition(null);
+  }, []);
 
   return (
     <div>
       {/* Main conversation item */}
       <div
-        onClick={onSelect}
+        onClick={handleClick}
+        onContextMenu={handleContextMenu}
         className={`
           group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all
-          ${isActive 
-            ? 'bg-blue-600 dark:bg-blue-700 text-white' 
-            : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100'
+          ${isSelected
+            ? 'bg-blue-100 dark:bg-blue-900/30 ring-2 ring-blue-500 dark:ring-blue-400'
+            : isActive 
+              ? 'bg-blue-600 dark:bg-blue-700 text-white' 
+              : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100'
           }
         `}
       >
+        {/* Bulk selection checkbox */}
+        {bulkSelectMode && (
+          <div 
+            className="flex-shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect?.();
+            }}
+          >
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all cursor-pointer ${
+              isSelected 
+                ? 'bg-blue-600 border-blue-600' 
+                : 'border-gray-300 dark:border-gray-600 hover:border-blue-500'
+            }`}>
+              {isSelected && (
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Icon/Badge */}
         <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
-          isActive 
-            ? 'bg-blue-500 dark:bg-blue-600 text-white' 
-            : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+          isSelected
+            ? 'bg-blue-200 dark:bg-blue-800 text-blue-700 dark:text-blue-300'
+            : isActive 
+              ? 'bg-blue-500 dark:bg-blue-600 text-white' 
+              : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
         }`}>
-          {conversation.is_flow ? '🔄' : conversation.mode === 'planning' ? '📋' : '✉️'}
+          {conversation.is_flow 
+            ? conversation.flow_type === 'campaign' ? '📧'
+            : conversation.flow_type === 'drip_sequence' ? '💧'
+            : conversation.flow_type === 'abandoned_cart' ? '🛒'
+            : conversation.flow_type === 'welcome_series' ? '👋'
+            : '🔄'
+            : conversation.mode === 'planning' ? '📋' 
+            : conversation.conversation_type === 'letter' ? '✉️'
+            : '✉️'}
         </div>
 
         {/* Content */}
@@ -120,22 +223,33 @@ export default function ConversationListItem({
             )}
           </div>
           
-          {/* Meta info */}
+          {/* Meta info with type tag */}
           <div className={`flex items-center gap-2 text-xs ${
             isActive ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'
           }`}>
-            {conversation.is_flow && (
-              <>
-                <span className="font-medium">{conversation.flow_type?.replace(/_/g, ' ')}</span>
-                <span>•</span>
-              </>
-            )}
+            {/* Type tag */}
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
+              isActive 
+                ? 'bg-blue-500/30 text-blue-100' 
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+            }`}>
+              {conversation.is_flow 
+                ? conversation.flow_type === 'campaign' ? 'Campaign'
+                : conversation.flow_type === 'drip_sequence' ? 'Drip'
+                : conversation.flow_type === 'abandoned_cart' ? 'Cart'
+                : conversation.flow_type === 'welcome_series' ? 'Welcome'
+                : 'Flow'
+                : conversation.mode === 'planning' ? 'Planning'
+                : conversation.conversation_type === 'letter' ? 'Letter'
+                : 'Email'}
+            </span>
             {conversation.created_by_name && (
               <>
-                <span className="truncate max-w-[80px]">{conversation.created_by_name}</span>
                 <span>•</span>
+                <span className="truncate max-w-[80px]">{conversation.created_by_name}</span>
               </>
             )}
+            <span>•</span>
             <span>{formatDate(conversation.last_message_at || conversation.created_at)}</span>
           </div>
         </div>
@@ -150,7 +264,7 @@ export default function ConversationListItem({
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
             }`}
           >
-            <span>{flowChildren.length || 0}</span>
+            <span>{flowChildren.length || flowChildrenCount}</span>
             <svg 
               className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
               fill="none" 
@@ -161,7 +275,36 @@ export default function ConversationListItem({
             </svg>
           </button>
         )}
+
+        {/* Three-dot menu button - Always visible on hover or when menu is open */}
+        {!bulkSelectMode && (
+          <button
+            onClick={handleThreeDotClick}
+            className={`flex-shrink-0 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity ${
+              showThreeDotMenu ? 'opacity-100' : ''
+            } ${
+              isActive 
+                ? 'hover:bg-blue-500/30 text-white' 
+                : 'hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-400'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+            </svg>
+          </button>
+        )}
       </div>
+
+      {/* Context Menu */}
+      <ConversationContextMenu
+        conversationId={conversation.id}
+        isPinned={isPinned}
+        isArchived={conversation.is_archived}
+        position={contextMenuPosition}
+        onAction={handleAction}
+        onClose={handleCloseContextMenu}
+        bulkSelectMode={bulkSelectMode}
+      />
 
       {/* Child emails */}
       {isExpanded && conversation.is_flow && (
@@ -216,3 +359,19 @@ export default function ConversationListItem({
   );
 }
 
+// Memoize component to prevent unnecessary re-renders
+// Only re-render if conversation data, active state, or selection changes
+export default memo(ConversationListItem, (prevProps, nextProps) => {
+  return (
+    prevProps.conversation.id === nextProps.conversation.id &&
+    prevProps.conversation.title === nextProps.conversation.title &&
+    prevProps.conversation.last_message_at === nextProps.conversation.last_message_at &&
+    prevProps.conversation.last_message_preview === nextProps.conversation.last_message_preview &&
+    prevProps.conversation.is_flow === nextProps.conversation.is_flow &&
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.isPinned === nextProps.isPinned &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.bulkSelectMode === nextProps.bulkSelectMode &&
+    prevProps.currentConversationId === nextProps.currentConversationId
+  );
+});

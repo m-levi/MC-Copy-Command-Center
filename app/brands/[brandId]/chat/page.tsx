@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, use, useMemo, useCallback, lazy, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType, FlowType, FlowOutline, FlowConversation, FlowOutlineData } from '@/types';
+import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType, FlowType, FlowOutline, FlowConversation, FlowOutlineData, BulkActionType } from '@/types';
 import { AI_MODELS } from '@/lib/ai-models';
 import ChatSidebarEnhanced from '@/components/ChatSidebarEnhanced';
 import { useSidebarState } from '@/hooks/useSidebarState';
@@ -10,6 +10,7 @@ import ChatMessage from '@/components/ChatMessage';
 import ChatInput from '@/components/ChatInput';
 import AIStatusIndicator from '@/components/AIStatusIndicator';
 import ThemeToggle from '@/components/ThemeToggle';
+import { executeBulkAction } from '@/lib/conversation-actions';
 
 // Lazy load heavy/optional components
 const VirtualizedMessageList = lazy(() => import('@/components/VirtualizedMessageList'));
@@ -714,6 +715,26 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     } catch (error) {
       console.error('Error deleting conversation:', error);
       toast.error('Failed to delete conversation');
+    }
+  };
+
+  const handleBulkAction = async (action: BulkActionType, conversationIds: string[]) => {
+    try {
+      const result = await executeBulkAction(action, conversationIds);
+      
+      // If we deleted the current conversation, clear it
+      if (action === 'delete' && currentConversation && conversationIds.includes(currentConversation.id)) {
+        setCurrentConversation(null);
+        setMessages([]);
+        router.push(`/brands/${brandId}/chat`);
+      }
+      
+      // Refresh conversations list
+      await fetchConversations();
+      
+    } catch (error) {
+      console.error('Error executing bulk action:', error);
+      toast.error('Failed to complete bulk action');
     }
   };
 
@@ -1487,7 +1508,8 @@ Please generate the complete email copy following all the guidelines we discusse
               .replace(/\[THINKING:START\]/g, '')
               .replace(/\[THINKING:END\]/g, '')
               .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
-              .replace(/\[PRODUCTS:[\s\S]*?\]/g, ''); // Remove any partial product markers
+              .replace(/\[PRODUCTS:[\s\S]*?\]/g, '') // Remove any partial product markers
+              .replace(/\[REMEMBER:[^\]]+\]/g, ''); // Remove memory instruction markers
             
             // Only process content chunks if we have actual content
             if (cleanChunk && !isInThinkingBlock) {
@@ -1726,6 +1748,7 @@ Please generate the complete email copy following all the guidelines we discusse
           onQuickAction={sidebarState.handleQuickAction}
           onViewModeChange={sidebarState.setViewMode}
           onSidebarWidthChange={sidebarState.setSidebarWidth}
+          onBulkAction={handleBulkAction}
           initialWidth={sidebarState.sidebarWidth}
         />
 

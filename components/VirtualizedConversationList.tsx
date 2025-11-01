@@ -20,6 +20,9 @@ interface VirtualizedConversationListProps {
   onQuickAction?: (conversationId: string, action: ConversationQuickAction) => void;
   setEditingTitle: (title: string) => void;
   height: number;
+  bulkSelectMode?: boolean;
+  selectedConversationIds?: Set<string>;
+  onToggleSelect?: (conversationId: string) => void;
 }
 
 export default function VirtualizedConversationList({
@@ -37,7 +40,10 @@ export default function VirtualizedConversationList({
   onDelete,
   onQuickAction,
   setEditingTitle,
-  height
+  height,
+  bulkSelectMode = false,
+  selectedConversationIds = new Set(),
+  onToggleSelect
 }: VirtualizedConversationListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeItemRef = useRef<HTMLDivElement>(null);
@@ -93,6 +99,10 @@ export default function VirtualizedConversationList({
               currentConversationId={currentConversationId}
               onSelect={() => onSelect(conversation.id)}
               onSelectChild={onSelectChild}
+              onAction={(action) => handleQuickAction(conversation.id, action)}
+              bulkSelectMode={bulkSelectMode}
+              isSelected={selectedConversationIds.has(conversation.id)}
+              onToggleSelect={() => onToggleSelect?.(conversation.id)}
             />
           </div>
         ))}

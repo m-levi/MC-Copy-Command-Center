@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SidebarViewMode, UserPreferences, ConversationWithStatus, ConversationQuickAction } from '@/types';
 import { getUserPreferences, upsertUserPreferences, getDefaultPreferences } from '@/lib/user-preferences';
-import { togglePinConversation, toggleArchiveConversation, duplicateConversation, exportConversation, exportConversationAsMarkdown } from '@/lib/conversation-actions';
+import { togglePinConversation, toggleArchiveConversation, duplicateConversation, exportConversation, exportConversationAsMarkdown, deleteConversation } from '@/lib/conversation-actions';
 import { Conversation } from '@/types';
 
 interface UseSidebarStateProps {
@@ -113,6 +113,18 @@ export function useSidebarState({
         } else {
           await exportConversation(conversationId);
         }
+        break;
+      case 'delete':
+        // Confirm before deleting
+        if (confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) {
+          const success = await deleteConversation(conversationId);
+          if (success) {
+            onConversationUpdate();
+          }
+        }
+        break;
+      case 'rename':
+        // Rename is handled separately in the UI
         break;
     }
 

@@ -87,7 +87,8 @@ export function useStreamingResponse() {
           .replace(/\[THINKING:START\]/g, '')
           .replace(/\[THINKING:END\]/g, '')
           .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
-          .replace(/\[PRODUCTS:[\s\S]*?\]/g, '');
+          .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
+          .replace(/\[REMEMBER:[^\]]+\]/g, ''); // Remove memory instruction markers
         
         // Only process content chunks if we have actual content
         if (cleanChunk && !isInThinkingBlock) {

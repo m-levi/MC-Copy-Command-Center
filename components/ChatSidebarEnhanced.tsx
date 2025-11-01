@@ -1,12 +1,13 @@
 'use client';
 
-import { ConversationWithStatus, OrganizationMember, SidebarViewMode, ConversationQuickAction } from '@/types';
+import { ConversationWithStatus, OrganizationMember, SidebarViewMode, ConversationQuickAction, BulkActionType } from '@/types';
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import ConversationFilterDropdown, { FilterType } from './ConversationFilterDropdown';
 import ConversationSearch from './ConversationSearch';
 import ConversationCard from './ConversationCard';
 import VirtualizedConversationList from './VirtualizedConversationList';
 import ConversationExplorer from './ConversationExplorer';
+import BulkActionBar from './BulkActionBar';
 
 interface ChatSidebarEnhancedProps {
   brandName: string;
@@ -29,6 +30,7 @@ interface ChatSidebarEnhancedProps {
   onQuickAction: (conversationId: string, action: ConversationQuickAction) => void;
   onViewModeChange: (mode: SidebarViewMode) => void;
   onSidebarWidthChange: (width: number) => void;
+  onBulkAction?: (action: BulkActionType, conversationIds: string[]) => void;
   initialWidth?: number;
 }
 
@@ -53,6 +55,7 @@ export default function ChatSidebarEnhanced({
   onQuickAction,
   onViewModeChange,
   onSidebarWidthChange,
+  onBulkAction,
   initialWidth = 398
 }: ChatSidebarEnhancedProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -63,6 +66,8 @@ export default function ChatSidebarEnhanced({
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(600);
+  const [bulkSelectMode, setBulkSelectMode] = useState(false);
+  const [selectedConversationIds, setSelectedConversationIds] = useState<Set<string>>(new Set());
 
   const handleDelete = useCallback((e: React.MouseEvent, conversationId: string) => {
     e.stopPropagation();
@@ -93,6 +98,31 @@ export default function ChatSidebarEnhanced({
     e.stopPropagation();
     setEditingId(null);
     setEditingTitle('');
+  }, []);
+
+  // Bulk selection handlers (basic ones that don't depend on orderedConversations)
+  const handleToggleBulkSelect = useCallback(() => {
+    setBulkSelectMode(!bulkSelectMode);
+    if (bulkSelectMode) {
+      setSelectedConversationIds(new Set());
+    }
+  }, [bulkSelectMode]);
+
+  const handleToggleConversationSelect = useCallback((conversationId: string) => {
+    setSelectedConversationIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(conversationId)) {
+        newSet.delete(conversationId);
+      } else {
+        newSet.add(conversationId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleCancelBulkSelect = useCallback(() => {
+    setBulkSelectMode(false);
+    setSelectedConversationIds(new Set());
   }, []);
 
   // Resize handlers
@@ -161,6 +191,20 @@ export default function ChatSidebarEnhanced({
     const unpinnedConversations = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
     return [...pinnedConversations, ...unpinnedConversations];
   }, [filteredConversations, pinnedConversationIds]);
+
+  // Bulk action handlers that depend on orderedConversations
+  const handleSelectAll = useCallback(() => {
+    setSelectedConversationIds(new Set(orderedConversations.map(c => c.id)));
+  }, [orderedConversations]);
+
+  const handleBulkAction = useCallback((action: BulkActionType) => {
+    if (onBulkAction && selectedConversationIds.size > 0) {
+      onBulkAction(action, Array.from(selectedConversationIds));
+      // Reset selection after action
+      setSelectedConversationIds(new Set());
+      setBulkSelectMode(false);
+    }
+  }, [onBulkAction, selectedConversationIds]);
 
   // Close mobile sidebar when conversation is selected on mobile
   const handleMobileSelectConversation = useCallback((conversationId: string) => {
@@ -280,6 +324,17 @@ export default function ChatSidebarEnhanced({
           </div>
         </div>
 
+        {/* Bulk action bar */}
+        {bulkSelectMode && selectedConversationIds.size > 0 && (
+          <BulkActionBar
+            selectedCount={selectedConversationIds.size}
+            totalCount={orderedConversations.length}
+            onAction={handleBulkAction}
+            onCancel={handleCancelBulkSelect}
+            onSelectAll={handleSelectAll}
+          />
+        )}
+
         {/* New conversation button */}
         <div className="p-3">
           <button
@@ -341,6 +396,9 @@ export default function ChatSidebarEnhanced({
               onQuickAction={onQuickAction}
               setEditingTitle={setEditingTitle}
               height={listHeight}
+              bulkSelectMode={bulkSelectMode}
+              selectedConversationIds={selectedConversationIds}
+              onToggleSelect={handleToggleConversationSelect}
             />
           ) : (
             <div className="h-full overflow-y-auto px-2 py-2">
@@ -365,6 +423,9 @@ export default function ChatSidebarEnhanced({
                       onSelectChild={onSelectConversation}
                       onAction={(action) => onQuickAction(conversation.id, action)}
                       onPrefetch={() => onPrefetchConversation?.(conversation.id)}
+                      bulkSelectMode={bulkSelectMode}
+                      isSelected={selectedConversationIds.has(conversation.id)}
+                      onToggleSelect={() => handleToggleConversationSelect(conversation.id)}
                     />
                   ))}
                 </div>
