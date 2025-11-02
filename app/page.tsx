@@ -110,13 +110,10 @@ export default function HomePage() {
       setUserRole(role);
       setCanManageBrands(role === 'admin' || role === 'brand_manager');
 
-      // Load all brands for the organization with creator info in a single query
+      // Load all brands for the organization
       const { data, error } = await supabase
         .from('brands')
-        .select(`
-          *,
-          creator:profiles!brands_created_by_fkey(full_name, email)
-        `)
+        .select('*')
         .eq('organization_id', org.id)
         .order('created_at', { ascending: false });
 
