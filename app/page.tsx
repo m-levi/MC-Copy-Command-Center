@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback, memo, lazy, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Brand, Organization, OrganizationRole } from '@/types';
 import BrandCard from '@/components/BrandCard';
 import BrandListItem from '@/components/BrandListItem';
-import BrandModal from '@/components/BrandModal';
 import { BrandGridSkeleton } from '@/components/SkeletonLoader';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
+
+// Lazy load the modal since it's not needed on initial render
+const BrandModal = lazy(() => import('@/components/BrandModal'));
 
 export const dynamic = 'force-dynamic';
 
@@ -108,10 +110,13 @@ export default function HomePage() {
       setUserRole(role);
       setCanManageBrands(role === 'admin' || role === 'brand_manager');
 
-      // Load all brands for the organization (not just user's brands)
+      // Load all brands for the organization with creator info in a single query
       const { data, error } = await supabase
         .from('brands')
-        .select('*')
+        .select(`
+          *,
+          creator:profiles!brands_created_by_fkey(full_name, email)
+        `)
         .eq('organization_id', org.id)
         .order('created_at', { ascending: false });
 
@@ -120,23 +125,7 @@ export default function HomePage() {
         throw error;
       }
 
-      // Fetch creator profiles separately for each brand
-      const brandsWithCreators = await Promise.all(
-        (data || []).map(async (brand) => {
-          if (brand.created_by) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('full_name, email')
-              .eq('user_id', brand.created_by)
-              .single();
-            
-            return { ...brand, creator: profile };
-          }
-          return brand;
-        })
-      );
-
-      setBrands(brandsWithCreators);
+      setBrands(data || []);
     } catch (error: any) {
       console.error('Error loading brands:', error);
       toast.error(error.message || 'Failed to load brands');
@@ -145,17 +134,17 @@ export default function HomePage() {
     }
   };
 
-  const handleCreateBrand = () => {
+  const handleCreateBrand = useCallback(() => {
     setEditingBrand(null);
     setIsModalOpen(true);
-  };
+  }, []);
 
-  const handleEditBrand = (brand: Brand) => {
+  const handleEditBrand = useCallback((brand: Brand) => {
     setEditingBrand(brand);
     setIsModalOpen(true);
-  };
+  }, []);
 
-  const handleSaveBrand = async (brandData: Partial<Brand>) => {
+  const handleSaveBrand = useCallback(async (brandData: Partial<Brand>) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !organization) return;
 
@@ -193,9 +182,9 @@ export default function HomePage() {
       console.error('Error saving brand:', error);
       toast.error(error.message || 'Failed to save brand');
     }
-  };
+  }, [editingBrand, organization, supabase]);
 
-  const handleDeleteBrand = async (brandId: string) => {
+  const handleDeleteBrand = useCallback(async (brandId: string) => {
     try {
       const { error } = await supabase
         .from('brands')
@@ -210,12 +199,12 @@ export default function HomePage() {
       console.error('Error deleting brand:', error);
       toast.error('Failed to delete brand');
     }
-  };
+  }, [supabase]);
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     await supabase.auth.signOut();
     router.push('/login');
-  };
+  }, [supabase, router]);
 
   // Filter and sort brands
   const filteredAndSortedBrands = useMemo(() => {
@@ -568,46 +557,44 @@ export default function HomePage() {
           </div>
         ) : (
           <div className={viewMode === 'grid' 
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500'
-            : 'flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500'
+            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
+            : 'flex flex-col gap-4'
           }>
-            {filteredAndSortedBrands.map((brand, index) => (
-              <div
-                key={brand.id}
-                style={{
-                  animationDelay: `${index * 30}ms`,
-                }}
-                className="animate-in fade-in slide-in-from-bottom-2 duration-300"
-              >
-                {viewMode === 'grid' ? (
-                  <BrandCard
-                    brand={brand}
-                    currentUserId={currentUserId}
-                    canManage={canManageBrands}
-                    onEdit={handleEditBrand}
-                    onDelete={handleDeleteBrand}
-                  />
-                ) : (
-                  <BrandListItem
-                    brand={brand}
-                    currentUserId={currentUserId}
-                    canManage={canManageBrands}
-                    onEdit={handleEditBrand}
-                    onDelete={handleDeleteBrand}
-                  />
-                )}
-              </div>
+            {filteredAndSortedBrands.map((brand) => (
+              viewMode === 'grid' ? (
+                <BrandCard
+                  key={brand.id}
+                  brand={brand}
+                  currentUserId={currentUserId}
+                  canManage={canManageBrands}
+                  onEdit={handleEditBrand}
+                  onDelete={handleDeleteBrand}
+                />
+              ) : (
+                <BrandListItem
+                  key={brand.id}
+                  brand={brand}
+                  currentUserId={currentUserId}
+                  canManage={canManageBrands}
+                  onEdit={handleEditBrand}
+                  onDelete={handleDeleteBrand}
+                />
+              )
             ))}
           </div>
         )}
       </main>
 
-      <BrandModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSave={handleSaveBrand}
-        brand={editingBrand}
-      />
+      <Suspense fallback={null}>
+        {isModalOpen && (
+          <BrandModal
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            onSave={handleSaveBrand}
+            brand={editingBrand}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }
