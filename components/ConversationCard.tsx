@@ -226,13 +226,14 @@ export default function ConversationCard({
         {/* Type badge */}
         <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm rounded-full text-[10px] font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
           {conversation.is_flow 
-            ? conversation.flow_type === 'campaign' ? '📧 Campaign'
-            : conversation.flow_type === 'drip_sequence' ? '💧 Drip'
-            : conversation.flow_type === 'abandoned_cart' ? '🛒 Cart'
+            ? conversation.flow_type === 'abandoned_cart' ? '🛒 Cart'
             : conversation.flow_type === 'welcome_series' ? '👋 Welcome'
+            : conversation.flow_type === 'post_purchase' ? '🎁 Post-Purchase'
+            : conversation.flow_type === 'winback' ? '💌 Winback'
+            : conversation.flow_type === 'product_launch' ? '🚀 Launch'
+            : conversation.flow_type === 'educational_series' ? '📚 Education'
             : '🔄 Flow'
             : conversation.mode === 'planning' ? '📋 Planning'
-            : conversation.conversation_type === 'letter' ? '✉️ Letter'
             : '✉️ Email'}
         </div>
       </div>

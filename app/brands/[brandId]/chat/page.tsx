@@ -730,7 +730,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
       
       // Refresh conversations list
-      await fetchConversations();
+      await loadConversations();
       
     } catch (error) {
       console.error('Error executing bulk action:', error);

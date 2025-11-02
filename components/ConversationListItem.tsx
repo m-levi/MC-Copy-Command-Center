@@ -198,13 +198,14 @@ function ConversationListItem({
               : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
         }`}>
           {conversation.is_flow 
-            ? conversation.flow_type === 'campaign' ? '📧'
-            : conversation.flow_type === 'drip_sequence' ? '💧'
-            : conversation.flow_type === 'abandoned_cart' ? '🛒'
+            ? conversation.flow_type === 'abandoned_cart' ? '🛒'
             : conversation.flow_type === 'welcome_series' ? '👋'
+            : conversation.flow_type === 'post_purchase' ? '🎁'
+            : conversation.flow_type === 'winback' ? '💌'
+            : conversation.flow_type === 'product_launch' ? '🚀'
+            : conversation.flow_type === 'educational_series' ? '📚'
             : '🔄'
             : conversation.mode === 'planning' ? '📋' 
-            : conversation.conversation_type === 'letter' ? '✉️'
             : '✉️'}
         </div>
 
@@ -234,13 +235,14 @@ function ConversationListItem({
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
             }`}>
               {conversation.is_flow 
-                ? conversation.flow_type === 'campaign' ? 'Campaign'
-                : conversation.flow_type === 'drip_sequence' ? 'Drip'
-                : conversation.flow_type === 'abandoned_cart' ? 'Cart'
+                ? conversation.flow_type === 'abandoned_cart' ? 'Cart'
                 : conversation.flow_type === 'welcome_series' ? 'Welcome'
+                : conversation.flow_type === 'post_purchase' ? 'Post-Purchase'
+                : conversation.flow_type === 'winback' ? 'Winback'
+                : conversation.flow_type === 'product_launch' ? 'Launch'
+                : conversation.flow_type === 'educational_series' ? 'Education'
                 : 'Flow'
                 : conversation.mode === 'planning' ? 'Planning'
-                : conversation.conversation_type === 'letter' ? 'Letter'
                 : 'Email'}
             </span>
             {conversation.created_by_name && (
