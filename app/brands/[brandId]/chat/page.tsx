@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, use, useMemo, useCallback, lazy, Suspense } from 'react';
+import { useEffect, useState, useRef, use, useMemo, useCallback, lazy, Suspense, startTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType, FlowType, FlowOutline, FlowConversation, FlowOutlineData, BulkActionType } from '@/types';
 import { AI_MODELS } from '@/lib/ai-models';
@@ -75,6 +75,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [selectedModel, setSelectedModel] = useState<AIModel>('claude-4.5-sonnet');
   const [emailType, setEmailType] = useState<EmailType>('design');
   const [loading, setLoading] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [aiStatus, setAiStatus] = useState<AIStatus>('idle');
   const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);
@@ -547,27 +548,31 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     const startTime = performance.now();
 
     try {
+      // Check cache first for instant loading
+      const cached = getCachedMessages(currentConversation.id);
+      if (cached && cached.length > 0) {
+        setMessages(cached);
+        setLoadingMessages(false);
+        trackPerformance('load_messages', performance.now() - startTime, { 
+          source: 'cache',
+          count: cached.length 
+        });
+        
+        // Prefetch draft
+        const draft = loadDraft(currentConversation.id);
+        if (draft) {
+          setDraftContent(draft);
+        }
+        
+        return;
+      }
+
+      // Show loading state if not cached
+      setLoadingMessages(true);
+      
       // Use request coalescer to prevent duplicate calls
       await requestCoalescerRef.current.execute(
         async () => {
-          // Check cache first
-          const cached = getCachedMessages(currentConversation.id);
-          if (cached && cached.length > 0) {
-            setMessages(cached);
-            trackPerformance('load_messages', performance.now() - startTime, { 
-              source: 'cache',
-              count: cached.length 
-            });
-            
-            // Prefetch draft
-            const draft = loadDraft(currentConversation.id);
-            if (draft) {
-              setDraftContent(draft);
-            }
-            
-            return;
-          }
-
           // Load from database
           const { data, error } = await supabase
             .from('messages')
@@ -597,6 +602,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     } catch (error) {
       console.error('Error loading messages:', error);
       toast.error('Failed to load messages');
+    } finally {
+      setLoadingMessages(false);
     }
   };
 
@@ -649,6 +656,25 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   };
 
   const handleSelectConversation = async (conversationId: string) => {
+    // Optimistically update UI immediately for instant feedback
+    const conversation = conversations.find((c) => c.id === conversationId);
+    if (!conversation) return;
+
+    // Set loading state immediately
+    setLoadingMessages(true);
+    
+    // Update current conversation immediately (optimistic update)
+    setCurrentConversation(conversation);
+    setSelectedModel(conversation.model as AIModel);
+    setConversationMode(conversation.mode || 'planning');
+    setDraftContent(''); // Clear draft when switching
+    
+    // Set email type based on conversation
+    if (conversation.is_flow) {
+      setEmailType('flow');
+      setSelectedFlowType(conversation.flow_type || null);
+    }
+    
     // Abort any ongoing AI generation before switching
     if (abortControllerRef.current && sending) {
       abortControllerRef.current.abort();
@@ -657,26 +683,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       toast('Generation stopped - switching conversations', { icon: '⏹️' });
     }
 
-    // Auto-delete current conversation if it's empty
+    // Auto-delete current conversation if it's empty (do this after UI update)
     if (currentConversation && 
         messages.length === 0 && 
         currentConversation.id !== conversationId) {
-      await cleanupIfEmpty(currentConversation.id, 'empty_on_switch');
+      cleanupIfEmpty(currentConversation.id, 'empty_on_switch').catch(console.error);
     }
 
-    const conversation = conversations.find((c) => c.id === conversationId);
-    if (conversation) {
-      setCurrentConversation(conversation);
-      setSelectedModel(conversation.model as AIModel);
-      setConversationMode(conversation.mode || 'planning');
-      setDraftContent(''); // Clear draft when switching
-      
-      // Set email type based on conversation
-      if (conversation.is_flow) {
-        setEmailType('flow');
-        setSelectedFlowType(conversation.flow_type || null);
-      }
-      
+    // Use startTransition for non-urgent updates
+    startTransition(() => {
       // Load flow data if this is a flow conversation
       if (conversation.is_flow) {
         loadFlowData(conversation.id);
@@ -688,7 +703,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
       
       trackEvent('conversation_selected', { conversationId });
-    }
+    });
   };
   
   const handlePrefetchConversation = (conversationId: string) => {
@@ -1974,6 +1989,23 @@ Please generate the complete email copy following all the guidelines we discusse
                     </ul>
                   )}
                 </div>
+              </div>
+            </div>
+          ) : loadingMessages ? (
+            /* Loading skeleton */
+            <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              <div className="space-y-6">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="animate-pulse">
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 bg-gray-300 dark:bg-gray-700 rounded-full flex-shrink-0"></div>
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-1/4"></div>
+                        <div className="h-20 bg-gray-200 dark:bg-gray-800 rounded-lg"></div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ) : messages.length > 50 ? (

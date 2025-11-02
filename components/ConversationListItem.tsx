@@ -189,26 +189,6 @@ function ConversationListItem({
           </div>
         )}
 
-        {/* Icon/Badge */}
-        <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
-          isSelected
-            ? 'bg-blue-200 dark:bg-blue-800 text-blue-700 dark:text-blue-300'
-            : isActive 
-              ? 'bg-blue-500 dark:bg-blue-600 text-white' 
-              : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-        }`}>
-          {conversation.is_flow 
-            ? conversation.flow_type === 'abandoned_cart' ? '🛒'
-            : conversation.flow_type === 'welcome_series' ? '👋'
-            : conversation.flow_type === 'post_purchase' ? '🎁'
-            : conversation.flow_type === 'winback' ? '💌'
-            : conversation.flow_type === 'product_launch' ? '🚀'
-            : conversation.flow_type === 'educational_series' ? '📚'
-            : '🔄'
-            : conversation.mode === 'planning' ? '📋' 
-            : '✉️'}
-        </div>
-
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
