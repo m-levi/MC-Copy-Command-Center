@@ -2,6 +2,7 @@
 
 import { ConversationQuickAction } from '@/types';
 import { useEffect, useRef, useCallback, memo } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ConversationContextMenuProps {
   conversationId: string;
@@ -129,10 +130,11 @@ function ConversationContextMenu({
     }
   ];
 
-  return (
+  // Render menu in a portal to escape sidebar's stacking context
+  const menuContent = (
     <div
       ref={menuRef}
-      className="fixed z-[100] bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
+      className="fixed z-[9999] bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 py-1 min-w-[180px]"
       style={{
         left: `${adjustedPosition.x}px`,
         top: `${adjustedPosition.y}px`,
@@ -158,6 +160,13 @@ function ConversationContextMenu({
       })}
     </div>
   );
+
+  // Use portal to render outside the sidebar DOM tree
+  if (typeof document !== 'undefined') {
+    return createPortal(menuContent, document.body);
+  }
+
+  return null;
 }
 
 // Memoize to prevent re-renders when position hasn't changed

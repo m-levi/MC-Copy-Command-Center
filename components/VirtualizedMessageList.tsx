@@ -14,6 +14,7 @@ interface VirtualizedMessageListProps {
   onRegenerateSection: (sectionType: string, sectionTitle: string) => void;
   onEdit: (index: number, newContent: string) => void;
   onReaction: (messageId: string, reaction: 'thumbs_up' | 'thumbs_down') => void;
+  aiStatus?: string;
 }
 
 const ESTIMATED_MESSAGE_HEIGHT = 400; // Estimated average message height in pixels
@@ -30,6 +31,7 @@ export default function VirtualizedMessageList({
   onRegenerateSection,
   onEdit,
   onReaction,
+  aiStatus = 'idle',
 }: VirtualizedMessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: messages.length });
@@ -171,7 +173,14 @@ export default function VirtualizedMessageList({
     <div
       ref={containerRef}
       className="flex-1 overflow-y-auto px-8 py-8 bg-[#fcfcfc] dark:bg-gray-950"
-      style={{ position: 'relative' }}
+      style={{ 
+        position: 'relative',
+        // Performance optimizations for smooth scrolling
+        willChange: 'scroll-position',
+        WebkitOverflowScrolling: 'touch',
+        scrollBehavior: 'smooth',
+        contain: 'layout style paint',
+      }}
     >
       <div
         style={{
@@ -226,6 +235,8 @@ export default function VirtualizedMessageList({
                       : undefined
                   }
                   isRegenerating={regeneratingMessageId === message.id}
+                  isStreaming={message.role === 'assistant' && actualIndex === messages.length - 1 && sending}
+                  aiStatus={aiStatus}
                 />
               </div>
             );

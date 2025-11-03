@@ -19,8 +19,9 @@ export default function ThemeToggle() {
 
   return (
     <button
+      data-theme-toggle
       onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-      className="p-2 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-150 cursor-pointer hover:scale-105 active:scale-95 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+      className="p-2 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer focus:ring-2 focus:ring-blue-500 focus:outline-none"
       title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
     >

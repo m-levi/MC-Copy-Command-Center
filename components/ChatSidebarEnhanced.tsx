@@ -1,6 +1,6 @@
 'use client';
 
-import { ConversationWithStatus, OrganizationMember, SidebarViewMode, ConversationQuickAction, BulkActionType } from '@/types';
+import { ConversationWithStatus, OrganizationMember, SidebarViewMode, ConversationQuickAction, BulkActionType, Brand } from '@/types';
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import ConversationFilterDropdown, { FilterType } from './ConversationFilterDropdown';
 import ConversationSearch from './ConversationSearch';
@@ -32,6 +32,11 @@ interface ChatSidebarEnhancedProps {
   onSidebarWidthChange: (width: number) => void;
   onBulkAction?: (action: BulkActionType, conversationIds: string[]) => void;
   initialWidth?: number;
+  // Brand switcher props
+  allBrands?: Brand[];
+  onBrandSwitch?: (brandId: string) => void;
+  onNavigateHome?: () => void;
+  onNewFlow?: () => void;
 }
 
 export default function ChatSidebarEnhanced({
@@ -56,7 +61,11 @@ export default function ChatSidebarEnhanced({
   onViewModeChange,
   onSidebarWidthChange,
   onBulkAction,
-  initialWidth = 398
+  initialWidth = 398,
+  allBrands = [],
+  onBrandSwitch,
+  onNavigateHome,
+  onNewFlow
 }: ChatSidebarEnhancedProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -64,7 +73,17 @@ export default function ChatSidebarEnhanced({
   const [isResizing, setIsResizing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
+  const [showBrandSwitcher, setShowBrandSwitcher] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    // Load collapsed state from localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('sidebarCollapsed');
+      return saved === 'true';
+    }
+    return false;
+  });
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const brandSwitcherRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(600);
   const [bulkSelectMode, setBulkSelectMode] = useState(false);
   const [selectedConversationIds, setSelectedConversationIds] = useState<Set<string>>(new Set());
@@ -125,25 +144,54 @@ export default function ChatSidebarEnhanced({
     setSelectedConversationIds(new Set());
   }, []);
 
-  // Resize handlers
-  const startResizing = () => {
+  // Toggle collapse/expand
+  const toggleCollapse = useCallback(() => {
+    setIsCollapsed(prev => {
+      const newState = !prev;
+      // Save to localStorage
+      localStorage.setItem('sidebarCollapsed', String(newState));
+      return newState;
+    });
+  }, []);
+
+  // Optimized resize handlers with throttling
+  const animationFrameRef = useRef<number | null>(null);
+  
+  const startResizing = useCallback(() => {
     setIsResizing(true);
-  };
+  }, []);
 
-  const stopResizing = () => {
+  const stopResizing = useCallback(() => {
     setIsResizing(false);
-    // Notify parent of width change
-    onSidebarWidthChange(sidebarWidth);
-  };
-
-  const resize = (e: MouseEvent) => {
-    if (isResizing && sidebarRef.current) {
-      const newWidth = e.clientX;
-      if (newWidth >= 320 && newWidth <= 700) {
-        setSidebarWidth(newWidth);
-      }
+    // Cancel any pending animation frame
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
-  };
+    // Notify parent of final width (debounced)
+    setTimeout(() => {
+      onSidebarWidthChange(sidebarWidth);
+    }, 100);
+  }, [sidebarWidth, onSidebarWidthChange]);
+
+  const resize = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    
+    // Throttle with requestAnimationFrame for smooth 60fps
+    if (animationFrameRef.current) {
+      return; // Skip if frame already scheduled
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(() => {
+      if (sidebarRef.current) {
+        const newWidth = e.clientX;
+        if (newWidth >= 320 && newWidth <= 700) {
+          setSidebarWidth(newWidth);
+        }
+      }
+      animationFrameRef.current = null;
+    });
+  }, [isResizing]);
 
   useEffect(() => {
     if (isResizing) {
@@ -152,9 +200,13 @@ export default function ChatSidebarEnhanced({
       return () => {
         document.removeEventListener('mousemove', resize);
         document.removeEventListener('mouseup', stopResizing);
+        // Cleanup animation frame on unmount
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
       };
     }
-  }, [isResizing, sidebarWidth]);
+  }, [isResizing, resize, stopResizing]);
 
   // Calculate list height for virtualization
   useEffect(() => {
@@ -233,6 +285,38 @@ export default function ChatSidebarEnhanced({
     }
   }, [isMobileOpen, onMobileToggle]);
 
+  // Close brand switcher dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        showBrandSwitcher &&
+        brandSwitcherRef.current &&
+        !brandSwitcherRef.current.contains(event.target as Node)
+      ) {
+        setShowBrandSwitcher(false);
+      }
+    };
+
+    if (showBrandSwitcher) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showBrandSwitcher]);
+
+  // Keyboard shortcut: Cmd/Ctrl + B to toggle collapse
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Check for Cmd (Mac) or Ctrl (Windows/Linux) + B
+      if ((event.metaKey || event.ctrlKey) && event.key === 'b') {
+        event.preventDefault();
+        toggleCollapse();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleCollapse]);
+
   return (
     <>
       {/* Mobile overlay */}
@@ -246,9 +330,9 @@ export default function ChatSidebarEnhanced({
       <aside 
         ref={sidebarRef}
         className={`
-          bg-[#f0f0f0] dark:bg-gray-900 text-black dark:text-white 
-          flex flex-col h-screen border-r border-[#d8d8d8] dark:border-gray-700 
-          transition-all duration-200
+          bg-[#f8f8f8] dark:bg-gray-900 text-black dark:text-white 
+          flex flex-col h-screen border-r border-gray-200 dark:border-gray-700 
+          transition-all duration-300 ease-in-out
           
           /* Mobile: Fixed overlay sidebar (removed from flow) */
           fixed lg:relative
@@ -260,68 +344,149 @@ export default function ChatSidebarEnhanced({
           w-[85vw] sm:w-80 lg:w-auto
         `}
         style={{ 
-          width: window.innerWidth >= 1024 ? `${sidebarWidth}px` : undefined 
+          width: window.innerWidth >= 1024 
+            ? (isCollapsed ? '60px' : `${sidebarWidth}px`) 
+            : undefined 
         }}
       >
-        {/* Brand header with view controls */}
-        <div className="px-4 py-4 border-b border-[#d8d8d8] dark:border-gray-700">
-          <div className="flex items-center justify-between mb-2">
-            {/* Mobile close button */}
-            <button
-              onClick={() => onMobileToggle?.(false)}
-              className="lg:hidden mr-3 p-2 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              aria-label="Close sidebar"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+        {/* Brand header with breadcrumb navigation */}
+        <div className="border-b border-gray-200 dark:border-gray-700">
+          {!isCollapsed ? (
+            <>
+              {/* Breadcrumb Navigation - MOVED TO TOP */}
+              <div className="px-4 pt-3 pb-2">
+                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <button
+                    onClick={onNavigateHome}
+                    className="flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    <span>All Brands</span>
+                  </button>
+                  {allBrands.length > 0 && (
+                    <>
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                      <div className="relative flex-1 min-w-0" ref={brandSwitcherRef}>
+                        <button
+                          onClick={() => setShowBrandSwitcher(!showBrandSwitcher)}
+                          className="flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+                        >
+                          <span className="truncate">{brandName}</span>
+                          <svg 
+                            className={`w-3 h-3 flex-shrink-0 transition-transform duration-200 ${showBrandSwitcher ? 'rotate-180' : ''}`} 
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
 
-            <div className="flex-1 min-w-0">
-              <h2 className="text-base font-semibold truncate">{brandName}</h2>
-              <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Email Copywriter</p>
-            </div>
+                        {/* Brand Switcher Dropdown */}
+                        {showBrandSwitcher && (
+                          <div className="absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden min-w-[200px] max-w-[280px] z-50">
+                            <div className="max-h-[300px] overflow-y-auto">
+                              {allBrands.map((b) => (
+                                <button
+                                  key={b.id}
+                                  onClick={() => {
+                                    onBrandSwitch?.(b.id);
+                                    setShowBrandSwitcher(false);
+                                  }}
+                                  className={`
+                                    w-full px-3 py-2 text-sm text-left transition-colors cursor-pointer flex items-center justify-between
+                                    ${b.id === brandId
+                                      ? 'bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-300'
+                                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                    }
+                                  `}
+                                >
+                                  <span className="truncate">{b.name}</span>
+                                  {b.id === brandId && (
+                                    <svg className="w-4 h-4 flex-shrink-0 ml-2" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
 
-            {/* View mode toggle */}
-            <div className="flex items-center gap-1 bg-white dark:bg-gray-800 rounded-lg p-1 shadow-sm">
+              {/* Brand Title and Controls */}
+              <div className="px-4 pb-3 flex items-center justify-between">
+                {/* Mobile close button */}
+                <button
+                  onClick={() => onMobileToggle?.(false)}
+                  className="lg:hidden mr-2 p-1.5 hover:bg-gray-200 dark:hover:bg-gray-800 rounded transition-colors"
+                  aria-label="Close sidebar"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg font-semibold truncate text-gray-900 dark:text-white">{brandName}</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Email Copywriter</p>
+                </div>
+
+                {/* Collapse and Explorer buttons */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={toggleCollapse}
+                    className="hidden lg:block p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                    title="Collapse sidebar (Cmd/Ctrl+B)"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => setIsExplorerOpen(true)}
+                    className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                    title="Expand View"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            /* Collapsed header - just expand button */
+            <div className="hidden lg:flex flex-col items-center py-3 gap-3">
               <button
-                onClick={() => onViewModeChange('list')}
-                className={`p-1.5 rounded transition-all ${
-                  viewMode === 'list'
-                    ? 'bg-blue-500 text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-                title="List View"
+                onClick={toggleCollapse}
+                className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 transition-all"
+                title="Expand sidebar (Cmd/Ctrl+B)"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
                 </svg>
               </button>
+              {/* Back home button (icon only) */}
               <button
-                onClick={() => onViewModeChange('grid')}
-                className={`p-1.5 rounded transition-all ${
-                  viewMode === 'grid'
-                    ? 'bg-blue-500 text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-                title="Grid View"
+                onClick={onNavigateHome}
+                className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-500 transition-all"
+                title="All Brands"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                </svg>
-              </button>
-              <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></div>
-              <button
-                onClick={() => setIsExplorerOpen(true)}
-                className="p-1.5 rounded text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all group"
-                title="Expand View"
-              >
-                <svg className="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
               </button>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Bulk action bar */}
@@ -335,113 +500,188 @@ export default function ChatSidebarEnhanced({
           />
         )}
 
-        {/* New conversation button */}
-        <div className="p-3">
-          <button
-            onClick={onNewConversation}
-            className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 dark:from-blue-500 dark:to-blue-600 dark:hover:from-blue-600 dark:hover:to-blue-700 rounded-xl text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2.5 shadow-md hover:shadow-lg hover:scale-105 active:scale-95 cursor-pointer text-white group"
-          >
-            <svg
-              className="w-4 h-4 group-hover:rotate-90 transition-transform duration-200"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={2.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 4v16m8-8H4"
+        {!isCollapsed ? (
+          <>
+            {/* New conversation buttons - split into Email and Flow */}
+            <div className="p-3 flex gap-2">
+              <button
+                onClick={onNewConversation}
+                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 text-white"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span>New Email</span>
+              </button>
+              <button
+                onClick={onNewFlow || onNewConversation}
+                className="flex-1 py-2.5 px-3 bg-purple-600 hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 text-white"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span>New Flow</span>
+              </button>
+            </div>
+
+            {/* Filter dropdown */}
+            <div className="px-3 pb-3">
+              <ConversationFilterDropdown
+                currentFilter={currentFilter}
+                selectedPersonId={selectedPersonId}
+                teamMembers={teamMembers}
+                onFilterChange={onFilterChange}
               />
-            </svg>
-            <span>New Conversation</span>
-          </button>
-        </div>
+            </div>
 
-        {/* Filter dropdown */}
-        <div className="px-3 pb-3">
-          <ConversationFilterDropdown
-            currentFilter={currentFilter}
-            selectedPersonId={selectedPersonId}
-            teamMembers={teamMembers}
-            onFilterChange={onFilterChange}
-          />
-        </div>
-
-        {/* Search bar */}
-        <div className="px-3 pb-3">
-          <ConversationSearch
-            value={searchQuery}
-            onChange={setSearchQuery}
-            onClear={() => setSearchQuery('')}
-          />
-        </div>
+            {/* Search bar */}
+            <div className="px-3 pb-3">
+              <ConversationSearch
+                value={searchQuery}
+                onChange={setSearchQuery}
+                onClear={() => setSearchQuery('')}
+              />
+            </div>
+          </>
+        ) : (
+          /* Collapsed: Icon-only buttons */
+          <div className="hidden lg:flex flex-col items-center py-3 gap-3">
+            {/* New conversation icon */}
+            <button
+              onClick={onNewConversation}
+              className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md hover:shadow-lg"
+              title="New Conversation"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+            
+            {/* Search icon */}
+            <button
+              onClick={toggleCollapse}
+              className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 transition-all"
+              title="Expand to search"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {/* Conversations list/grid */}
         <div className="flex-1 min-h-0 overflow-hidden">
-          {viewMode === 'list' ? (
-            <VirtualizedConversationList
-              conversations={orderedConversations}
-              currentConversationId={currentConversationId}
-              pinnedConversationIds={pinnedConversationIds}
-              editingId={editingId}
-              editingTitle={editingTitle}
-              onSelect={handleMobileSelectConversation}
-              onSelectChild={onSelectConversation}
-              onPrefetch={onPrefetchConversation}
-              onStartRename={handleStartRename}
-              onSaveRename={handleSaveRename}
-              onCancelRename={handleCancelRename}
-              onDelete={handleDelete}
-              onQuickAction={onQuickAction}
-              setEditingTitle={setEditingTitle}
-              height={listHeight}
-              bulkSelectMode={bulkSelectMode}
-              selectedConversationIds={selectedConversationIds}
-              onToggleSelect={handleToggleConversationSelect}
-            />
+          {!isCollapsed ? (
+            viewMode === 'list' ? (
+              <VirtualizedConversationList
+                conversations={orderedConversations}
+                currentConversationId={currentConversationId}
+                pinnedConversationIds={pinnedConversationIds}
+                editingId={editingId}
+                editingTitle={editingTitle}
+                onSelect={handleMobileSelectConversation}
+                onSelectChild={onSelectConversation}
+                onPrefetch={onPrefetchConversation}
+                onStartRename={handleStartRename}
+                onSaveRename={handleSaveRename}
+                onCancelRename={handleCancelRename}
+                onDelete={handleDelete}
+                onQuickAction={onQuickAction}
+                setEditingTitle={setEditingTitle}
+                height={listHeight}
+                bulkSelectMode={bulkSelectMode}
+                selectedConversationIds={selectedConversationIds}
+                onToggleSelect={handleToggleConversationSelect}
+              />
+            ) : (
+              <div className="h-full overflow-y-auto px-2 py-2">
+                {orderedConversations.length === 0 ? (
+                  <div className="px-3 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+                    <svg className="w-12 h-12 mx-auto mb-3 text-gray-400 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                    </svg>
+                    <p>No conversations yet</p>
+                    <p className="text-xs mt-1">Start a new conversation to get started</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3">
+                    {orderedConversations.map(conversation => (
+                      <ConversationCard
+                        key={conversation.id}
+                        conversation={conversation}
+                        isActive={conversation.id === currentConversationId}
+                        isPinned={pinnedConversationIds.includes(conversation.id)}
+                        currentConversationId={currentConversationId}
+                        onSelect={() => handleMobileSelectConversation(conversation.id)}
+                        onSelectChild={onSelectConversation}
+                        onAction={(action) => onQuickAction(conversation.id, action)}
+                        onPrefetch={() => onPrefetchConversation?.(conversation.id)}
+                        bulkSelectMode={bulkSelectMode}
+                        isSelected={selectedConversationIds.has(conversation.id)}
+                        onToggleSelect={() => handleToggleConversationSelect(conversation.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
           ) : (
-            <div className="h-full overflow-y-auto px-2 py-2">
-              {orderedConversations.length === 0 ? (
-                <div className="px-3 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-                  <svg className="w-12 h-12 mx-auto mb-3 text-gray-400 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+            /* Collapsed: Icon-only conversation indicators */
+            <div className="hidden lg:flex flex-col items-center py-2 gap-2 overflow-y-auto">
+              {orderedConversations.slice(0, 10).map(conversation => (
+                <button
+                  key={conversation.id}
+                  onClick={() => handleMobileSelectConversation(conversation.id)}
+                  className={`
+                    p-2 rounded-lg transition-all
+                    ${conversation.id === currentConversationId
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'
+                    }
+                  `}
+                  title={conversation.title || 'Conversation'}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                   </svg>
-                  <p>No conversations yet</p>
-                  <p className="text-xs mt-1">Start a new conversation to get started</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3">
-                  {orderedConversations.map(conversation => (
-                    <ConversationCard
-                      key={conversation.id}
-                      conversation={conversation}
-                      isActive={conversation.id === currentConversationId}
-                      isPinned={pinnedConversationIds.includes(conversation.id)}
-                      currentConversationId={currentConversationId}
-                      onSelect={() => handleMobileSelectConversation(conversation.id)}
-                      onSelectChild={onSelectConversation}
-                      onAction={(action) => onQuickAction(conversation.id, action)}
-                      onPrefetch={() => onPrefetchConversation?.(conversation.id)}
-                      bulkSelectMode={bulkSelectMode}
-                      isSelected={selectedConversationIds.has(conversation.id)}
-                      onToggleSelect={() => handleToggleConversationSelect(conversation.id)}
-                    />
-                  ))}
-                </div>
-              )}
+                  {pinnedConversationIds.includes(conversation.id) && (
+                    <svg className="w-3 h-3 absolute top-0 right-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M10 2a1 1 0 011 1v1.323l3.954 1.582 1.599-.8a1 1 0 01.894 1.79l-1.233.616 1.738 5.42a1 1 0 01-.285 1.05A3.989 3.989 0 0115 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.738-5.42-1.233-.617a1 1 0 01.894-1.788l1.599.799L11 4.323V3a1 1 0 011-1z" />
+                    </svg>
+                  )}
+                </button>
+              ))}
             </div>
           )}
         </div>
 
 
-        {/* Resize handle - Desktop only */}
-        <div
-          className="hidden lg:block absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 dark:hover:bg-blue-400 transition-colors z-10 group"
-          onMouseDown={startResizing}
-        >
-          <div className="absolute top-1/2 right-0 transform -translate-y-1/2 w-1 h-12 bg-gray-300 dark:bg-gray-600 group-hover:bg-blue-500 dark:group-hover:bg-blue-400 transition-colors rounded-full"></div>
-        </div>
+        {/* Smooth, thin resize handle - Desktop only, hidden when collapsed */}
+        {!isCollapsed && (
+          <div
+            className={`
+              hidden lg:block absolute top-0 right-0 h-full cursor-col-resize z-10 group
+              transition-all duration-200 ease-out
+              ${isResizing ? 'w-1 bg-blue-400 dark:bg-blue-500' : 'w-0.5 bg-gray-200 dark:bg-gray-700 hover:bg-blue-400 hover:dark:bg-blue-500 hover:w-1'}
+            `}
+            onMouseDown={startResizing}
+            onDoubleClick={() => {
+              setSidebarWidth(398);
+              onSidebarWidthChange(398);
+            }}
+            title="Drag to resize, double-click to reset"
+          >
+            {/* Subtle grip indicator on hover */}
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-60 transition-opacity duration-200">
+              <div className="flex flex-col gap-0.5">
+                <div className="w-0.5 h-0.5 bg-white rounded-full"></div>
+                <div className="w-0.5 h-0.5 bg-white rounded-full"></div>
+                <div className="w-0.5 h-0.5 bg-white rounded-full"></div>
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Full-screen explorer */}

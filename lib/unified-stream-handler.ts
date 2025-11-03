@@ -9,6 +9,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { Message } from '@/types';
 import { parseMemoryInstructions, saveMemory } from '@/lib/conversation-memory-store';
 import { extractProductMentions, constructProductUrl } from '@/lib/web-search';
+import { smartExtractProductLinks, extractURLsFromSearchContext } from '@/lib/url-extractor';
 
 export type AIProvider = 'openai' | 'anthropic';
 
@@ -116,7 +117,8 @@ async function createStream(
   provider: AIProvider,
   modelId: string,
   formattedMessages: any[],
-  systemPrompt: string | null
+  systemPrompt: string | null,
+  websiteUrl?: string
 ): Promise<any> {
   const providerModel = getProviderModelName(modelId, provider);
   
@@ -127,11 +129,48 @@ async function createStream(
         ? [{ role: 'system', content: systemPrompt }, ...formattedMessages]
         : formattedMessages,
       stream: true,
+      tools: [{
+        type: 'web_search',
+      }],
+      tool_choice: 'auto',
     };
+    
+    console.log(`[${provider.toUpperCase()}] Web search tool enabled:`, { 
+      type: 'web_search',
+      websiteContext: websiteUrl ? `Searching ${new URL(websiteUrl).hostname}` : 'No website URL' 
+    });
     
     return await client.chat.completions.create(config);
   } else {
     // Anthropic
+    const tools = [];
+    
+    // Add web search tool
+    const searchTool: any = {
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: 5,
+    };
+    
+    if (websiteUrl) {
+      try {
+        searchTool.allowed_domains = [
+          new URL(websiteUrl).hostname,
+          'shopify.com',
+          'amazon.com',
+          'yelp.com',
+          'trustpilot.com',
+        ];
+        console.log(`[${provider.toUpperCase()}] Web search tool enabled with allowed domains:`, searchTool.allowed_domains);
+      } catch (err) {
+        console.warn(`[${provider.toUpperCase()}] Invalid website URL, web search enabled without domain filtering`);
+      }
+    } else {
+      console.log(`[${provider.toUpperCase()}] Web search tool enabled (no domain filtering - no website URL provided)`);
+    }
+    
+    tools.push(searchTool);
+    
     return await client.messages.create({
       model: providerModel,
       max_tokens: 4096,
@@ -142,6 +181,7 @@ async function createStream(
         type: 'enabled',
         budget_tokens: 2000,
       },
+      tools,
     });
   }
 }
@@ -155,10 +195,18 @@ function parseChunk(chunk: any, provider: AIProvider): {
   thinkingStart?: boolean;
   thinkingEnd?: boolean;
   isThinking?: boolean;
+  toolUse?: string;
+  toolResult?: string;
 } {
   if (provider === 'openai') {
     const reasoningContent = (chunk.choices[0]?.delta as any)?.reasoning_content || '';
     const content = chunk.choices[0]?.delta?.content || '';
+    
+    // Add tool_calls detection
+    const toolCalls = chunk.choices[0]?.delta?.tool_calls;
+    if (toolCalls && toolCalls.length > 0) {
+      return { toolUse: toolCalls[0].function?.name || 'web_search' };
+    }
     
     return {
       content,
@@ -179,6 +227,16 @@ function parseChunk(chunk: any, provider: AIProvider): {
       return { thinkingEnd: true };
     }
     
+    // Add server_tool_use detection
+    if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'server_tool_use') {
+      return { toolUse: chunk.content_block.name };
+    }
+    
+    // Add web_search_tool_result detection
+    if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'web_search_tool_result') {
+      return { toolResult: 'web_search' };
+    }
+    
     if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
       return { content: chunk.delta.text };
     }
@@ -188,26 +246,23 @@ function parseChunk(chunk: any, provider: AIProvider): {
 }
 
 /**
- * Handle product link extraction
+ * Handle product link extraction - uses smart extraction for REAL URLs only
  */
 async function extractProductLinks(
-  websiteUrl: string,
-  content: string
+  websiteUrl: string | undefined,
+  content: string,
+  userMessages: Message[]
 ): Promise<ProductLink[]> {
   try {
-    const productNames = extractProductMentions(content);
-    if (productNames.length === 0) return [];
+    // Extract user message content
+    const userMessageTexts = userMessages
+      .filter(m => m.role === 'user')
+      .map(m => m.content);
     
-    const links = await Promise.all(
-      productNames.map(async (name) => {
-        const result = constructProductUrl(websiteUrl, name);
-        return {
-          name: result.productName,
-          url: result.url,
-          description: result.description,
-        };
-      })
-    );
+    // Use smart extraction to find real URLs only
+    const links = smartExtractProductLinks(content, userMessageTexts, websiteUrl);
+    
+    console.log('[ProductLinks] Smart extraction found', links.length, 'real product links');
     
     return links;
   } catch (error) {
@@ -257,7 +312,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
   
   const client = await getClient(provider);
   const { formatted, system } = formatMessages(messages, systemPrompt, modelId, provider);
-  const stream = await createStream(client, provider, modelId, formatted, system);
+  const stream = await createStream(client, provider, modelId, formatted, system, websiteUrl);
   
   console.log(`[${provider.toUpperCase()}] Stream received, starting to read...`);
   
@@ -273,9 +328,31 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         let thinkingContent = '';
         let isInThinkingBlock = false;
         let currentStatusIndex = 0;
+        let webSearchContent = ''; // Track content from web searches
         
         for await (const chunk of stream) {
           const parsed = parseChunk(chunk, provider);
+          
+          // Handle tool usage
+          if (parsed.toolUse) {
+            console.log(`[${provider.toUpperCase()}] Tool use started: ${parsed.toolUse}`);
+            controller.enqueue(encoder.encode(`[TOOL:${parsed.toolUse}:START]`));
+            controller.enqueue(encoder.encode('[STATUS:searching_web]'));
+            continue;
+          }
+          
+          if (parsed.toolResult) {
+            console.log(`[${provider.toUpperCase()}] Tool result received: ${parsed.toolResult}`);
+            controller.enqueue(encoder.encode(`[TOOL:${parsed.toolResult}:END]`));
+            controller.enqueue(encoder.encode('[STATUS:analyzing_brand]'));
+            
+            // Capture the context around web search for URL extraction
+            // The AI's response after using web search often contains the URLs it found
+            if (parsed.toolResult === 'web_search') {
+              webSearchContent = fullResponse; // Snapshot current content
+            }
+            continue;
+          }
           
           // Handle thinking content
           if (parsed.thinkingStart || parsed.isThinking) {
@@ -329,11 +406,14 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           await saveMemoryInstructions(conversationId, fullResponse);
         }
         
-        // Extract and send product links
-        if (websiteUrl && fullResponse) {
-          const productLinks = await extractProductLinks(websiteUrl, fullResponse);
+        // Extract and send product links (ONLY real URLs, no fake construction)
+        if (fullResponse) {
+          const productLinks = await extractProductLinks(websiteUrl, fullResponse, messages);
           if (productLinks.length > 0) {
+            console.log('[Stream] Sending', productLinks.length, 'product links to client');
             controller.enqueue(encoder.encode(`\n\n[PRODUCTS:${JSON.stringify(productLinks)}]`));
+          } else {
+            console.log('[Stream] No product links found - box will be hidden');
           }
         }
         

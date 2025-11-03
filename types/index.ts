@@ -108,6 +108,7 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 export type AIStatus = 
   | 'idle'
   | 'thinking'
+  | 'searching_web'
   | 'analyzing_brand'
   | 'crafting_subject'
   | 'writing_hero'

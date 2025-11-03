@@ -1,41 +1,60 @@
-import { generateEmbedding, addBrandDocument } from '@/lib/rag-service';
+import { addBrandDocument } from '@/lib/rag-service';
 import { createClient } from '@/lib/supabase/server';
+import {
+  validationError,
+  authenticationError,
+  authorizationError,
+  externalAPIError,
+  databaseError,
+  withErrorHandling,
+} from '@/lib/api-error';
 
 export const runtime = 'edge';
 
-export async function POST(req: Request) {
+export const POST = withErrorHandling(async (req: Request) => {
+  const { brandId, docType, title, content } = await req.json();
+
+  // Validate required fields
+  if (!brandId || !docType || !title || !content) {
+    return validationError(
+      'Missing required fields',
+      'brandId, docType, title, and content are all required'
+    );
+  }
+
+  // Verify user authentication
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  
+  if (authError || !user) {
+    return authenticationError('Please log in to add documents');
+  }
+
+  // Verify user has access to this brand
+  const { data: brand, error: brandError } = await supabase
+    .from('brands')
+    .select('id')
+    .eq('id', brandId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (brandError) {
+    return databaseError('brand lookup', brandError.message);
+  }
+
+  if (!brand) {
+    return authorizationError('You do not have access to this brand');
+  }
+
+  // Check OpenAI API key
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.error('[Embeddings] OpenAI API key not configured');
+    return externalAPIError('OpenAI', 'API key not configured');
+  }
+
+  // Add document with embedding
   try {
-    const { brandId, docType, title, content } = await req.json();
-
-    if (!brandId || !docType || !title || !content) {
-      return new Response('Missing required fields', { status: 400 });
-    }
-
-    // Verify user has access to this brand
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      return new Response('Unauthorized', { status: 401 });
-    }
-
-    const { data: brand } = await supabase
-      .from('brands')
-      .select('id')
-      .eq('id', brandId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (!brand) {
-      return new Response('Brand not found or unauthorized', { status: 403 });
-    }
-
-    // Add document with embedding
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return new Response('OpenAI API key not configured', { status: 500 });
-    }
-
     const document = await addBrandDocument(
       brandId,
       docType,
@@ -45,16 +64,19 @@ export async function POST(req: Request) {
     );
 
     if (!document) {
-      return new Response('Failed to add document', { status: 500 });
+      return databaseError('document creation', 'Failed to create document record');
     }
 
     return new Response(JSON.stringify(document), {
+      status: 201,
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Embeddings API error:', error);
-    return new Response('Internal server error', { status: 500 });
+    if (error instanceof Error && error.message.includes('OpenAI')) {
+      return externalAPIError('OpenAI', error.message);
+    }
+    throw error; // Let withErrorHandling catch it
   }
-}
+});
 
 

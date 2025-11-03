@@ -1,18 +1,12 @@
-import { createClient } from '@/lib/supabase/server';
 import { getModelById } from '@/lib/ai-models';
-import OpenAI from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
-import { Message, ProductLink, FlowType } from '@/types';
+import { Message, FlowType } from '@/types';
 import { retryWithBackoff } from '@/lib/retry-utils';
-import { buildMessageContext, extractConversationContext } from '@/lib/conversation-memory';
+import { extractConversationContext } from '@/lib/conversation-memory';
 import { searchRelevantDocuments, buildRAGContext } from '@/lib/rag-service';
-import { extractProductMentions, constructProductUrl } from '@/lib/web-search';
 import { 
   loadMemories, 
   buildMemoryContext, 
   formatMemoryForPrompt,
-  parseMemoryInstructions,
-  saveMemory 
 } from '@/lib/conversation-memory-store';
 import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
 import { buildSystemPrompt } from '@/lib/chat-prompts';
@@ -22,22 +16,6 @@ import { handleUnifiedStream } from '@/lib/unified-stream-handler';
 // export const runtime = 'edge';
 
 // AI clients now loaded dynamically in unified-stream-handler to reduce bundle size
-
-// Helper function to construct product URLs
-// AI native search will provide actual product details if needed
-function constructProductLinks(
-  websiteUrl: string,
-  productNames: string[]
-): ProductLink[] {
-  return productNames.map(name => {
-    const result = constructProductUrl(websiteUrl, name);
-    return {
-      name: result.productName,
-      url: result.url,
-      description: result.description,
-    };
-  });
-}
 
 export async function POST(req: Request) {
   try {

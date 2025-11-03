@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { OrganizationMember } from '@/types';
 
-export type FilterType = 'all' | 'mine' | 'person';
+export type FilterType = 'all' | 'mine' | 'person' | 'emails' | 'flows' | 'planning';
 
 interface ConversationFilterDropdownProps {
   currentFilter: FilterType;
@@ -33,8 +33,11 @@ export default function ConversationFilterDropdown({
   }, []);
 
   const getFilterLabel = () => {
-    if (currentFilter === 'all') return 'All Team';
+    if (currentFilter === 'all') return 'All Conversations';
     if (currentFilter === 'mine') return 'Just Mine';
+    if (currentFilter === 'emails') return 'Emails Only';
+    if (currentFilter === 'flows') return 'Flows Only';
+    if (currentFilter === 'planning') return 'Planning Mode';
     if (currentFilter === 'person' && selectedPersonId) {
       const member = teamMembers.find(m => m.user_id === selectedPersonId);
       return member?.profile?.full_name || member?.profile?.email || 'Selected Person';
@@ -51,7 +54,7 @@ export default function ConversationFilterDropdown({
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
       >
         <span className="flex items-center gap-2">
           <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,11 +73,16 @@ export default function ConversationFilterDropdown({
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-64 overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-20 max-h-96 overflow-y-auto">
+          {/* Owner Section */}
+          <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-200 dark:border-gray-700">
+            Owner
+          </div>
+          
           <button
             onClick={() => handleFilterSelect('all')}
-            className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors ${
-              currentFilter === 'all' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'
+            className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+              currentFilter === 'all' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'
             }`}
           >
             <div className="flex items-center gap-2">
@@ -87,8 +95,8 @@ export default function ConversationFilterDropdown({
 
           <button
             onClick={() => handleFilterSelect('mine')}
-            className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors ${
-              currentFilter === 'mine' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'
+            className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+              currentFilter === 'mine' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'
             }`}
           >
             <div className="flex items-center gap-2">
@@ -99,20 +107,69 @@ export default function ConversationFilterDropdown({
             </div>
           </button>
 
+          {/* Type Section */}
+          <div className="border-t border-gray-200 dark:border-gray-700 mt-1"></div>
+          <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            Type
+          </div>
+
+          <button
+            onClick={() => handleFilterSelect('emails')}
+            className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+              currentFilter === 'emails' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              Emails Only
+            </div>
+          </button>
+
+          <button
+            onClick={() => handleFilterSelect('flows')}
+            className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+              currentFilter === 'flows' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Flows Only
+            </div>
+          </button>
+
+          <button
+            onClick={() => handleFilterSelect('planning')}
+            className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+              currentFilter === 'planning' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+              </svg>
+              Planning Mode
+            </div>
+          </button>
+
+          {/* Team Members Section */}
           {teamMembers.length > 0 && (
             <>
-              <div className="border-t border-gray-200 my-1"></div>
-              <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <div className="border-t border-gray-200 dark:border-gray-700 mt-1"></div>
+              <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                 Team Members
               </div>
               {teamMembers.map((member) => (
                 <button
                   key={member.user_id}
                   onClick={() => handleFilterSelect('person', member.user_id)}
-                  className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors ${
+                  className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
                     currentFilter === 'person' && selectedPersonId === member.user_id
-                      ? 'bg-blue-50 text-blue-700 font-medium'
-                      : 'text-gray-700'
+                      ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium'
+                      : 'text-gray-700 dark:text-gray-300'
                   }`}
                 >
                   <div className="flex items-center gap-2">

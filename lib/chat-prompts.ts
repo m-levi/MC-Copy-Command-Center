@@ -9,6 +9,21 @@ export interface PromptContext {
   contextInfo: string;
   memoryContext?: string;
   emailType?: string;
+  websiteUrl?: string;
+}
+
+/**
+ * Safely extract hostname from URL with error handling
+ */
+function getHostnameFromUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  
+  try {
+    return new URL(url).hostname;
+  } catch (err) {
+    console.warn('Invalid website URL, cannot extract hostname:', url);
+    return null;
+  }
 }
 
 /**
@@ -70,8 +85,15 @@ ${context.memoryContext || ''}
 
 You have access to powerful tools to enhance your responses:
 
-**🔍 Web Search:** You can search the internet for current information, product details, market trends, competitor analysis, and more. Use this when you need:
+**🔍 Web Search:** You can search the internet for current information, product details, market trends, competitor analysis, and more${(() => {
+  const hostname = getHostnameFromUrl(context.websiteUrl);
+  return hostname ? ` (including ${hostname})` : '';
+})()}. 
+
+**When users ask about products - ALWAYS search the website first** to find real product names and details. Use this when you need:
+- Current product catalog from the brand's website (search: "products" or "shop")
 - Current pricing or product availability
+- Product information and details
 - Recent industry trends or statistics  
 - Competitor information
 - Real-time data beyond your knowledge cutoff
@@ -373,11 +395,27 @@ ${context.memoryContext || ''}
 
 You have access to powerful tools to enhance your email copy:
 
-**🔍 Web Search:** Search the internet for current product information, pricing, reviews, and market trends. Use this to:
+**🔍 Web Search:** Search the internet for current product information, pricing, reviews, and market trends${(() => {
+  const hostname = getHostnameFromUrl(context.websiteUrl);
+  return hostname ? ` (especially from ${hostname})` : '';
+})()}. 
+
+**IMPORTANT - When the user asks about products:**
+- ALWAYS use web search to find real products from the brand's website
+- Search for "products" or "shop" on the website to discover what's available
+- Get accurate product names, descriptions, and details
+- Include product names in quotes in your response: "Product Name"
+- This creates clickable product links for the user
+
+Use web search to:
+- Find products on the brand's website (${context.websiteUrl || 'the brand website'})
 - Verify current product availability and pricing
+- Get accurate product descriptions and details
 - Find recent customer reviews or testimonials
 - Research competitor offers
 - Get up-to-date statistics or data
+
+**Example:** If asked "create an email about our coffee products", search the website for coffee products first, then use the real product names you find.
 
 **🌐 Web Fetch:** Directly fetch content from specific URLs (especially the brand website). Use this to:
 - Review current product pages for accurate details
@@ -631,6 +669,7 @@ export function buildSystemPrompt(
     contextInfo,
     memoryContext: options.memoryContext,
     emailType: options.emailType,
+    websiteUrl: brandContext?.website_url,
   };
 
   // Section regeneration

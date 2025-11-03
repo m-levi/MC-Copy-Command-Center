@@ -3,6 +3,7 @@
 import { Brand } from '@/types';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 interface BrandCardProps {
   brand: Brand & { creator?: { full_name?: string; email: string } };
@@ -22,6 +23,11 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
   const handleCardClick = () => {
     setIsNavigating(true);
     router.push(`/brands/${brand.id}/chat`);
+  };
+
+  // Prefetch the route on hover for instant navigation
+  const handleMouseEnter = () => {
+    router.prefetch(`/brands/${brand.id}/chat`);
   };
 
   const handleMenuClick = (e: React.MouseEvent) => {
@@ -51,7 +57,8 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
   return (
     <div
       onClick={handleCardClick}
-      className={`relative bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-2xl transition-all duration-300 cursor-pointer p-6 border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 hover:-translate-y-2 group ${
+      onMouseEnter={handleMouseEnter}
+      className={`relative bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer p-6 border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 hover:-translate-y-1 group ${
         isNavigating ? 'opacity-50 scale-95 pointer-events-none' : ''
       }`}
     >

@@ -1,9 +1,7 @@
 'use client';
 
 import { EmailSection } from '@/types';
-import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { useState, memo } from 'react';
 
 interface EmailSectionCardProps {
   section: EmailSection;
@@ -11,7 +9,8 @@ interface EmailSectionCardProps {
   isRegenerating?: boolean;
 }
 
-export default function EmailSectionCard({
+// Memoized to prevent re-renders when parent updates
+const EmailSectionCard = memo(function EmailSectionCard({
   section,
   onRegenerateSection,
   isRegenerating = false,
@@ -30,7 +29,14 @@ export default function EmailSectionCard({
   };
 
   return (
-    <div className="border-2 border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden mb-2 bg-white dark:bg-gray-800 hover:border-blue-400 dark:hover:border-blue-500 transition-all shadow-sm hover:shadow-md">
+    <div 
+      className="border-2 border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden mb-2 bg-white dark:bg-gray-800 hover:border-blue-400 dark:hover:border-blue-500 transition-all shadow-sm hover:shadow-md"
+      style={{
+        // Optimize rendering performance
+        contain: 'layout style paint',
+        contentVisibility: 'auto',
+      }}
+    >
       {/* Section Header */}
       <div
         className="flex items-center justify-between px-3 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 border-b-2 border-gray-300 dark:border-gray-600 cursor-pointer hover:from-blue-50 hover:to-blue-100 dark:hover:from-blue-900/30 dark:hover:to-blue-800/30 transition-all"
@@ -69,7 +75,7 @@ export default function EmailSectionCard({
               e.stopPropagation();
               handleCopy();
             }}
-            className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-md transition-all hover:scale-105"
+            className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-md transition-all hover:scale-105 cursor-pointer"
             title="Copy section"
           >
             {copied ? (
@@ -108,7 +114,7 @@ export default function EmailSectionCard({
               handleRegenerate();
             }}
             disabled={isRegenerating}
-            className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-md transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-md transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 cursor-pointer"
             title="Regenerate section"
           >
             <svg
@@ -130,29 +136,28 @@ export default function EmailSectionCard({
         </div>
       </div>
 
-      {/* Section Content */}
+      {/* Section Content - Clean Code Block */}
       {isExpanded && (
         <div className="px-4 py-3 bg-white dark:bg-gray-900">
-          <div className="prose prose-sm max-w-none
-            prose-headings:font-bold prose-headings:text-gray-900 dark:prose-headings:text-gray-100
-            prose-p:text-gray-800 dark:prose-p:text-gray-200 prose-p:leading-relaxed
-            prose-li:text-gray-800 dark:prose-li:text-gray-200
-            prose-strong:text-gray-900 dark:prose-strong:text-gray-100 prose-strong:font-bold
-            prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
-            prose-code:text-pink-600 dark:prose-code:text-pink-400 prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs
-            prose-pre:bg-gray-50 dark:prose-pre:bg-gray-800 prose-pre:border prose-pre:border-gray-200 dark:prose-pre:border-gray-700
-            prose-blockquote:border-l-4 prose-blockquote:border-blue-500 prose-blockquote:bg-blue-50 dark:prose-blockquote:bg-blue-950/30 prose-blockquote:py-2 prose-blockquote:px-4
-            text-gray-900 dark:text-gray-100
-          ">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <div className="bg-gray-50 dark:bg-gray-800/50 rounded border border-gray-200 dark:border-gray-700 p-3 font-mono text-xs overflow-hidden">
+            <pre className="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200 leading-relaxed">
               {section.content}
-            </ReactMarkdown>
+            </pre>
           </div>
         </div>
       )}
     </div>
   );
-}
+}, (prevProps, nextProps) => {
+  // Only re-render if section content or regeneration state changes
+  return (
+    prevProps.section.content === nextProps.section.content &&
+    prevProps.section.title === nextProps.section.title &&
+    prevProps.isRegenerating === nextProps.isRegenerating
+  );
+});
+
+export default EmailSectionCard;
 
 // Helper function to parse email sections from markdown
 export function parseEmailSections(content: string): EmailSection[] | null {

@@ -269,7 +269,8 @@ export default function ChatInput({
               placeholder={getPlaceholder()}
               disabled={disabled || isGenerating}
               rows={1}
-              className="w-full text-sm sm:text-base leading-relaxed font-normal bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 resize-none max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full text-sm sm:text-base leading-relaxed font-normal bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 focus:border-none outline-none resize-none max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ border: 'none', outline: 'none', boxShadow: 'none' }}
             />
           </div>
           

@@ -17,7 +17,7 @@ export default function ThoughtProcess({ thinking, isStreaming = false }: Though
     <div className="mb-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors group"
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer group"
       >
         <div className="flex items-center gap-2.5">
           <span className="text-sm text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300">
@@ -45,8 +45,8 @@ export default function ThoughtProcess({ thinking, isStreaming = false }: Though
       </button>
       
       {isExpanded && (
-        <div className="px-4 pb-4 pt-3 border-t border-gray-200 dark:border-gray-700">
-          <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap leading-relaxed">
+        <div className="px-4 pb-4 pt-3 border-t border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words leading-relaxed max-w-full">
             {thinking}
           </div>
         </div>

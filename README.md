@@ -1,281 +1,261 @@
-# Email Copywriter AI
+# Email Copywriter AI - Command Center
 
-An AI-powered email copywriting tool specifically designed for e-commerce brands. Write compelling email copy with the help of advanced AI models like GPT-4 and Claude Sonnet 4.5.
+A modern, AI-powered email copywriting platform built with Next.js 16, React 19, TypeScript, and Supabase.
 
-## Features
+## 🎯 Overview
 
-- 🎨 **Brand Management**: Store and manage multiple brands with detailed brand information, guidelines, and copywriting style guides
-- 💬 **AI Chat Interface**: Modern chat interface similar to ChatGPT and Cursor for seamless interaction
-- 🤖 **Multiple AI Models**: Choose from GPT-4o, GPT-4 Turbo, GPT-3.5 Turbo, Claude Sonnet 4.5, and Claude Opus 3.5
-- 📝 **Conversation History**: Keep track of all your email copywriting conversations per brand
-- 🔐 **Secure Authentication**: Built with Supabase authentication
-- 🎯 **Context-Aware**: AI automatically uses your brand details, guidelines, and style guide for consistent copy
+Command Center is an enterprise-grade application that helps teams create compelling email copy using state-of-the-art AI models (GPT-5, Claude 4.5). It features:
 
-## Tech Stack
+- **Multi-brand management** - Manage multiple brands with unique voice and style
+- **AI-powered copywriting** - Generate emails using latest AI models
+- **Flow builder** - Create multi-email sequences and campaigns
+- **Team collaboration** - Organization-based access with role management
+- **Real-time streaming** - See AI responses as they're generated
+- **Conversation memory** - AI learns and remembers context
+- **Document RAG** - Upload brand documents for better context
+- **Product linking** - Automatically link products in emails
+- **Dark mode** - Full dark mode support
+- **Mobile responsive** - Works on all devices
 
-- **Frontend**: Next.js 14+ (App Router), React, TypeScript, Tailwind CSS
-- **Backend**: Next.js API Routes (Edge Runtime)
-- **Database**: Supabase (PostgreSQL)
-- **Authentication**: Supabase Auth
-- **AI**: OpenAI API, Anthropic API
-- **Deployment**: Vercel
-
-## Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Node.js 18+ and npm
-- A Supabase account
+- Supabase account
 - OpenAI API key
-- Anthropic API key
+- Anthropic API key (optional)
 
-### Setup
+### Installation
 
 1. **Clone the repository**
-
 ```bash
-git clone <your-repo-url>
+git clone <repo-url>
 cd command_center
 ```
 
 2. **Install dependencies**
-
 ```bash
 npm install
 ```
 
-3. **Set up Supabase**
-
-   - Create a new Supabase project at [supabase.com](https://supabase.com)
-   - Run the following SQL in the Supabase SQL Editor:
-
-```sql
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Profiles table
-CREATE TABLE profiles (
-  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Brands table
-CREATE TABLE brands (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  brand_details TEXT,
-  brand_guidelines TEXT,
-  copywriting_style_guide TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Conversations table
-CREATE TABLE conversations (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  brand_id UUID NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  model TEXT NOT NULL,
-  conversation_type TEXT NOT NULL DEFAULT 'email',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Messages table
-CREATE TABLE messages (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Future automation tables (not yet implemented)
-CREATE TABLE automation_outlines (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  outline_data JSONB,
-  approved BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE automation_emails (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  automation_id UUID NOT NULL REFERENCES automation_outlines(id) ON DELETE CASCADE,
-  sequence_order INT NOT NULL,
-  email_copy TEXT,
-  status TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable Row Level Security
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE brands ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE automation_outlines ENABLE ROW LEVEL SECURITY;
-ALTER TABLE automation_emails ENABLE ROW LEVEL SECURITY;
-
--- RLS Policies for profiles
-CREATE POLICY "Users can view own profile" ON profiles
-  FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own profile" ON profiles
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own profile" ON profiles
-  FOR UPDATE USING (auth.uid() = user_id);
-
--- RLS Policies for brands
-CREATE POLICY "Users can view own brands" ON brands
-  FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own brands" ON brands
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own brands" ON brands
-  FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete own brands" ON brands
-  FOR DELETE USING (auth.uid() = user_id);
-
--- RLS Policies for conversations
-CREATE POLICY "Users can view own conversations" ON conversations
-  FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own conversations" ON conversations
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own conversations" ON conversations
-  FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete own conversations" ON conversations
-  FOR DELETE USING (auth.uid() = user_id);
-
--- RLS Policies for messages
-CREATE POLICY "Users can view messages from own conversations" ON messages
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM conversations
-      WHERE conversations.id = messages.conversation_id
-      AND conversations.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Users can insert messages to own conversations" ON messages
-  FOR INSERT WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM conversations
-      WHERE conversations.id = messages.conversation_id
-      AND conversations.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Users can delete messages from own conversations" ON messages
-  FOR DELETE USING (
-    EXISTS (
-      SELECT 1 FROM conversations
-      WHERE conversations.id = messages.conversation_id
-      AND conversations.user_id = auth.uid()
-    )
-  );
-
--- RLS Policies for automation_outlines
-CREATE POLICY "Users can view own automation outlines" ON automation_outlines
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM conversations
-      WHERE conversations.id = automation_outlines.conversation_id
-      AND conversations.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Users can insert own automation outlines" ON automation_outlines
-  FOR INSERT WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM conversations
-      WHERE conversations.id = automation_outlines.conversation_id
-      AND conversations.user_id = auth.uid()
-    )
-  );
-
--- RLS Policies for automation_emails
-CREATE POLICY "Users can view own automation emails" ON automation_emails
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM automation_outlines
-      JOIN conversations ON conversations.id = automation_outlines.conversation_id
-      WHERE automation_outlines.id = automation_emails.automation_id
-      AND conversations.user_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Users can insert own automation emails" ON automation_emails
-  FOR INSERT WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM automation_outlines
-      JOIN conversations ON conversations.id = automation_outlines.conversation_id
-      WHERE automation_outlines.id = automation_emails.automation_id
-      AND conversations.user_id = auth.uid()
-    )
-  );
-```
-
-4. **Configure environment variables**
-
-   - Copy `env.example` to `.env.local`
-   - Fill in your credentials:
-
+3. **Set up environment variables**
 ```bash
-# Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-
-# AI API Keys (Server-side only)
-OPENAI_API_KEY=your_openai_api_key
-ANTHROPIC_API_KEY=your_anthropic_api_key
+cp env.example .env.local
 ```
 
-5. **Run the development server**
+Edit `.env.local` with your credentials:
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+```
 
+4. **Run database migrations**
+
+Execute the SQL files in `docs/database-migrations/` in your Supabase SQL editor in this order:
+1. `DATABASE_MIGRATION.sql`
+2. `ORGANIZATION_MIGRATION.sql`
+3. `CONVERSATION_MEMORY_MIGRATION.sql`
+4. `FLOW_DATABASE_MIGRATION.sql`
+5. `THINKING_CONTENT_MIGRATION.sql`
+6. `USER_PREFERENCES_MIGRATION.sql`
+7. `PLANNING_MODE_MIGRATION.sql`
+8. `PRODUCT_SEARCH_MIGRATION.sql`
+9. `PERFORMANCE_OPTIMIZATION_INDEXES.sql`
+10. `AUTH_SECURITY_IMPROVEMENTS.sql`
+11. `SUPABASE_PERFORMANCE_OPTIMIZATIONS.sql`
+12. `FIX_MESSAGES_RLS_POLICY.sql`
+
+5. **Start development server**
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see the app.
+6. **Open in browser**
+```
+http://localhost:3000
+```
 
-## Usage
+## 📚 Documentation
 
-1. **Sign Up**: Create an account using email and password
-2. **Create a Brand**: Add your brand details, guidelines, and copywriting style guide
-3. **Start Writing**: Click on a brand to open the chat interface
-4. **Choose AI Model**: Select your preferred AI model from the dropdown
-5. **Chat**: Start a conversation and let the AI help you write amazing email copy!
+- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Detailed setup instructions
+- **[ARCHITECTURE_OVERVIEW.md](ARCHITECTURE_OVERVIEW.md)** - System architecture
+- **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Deployment guide
+- **[TROUBLESHOOTING_GUIDE.md](TROUBLESHOOTING_GUIDE.md)** - Common issues
+- **[FINAL_REPORT.md](FINAL_REPORT.md)** - Comprehensive code review
 
-## Deployment
+## 🏗️ Architecture
 
-### Deploy to Vercel
+### Tech Stack
 
-1. Push your code to GitHub
-2. Connect your repository to Vercel
-3. Configure environment variables in Vercel dashboard
-4. Deploy!
+- **Framework**: Next.js 16 (App Router)
+- **UI**: React 19, TailwindCSS 4
+- **Language**: TypeScript (strict mode)
+- **Database**: Supabase (PostgreSQL)
+- **Auth**: Supabase Auth
+- **AI**: OpenAI (GPT-5), Anthropic (Claude 4.5)
+- **State**: React hooks, Context API
+- **Styling**: TailwindCSS with dark mode
+- **Icons**: Heroicons, Lucide React
 
-## Future Enhancements
+### Project Structure
 
-- **Email Automation Flows**: Multi-step agentic AI process for creating email automation sequences
-- **Email Templates**: Save and reuse successful email copy
-- **Analytics**: Track email performance metrics
-- **Collaboration**: Share brands and conversations with team members
-- **Export**: Export email copy in various formats
+```
+command_center/
+├── app/                    # Next.js app directory
+│   ├── api/               # API routes
+│   ├── brands/            # Brand management
+│   ├── admin/             # Admin dashboard
+│   ├── settings/          # User settings
+│   └── page.tsx           # Homepage
+│
+├── components/            # React components
+│   ├── ui/               # Reusable UI components
+│   └── *.tsx             # Feature components
+│
+├── lib/                   # Utilities and services
+│   ├── supabase/         # Supabase clients
+│   ├── ai-models.ts      # AI model configurations
+│   ├── api-error.ts      # Error handling
+│   └── *.ts              # Other utilities
+│
+├── hooks/                 # Custom React hooks
+├── types/                 # TypeScript types
+├── docs/                  # Documentation
+│   ├── archive/          # Archived docs
+│   └── database-migrations/  # SQL migrations
+│
+└── public/               # Static assets
+```
 
-## License
+## 🎨 Features
 
-MIT
+### Brand Management
+- Create and manage multiple brands
+- Define brand voice, tone, and guidelines
+- Upload brand documents for context
+- Extract brand info from websites
 
-## Support
+### AI Copywriting
+- Support for multiple AI models (GPT-5, Claude 4.5)
+- Real-time streaming responses
+- Thinking process visualization
+- Conversation memory and context
+- Product linking and search
+- Email type templates (promotional, transactional, etc.)
 
-For issues and questions, please open an issue on GitHub.
+### Flow Builder
+- Create multi-email sequences
+- Plan and outline entire campaigns
+- Generate all emails at once
+- Navigate between related emails
+- Approve outlines before generation
+
+### Team Collaboration
+- Organization-based access control
+- Role management (admin, brand_manager, member)
+- Team member invitations
+- Activity tracking
+
+### Performance
+- Virtual scrolling for large lists
+- Optimistic UI updates
+- Request caching
+- Offline support with queue
+- Code splitting and lazy loading
+
+## 🔒 Security
+
+- Row Level Security (RLS) policies
+- API keys server-side only
+- Input validation and sanitization
+- XSS protection with DOMPurify
+- CSRF protection
+- Secure session management
+
+## 🧪 Development
+
+### Available Scripts
+
+```bash
+npm run dev      # Start development server
+npm run build    # Build for production
+npm run start    # Start production server
+npm run lint     # Run ESLint
+```
+
+### Code Quality
+
+- **TypeScript strict mode** enabled
+- **ESLint** configured
+- **Prettier** formatting (recommended)
+- **Git hooks** for pre-commit checks (optional)
+
+### Testing
+
+Manual testing checklist in `FINAL_REPORT.md`.
+
+For automated testing (recommended):
+- Unit tests: Jest + React Testing Library
+- Integration tests: Jest
+- E2E tests: Playwright
+
+## 📊 Performance
+
+- **Lighthouse Score**: Aim for 90+ on all metrics
+- **Bundle Size**: Optimized with code splitting
+- **Database**: Indexed queries, RLS enabled
+- **Caching**: Response cache, browser cache
+- **CDN**: Vercel Edge Network (when deployed)
+
+## 🚢 Deployment
+
+### Vercel (Recommended)
+
+1. Connect GitHub repository to Vercel
+2. Add environment variables
+3. Deploy
+
+### Docker (Alternative)
+
+```bash
+npm run build
+docker build -t command-center .
+docker run -p 3000:3000 command-center
+```
+
+See **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** for full guide.
+
+## 🤝 Contributing
+
+1. Create a feature branch
+2. Make your changes
+3. Run linting and tests
+4. Submit a pull request
+
+## 📝 License
+
+Proprietary - All rights reserved
+
+## 🙏 Acknowledgments
+
+- Next.js team for the amazing framework
+- Supabase for backend infrastructure
+- OpenAI and Anthropic for AI models
+- Vercel for hosting
+
+## 📞 Support
+
+For issues and questions:
+- Check **[TROUBLESHOOTING_GUIDE.md](TROUBLESHOOTING_GUIDE.md)**
+- Review **[FINAL_REPORT.md](FINAL_REPORT.md)**
+- Contact the development team
+
+---
+
+**Version**: 1.0.0  
+**Last Updated**: November 3, 2025  
+**Status**: Production Ready ✅

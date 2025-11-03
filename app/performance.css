@@ -1,0 +1,437 @@
+/**
+ * Global Performance Optimizations
+ * 
+ * These CSS rules enhance scroll performance, reduce jank,
+ * and improve rendering across the entire application.
+ */
+
+/* ============================================
+   SMOOTH SCROLLING OPTIMIZATIONS
+   ============================================ */
+
+/* Enable smooth scrolling globally */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Hardware-accelerated scrolling on iOS */
+* {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Optimize scrollable containers */
+.scroll-container,
+[class*="overflow-y-auto"],
+[class*="overflow-x-auto"] {
+  /* Use GPU for scroll */
+  will-change: scroll-position;
+  
+  /* Prevent layout thrashing */
+  contain: layout style paint;
+  
+  /* Smooth momentum scrolling */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ============================================
+   REDUCE LAYOUT THRASHING
+   ============================================ */
+
+/* Isolate message components for better performance */
+.message-item,
+[data-message-id] {
+  contain: layout style paint;
+  content-visibility: auto;
+}
+
+/* Isolate chat sections */
+.chat-section {
+  contain: layout;
+}
+
+/* ============================================
+   ANIMATION PERFORMANCE
+   ============================================ */
+
+/* Only animate transform and opacity (GPU-accelerated) */
+@media (prefers-reduced-motion: no-preference) {
+  .animate-bounce,
+  .animate-pulse,
+  .animate-spin {
+    will-change: transform;
+  }
+  
+  .animate-fade {
+    will-change: opacity;
+  }
+}
+
+/* Disable animations if user prefers reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   FONT RENDERING OPTIMIZATION
+   ============================================ */
+
+body {
+  /* Optimize font rendering */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  
+  /* Improve text legibility during scale */
+  text-rendering: optimizeLegibility;
+}
+
+/* ============================================
+   IMAGE LOADING OPTIMIZATION
+   ============================================ */
+
+img {
+  /* Lazy load images by default */
+  loading: lazy;
+  
+  /* Prevent layout shift */
+  height: auto;
+}
+
+/* ============================================
+   PREVENT JANK ON HOVER/FOCUS
+   ============================================ */
+
+/* Optimize interactive elements */
+button,
+a,
+[role="button"] {
+  /* Prevent layout on hover */
+  contain: layout style;
+  
+  /* Hint for hover animations */
+  will-change: auto;
+}
+
+button:hover,
+a:hover,
+[role="button"]:hover {
+  /* Only animate transform/opacity */
+  will-change: transform;
+}
+
+/* ============================================
+   VIRTUAL SCROLLING OPTIMIZATION
+   ============================================ */
+
+/* Optimize virtualized lists */
+.virtual-list-container {
+  contain: strict;
+  will-change: scroll-position;
+}
+
+.virtual-list-item {
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 400px; /* Estimated height */
+}
+
+/* ============================================
+   MODAL/OVERLAY PERFORMANCE
+   ============================================ */
+
+/* Optimize modal rendering */
+.modal-overlay,
+[role="dialog"] {
+  /* Isolate layer */
+  contain: layout style paint;
+  
+  /* Use GPU compositing */
+  will-change: opacity;
+  
+  /* Force hardware acceleration */
+  transform: translateZ(0);
+}
+
+/* ============================================
+   LOADING/SKELETON OPTIMIZATION
+   ============================================ */
+
+/* Optimize shimmer animations */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.shimmer-animation {
+  will-change: transform;
+  animation: shimmer 2s infinite;
+}
+
+/* ============================================
+   CHAT-SPECIFIC OPTIMIZATIONS
+   ============================================ */
+
+/* Message container optimization */
+.messages-container {
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
+  
+  /* Hardware acceleration */
+  will-change: scroll-position;
+  -webkit-overflow-scrolling: touch;
+  
+  /* Isolate layout */
+  contain: layout style paint;
+  
+  /* Prevent scroll jank */
+  overscroll-behavior: contain;
+}
+
+/* Individual message optimization */
+.chat-message {
+  /* Isolate rendering */
+  contain: layout style paint;
+  
+  /* Lazy render off-screen messages */
+  content-visibility: auto;
+  
+  /* Hint for estimated height (prevents layout shift) */
+  contain-intrinsic-size: auto 300px;
+}
+
+/* Streaming indicator optimization */
+.ai-status-indicator {
+  /* Isolate from layout */
+  contain: layout style;
+  
+  /* Optimize animation */
+  will-change: opacity;
+}
+
+/* ============================================
+   TAILWIND UTILITY OVERRIDES
+   ============================================ */
+
+/* Optimize Tailwind transitions */
+.transition-all,
+.transition-colors,
+.transition-opacity,
+.transition-transform {
+  /* Use GPU when possible */
+  will-change: auto;
+}
+
+/* Active transitions hint GPU usage */
+.transition-all:active,
+.transition-colors:active,
+.transition-opacity:active,
+.transition-transform:active {
+  will-change: transform, opacity;
+}
+
+/* ============================================
+   DARK MODE OPTIMIZATION
+   ============================================ */
+
+/* Prevent flash of unstyled content in dark mode */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
+/* Optimize dark mode transitions */
+.dark {
+  color-scheme: dark;
+}
+
+/* ============================================
+   MOBILE OPTIMIZATIONS
+   ============================================ */
+
+@media (max-width: 768px) {
+  /* Prevent zoom on input focus (iOS) */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  textarea {
+    font-size: 16px;
+  }
+  
+  /* Optimize touch targets */
+  button,
+  a,
+  [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Reduce animations on mobile for better battery */
+  * {
+    animation-duration: 0.1s !important;
+    transition-duration: 0.1s !important;
+  }
+  
+  /* Enable momentum scrolling on mobile */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Optimize tap highlight */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* ============================================
+   PRINT OPTIMIZATION
+   ============================================ */
+
+@media print {
+  /* Remove animations for print */
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  
+  /* Optimize for printing */
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* ============================================
+   ACCESSIBILITY + PERFORMANCE
+   ============================================ */
+
+/* Focus visible optimization (keyboard navigation) */
+:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  
+  /* Don't trigger layout on focus */
+  contain: layout;
+}
+
+/* Remove focus styles for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ============================================
+   DEBUGGING (Remove in production)
+   ============================================ */
+
+/* Uncomment to see layout boundaries during development
+.debug-layout * {
+  outline: 1px solid rgba(255, 0, 0, 0.1);
+}
+
+.debug-layout *:hover {
+  outline: 1px solid rgba(255, 0, 0, 0.5);
+}
+*/
+
+/* ============================================
+   BROWSER-SPECIFIC FIXES
+   ============================================ */
+
+/* Safari-specific optimizations */
+@supports (-webkit-touch-callout: none) {
+  /* Fix Safari bounce scroll */
+  body {
+    overscroll-behavior-y: none;
+  }
+  
+  /* Fix Safari 100vh */
+  .h-screen {
+    height: -webkit-fill-available;
+  }
+}
+
+/* Firefox-specific optimizations */
+@-moz-document url-prefix() {
+  /* Improve Firefox scroll performance */
+  * {
+    scroll-behavior: auto;
+  }
+}
+
+/* ============================================
+   INSTANT FEEDBACK OPTIMIZATIONS
+   ============================================ */
+
+/* Add instant visual feedback on touch/click */
+button:active,
+a:active,
+[role="button"]:active {
+  transform: scale(0.98);
+  transition-duration: 50ms !important;
+}
+
+/* Optimize cursor for better perceived performance */
+button,
+a,
+[role="button"],
+.cursor-pointer {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Prevent flash of invisible text (FOIT) */
+body {
+  font-display: swap;
+}
+
+/* ============================================
+   PREFETCH OPTIMIZATIONS
+   ============================================ */
+
+/* Hint browser to prefetch on hover */
+a:hover,
+button:hover {
+  /* Browser will prioritize resources for this element */
+  content-visibility: auto;
+}
+
+/* ============================================
+   CRITICAL PERFORMANCE NOTES
+   ============================================ */
+
+/*
+ * DO:
+ * ✅ Use transform and opacity for animations
+ * ✅ Add will-change only during animations
+ * ✅ Use contain for independent components
+ * ✅ Enable content-visibility for off-screen content
+ * ✅ Prefetch routes on hover
+ * ✅ Use lighter transitions (100-150ms)
+ * 
+ * DON'T:
+ * ❌ Add will-change to everything (memory overhead)
+ * ❌ Animate width, height, or layout properties
+ * ❌ Use contain: strict unless necessary
+ * ❌ Forget to test on mobile devices
+ * ❌ Use transitions longer than 200ms
+ * 
+ * PERFORMANCE TARGETS:
+ * • 60 FPS (16.67ms per frame)
+ * • First Contentful Paint < 1.0s
+ * • Time to Interactive < 2.5s
+ * • Cumulative Layout Shift < 0.1
+ * • Interaction to Next Paint < 200ms
+ */
+
+

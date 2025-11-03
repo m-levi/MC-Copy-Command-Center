@@ -21,6 +21,7 @@ const FlowOutlineDisplay = lazy(() => import('@/components/FlowOutlineDisplay'))
 const FlowNavigation = lazy(() => import('@/components/FlowNavigation'));
 const ApproveOutlineButton = lazy(() => import('@/components/ApproveOutlineButton'));
 const FlowGenerationProgress = lazy(() => import('@/components/FlowGenerationProgress'));
+const ConversationOptionsMenu = lazy(() => import('@/components/ConversationOptionsMenu'));
 import { FilterType } from '@/components/ConversationFilterDropdown';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
@@ -88,6 +89,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [currentUserName, setCurrentUserName] = useState('');
   const [showMemorySettings, setShowMemorySettings] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [showConversationMenu, setShowConversationMenu] = useState(false);
   
   // Flow-related state
   const [showFlowTypeSelector, setShowFlowTypeSelector] = useState(false);
@@ -348,8 +350,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   }, [currentConversation]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    // Only auto-scroll if NOT currently streaming
+    // This lets users stay at the top and watch the indicator while AI generates
+    if (!sending) {
+      scrollToBottom();
+    }
+  }, [messages, sending]);
 
   // Detect flow outline in AI responses
   useEffect(() => {
@@ -368,9 +374,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   }, [messages, currentConversation?.is_flow, currentConversation?.flow_type, flowOutline?.approved]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const scrollToBottom = useCallback(() => {
+    // Use requestAnimationFrame for smoother scrolling
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
+  }, []);
 
   const initializePage = async () => {
     try {
@@ -553,6 +562,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (cached && cached.length > 0) {
         setMessages(cached);
         setLoadingMessages(false);
+        
         trackPerformance('load_messages', performance.now() - startTime, { 
           source: 'cache',
           count: cached.length 
@@ -567,8 +577,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         return;
       }
 
-      // Show loading state if not cached
-      setLoadingMessages(true);
+      // If not cached, loading state is already set by handleSelectConversation
+      // No need to set it again here
       
       // Use request coalescer to prevent duplicate calls
       await requestCoalescerRef.current.execute(
@@ -596,13 +606,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           if (draft) {
             setDraftContent(draft);
           }
+          
+          // IMPORTANT: Hide loading state after database load
+          setLoadingMessages(false);
         },
         currentConversation.id
       );
     } catch (error) {
       console.error('Error loading messages:', error);
       toast.error('Failed to load messages');
-    } finally {
       setLoadingMessages(false);
     }
   };
@@ -660,8 +672,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     const conversation = conversations.find((c) => c.id === conversationId);
     if (!conversation) return;
 
-    // Set loading state immediately
-    setLoadingMessages(true);
+    // Only show loading state if we don't have cached messages
+    const cached = getCachedMessages(conversationId);
+    if (!cached || cached.length === 0) {
+      setLoadingMessages(true);
+    }
     
     // Update current conversation immediately (optimistic update)
     setCurrentConversation(conversation);
@@ -1138,7 +1153,10 @@ Please generate the complete email copy following all the guidelines we discusse
         }
       }
 
+      // IMPORTANT: Reset status to idle
+      console.log('[Regenerate] Completed, resetting status to idle');
       setAiStatus('idle');
+      setSending(false);
 
       // Update message in database
       await supabase
@@ -1153,9 +1171,14 @@ Please generate the complete email copy following all the guidelines we discusse
         console.error('Error regenerating message:', error);
         toast.error('Failed to regenerate message');
       }
+      // CRITICAL: Always reset status to idle
+      console.log('[Regenerate] Error occurred, resetting status to idle');
       setAiStatus('idle');
     } finally {
+      // CRITICAL: Always reset
+      console.log('[Regenerate] Finally block, ensuring all reset');
       setSending(false);
+      setAiStatus('idle');
       setRegeneratingMessageId(null);
       abortControllerRef.current = null;
     }
@@ -1242,7 +1265,10 @@ Please generate the complete email copy following all the guidelines we discusse
         }
       }
 
+      // IMPORTANT: Reset status to idle
+      console.log('[RegenerateSection] Completed, resetting status to idle');
       setAiStatus('idle');
+      setSending(false);
 
       // Update message in database
       await supabase
@@ -1258,9 +1284,14 @@ Please generate the complete email copy following all the guidelines we discusse
         console.error('Error regenerating section:', error);
         toast.error('Failed to regenerate section');
       }
+      // CRITICAL: Always reset status to idle
+      console.log('[RegenerateSection] Error occurred, resetting status to idle');
       setAiStatus('idle');
     } finally {
+      // CRITICAL: Always reset
+      console.log('[RegenerateSection] Finally block, ensuring all reset');
       setSending(false);
+      setAiStatus('idle');
       setRegeneratingMessageId(null);
       abortControllerRef.current = null;
     }
@@ -1343,6 +1374,19 @@ Please generate the complete email copy following all the guidelines we discusse
       return;
     }
 
+    // IMMEDIATE FEEDBACK: Show user message and loading state instantly
+    const tempUserMessage: Message | null = !skipUserMessage ? {
+      id: `temp-${Date.now()}`,
+      conversation_id: currentConversation.id,
+      role: 'user',
+      content,
+      created_at: new Date().toISOString(),
+    } : null;
+    
+    if (tempUserMessage) {
+      setMessages((prev) => [...prev, tempUserMessage]);
+    }
+    
     setSending(true);
     setAiStatus('analyzing_brand');
     
@@ -1372,7 +1416,11 @@ Please generate the complete email copy following all the guidelines we discusse
 
         if (userError) throw userError;
         userMessage = data;
-        setMessages((prev) => [...prev, userMessage!]);
+        
+        // Replace temp user message with real saved one
+        setMessages((prev) => prev.map(msg => 
+          msg.id === tempUserMessage?.id ? userMessage! : msg
+        ));
       } else {
         // Use the last user message
         userMessage = messages.filter(m => m.role === 'user').pop();
@@ -1455,6 +1503,15 @@ Please generate the complete email copy following all the guidelines we discusse
       };
 
       setMessages((prev) => [...prev, aiMessage]);
+      
+      // Scroll to show the activity indicator at the top
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }, 100);
+
+      console.log('[Stream] Created AI placeholder:', aiMessageId);
 
       // Read streaming response with advanced parser and recovery
       const reader = response.body?.getReader();
@@ -1466,7 +1523,13 @@ Please generate the complete email copy following all the guidelines we discusse
       let thinkingContent = ''; // Accumulate thinking content
       let isInThinkingBlock = false;
       const CHECKPOINT_INTERVAL = 100; // Create checkpoint every 100 chunks
+      
+      // Throttle UI updates to 60fps max for smoother performance
+      let lastUpdateTime = 0;
+      const UPDATE_THROTTLE = 16; // ~60fps (1000ms / 60 = 16.67ms)
+      let pendingUpdate = false;
 
+      console.log('[Stream] Starting to read response...');
       if (reader) {
         try {
           while (true) {
@@ -1475,6 +1538,10 @@ Please generate the complete email copy following all the guidelines we discusse
 
             const chunk = decoder.decode(value, { stream: true });
             rawStreamContent += chunk; // Accumulate for product extraction
+            
+            if (checkpointCounter === 0) {
+              console.log('[Stream] First chunk received:', chunk.substring(0, 100));
+            }
             
             // Parse thinking markers
             if (chunk.includes('[THINKING:START]')) {
@@ -1503,6 +1570,39 @@ Please generate the complete email copy following all the guidelines we discusse
               continue;
             }
             
+            // Parse tool markers - handle web search in thinking block
+            const toolMatch = chunk.match(/\[TOOL:(\w+):(START|END)\]/g);
+            if (toolMatch) {
+              toolMatch.forEach((match) => {
+                const toolParts = match.match(/\[TOOL:(\w+):(START|END)\]/);
+                if (toolParts) {
+                  const [, toolName, action] = toolParts;
+                  if (action === 'START') {
+                    console.log(`[Tool] ${toolName} started`);
+                    // Add tool usage to thinking content
+                    thinkingContent += `\n\n[Using web search to find information...]\n\n`;
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === aiMessageId
+                          ? { ...msg, thinking: thinkingContent }
+                          : msg
+                      )
+                    );
+                  } else if (action === 'END') {
+                    console.log(`[Tool] ${toolName} completed`);
+                    thinkingContent += `\n[Web search complete]\n\n`;
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === aiMessageId
+                          ? { ...msg, thinking: thinkingContent }
+                          : msg
+                      )
+                    );
+                  }
+                }
+              });
+            }
+            
             // Parse status markers
             const statusMatch = chunk.match(/\[STATUS:(\w+)\]/g);
             if (statusMatch) {
@@ -1510,9 +1610,11 @@ Please generate the complete email copy following all the guidelines we discusse
                 const status = match.replace('[STATUS:', '').replace(']', '') as AIStatus;
                 setAiStatus(status);
                 
-                // Update sidebar status for thinking
+                // Update sidebar status for thinking or web search
                 if (status === 'thinking') {
                   sidebarState.updateConversationStatus(currentConversation.id, 'ai_responding', 5);
+                } else if (status === 'searching_web') {
+                  sidebarState.updateConversationStatus(currentConversation.id, 'ai_responding', 8);
                 }
               });
             }
@@ -1520,6 +1622,7 @@ Please generate the complete email copy following all the guidelines we discusse
             // Clean markers from content (but keep accumulating for later product extraction)
             const cleanChunk = chunk
               .replace(/\[STATUS:\w+\]/g, '')
+              .replace(/\[TOOL:\w+:(START|END)\]/g, '') // Remove tool markers
               .replace(/\[THINKING:START\]/g, '')
               .replace(/\[THINKING:END\]/g, '')
               .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
@@ -1532,15 +1635,29 @@ Please generate the complete email copy following all the guidelines we discusse
               const result = processStreamChunk(streamState, cleanChunk);
               streamState = result.state;
               
-              // Only update UI when needed (batching for 60fps)
-              if (result.shouldRender) {
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === aiMessageId
-                      ? { ...msg, content: streamState.fullContent, thinking: thinkingContent }
-                      : msg
-                  )
-                );
+              // Throttle UI updates to prevent choppy scrolling
+              const now = Date.now();
+              if (result.shouldRender && (now - lastUpdateTime >= UPDATE_THROTTLE || !pendingUpdate)) {
+                lastUpdateTime = now;
+                pendingUpdate = true;
+                
+                // Use requestAnimationFrame for smoother updates
+                requestAnimationFrame(() => {
+                  setMessages((prev) => {
+                    const updated = prev.map((msg) =>
+                      msg.id === aiMessageId
+                        ? { ...msg, content: streamState.fullContent, thinking: thinkingContent }
+                        : msg
+                    );
+                    
+                    if (checkpointCounter % 50 === 0) {
+                      console.log('[Stream] Updating message, content length:', streamState.fullContent.length);
+                    }
+                    
+                    return updated;
+                  });
+                  pendingUpdate = false;
+                });
               }
             }
             
@@ -1560,21 +1677,33 @@ Please generate the complete email copy following all the guidelines we discusse
           // Finalize stream
           streamState = finalizeStream(streamState);
           
+          // Final update to ensure all content is rendered
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === aiMessageId
+                ? { ...msg, content: streamState.fullContent, thinking: thinkingContent }
+                : msg
+            )
+          );
+          
           // Extract product links from complete stream (after all chunks received)
+          console.log('[ProductExtract] Checking for PRODUCTS marker in stream...');
           const productMatch = rawStreamContent.match(/\[PRODUCTS:([\s\S]*?)\](?:\s|$)/);
           if (productMatch) {
+            console.log('[ProductExtract] PRODUCTS marker found!', productMatch[1].substring(0, 100));
             try {
               const jsonString = productMatch[1].trim();
               // Validate JSON before parsing
               if (jsonString && jsonString.startsWith('[') && jsonString.endsWith(']')) {
                 productLinks = JSON.parse(jsonString);
+                console.log('[ProductExtract] Parsed product links:', productLinks);
                 // Validate structure
                 if (!Array.isArray(productLinks)) {
                   console.warn('Product links is not an array, resetting');
                   productLinks = [];
                 }
               } else {
-                console.warn('Invalid product links format, skipping');
+                console.warn('Invalid product links format, skipping:', jsonString.substring(0, 50));
                 productLinks = [];
               }
             } catch (e) {
@@ -1582,6 +1711,8 @@ Please generate the complete email copy following all the guidelines we discusse
               // Silent fail - product links are optional
               productLinks = [];
             }
+          } else {
+            console.log('[ProductExtract] No PRODUCTS marker found in stream');
           }
           
           // Clear checkpoint after successful completion
@@ -1599,7 +1730,10 @@ Please generate the complete email copy following all the guidelines we discusse
 
       const fullContent = streamState.fullContent;
 
+      // IMPORTANT: Reset AI status to idle IMMEDIATELY after stream completes
+      console.log('[Stream] Completed successfully, resetting status to idle');
       setAiStatus('idle');
+      setSending(false);
       
       // Update sidebar status - completion
       sidebarState.updateConversationStatus(currentConversation.id, 'idle');
@@ -1609,6 +1743,11 @@ Please generate the complete email copy following all the guidelines we discusse
       const sanitizedThinking = thinkingContent ? sanitizeContent(thinkingContent) : null;
 
       // Save complete AI message to database with product links and thinking
+      console.log('[Database] Saving message with product links:', productLinks.length, 'links');
+      if (productLinks.length > 0) {
+        console.log('[Database] Product links to save:', productLinks);
+      }
+      
       const { data: savedAiMessage, error: aiError } = await supabase
         .from('messages')
         .insert({
@@ -1625,10 +1764,16 @@ Please generate the complete email copy following all the guidelines we discusse
 
       // Replace placeholder with saved message and remove any duplicates
       setMessages((prev) => {
+        console.log('[Messages] Replacing AI placeholder. Prev count:', prev.length);
+        console.log('[Messages] Placeholder ID:', aiMessageId, 'Saved ID:', savedAiMessage.id);
+        
         // First, filter out any existing instances of the saved message ID
         const withoutDuplicates = prev.filter(msg => msg.id !== savedAiMessage.id);
         // Then replace the placeholder with the saved message
-        return withoutDuplicates.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg));
+        const updated = withoutDuplicates.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg));
+        
+        console.log('[Messages] Final count:', updated.length);
+        return updated;
       });
       
       // Update cache with new messages
@@ -1670,9 +1815,14 @@ Please generate the complete email copy following all the guidelines we discusse
         toast.error(errorMessage);
         sidebarState.updateConversationStatus(currentConversation.id, 'error');
       }
+      // CRITICAL: Always reset status to idle
+      console.log('[Stream] Error occurred, resetting status to idle');
       setAiStatus('idle');
     } finally {
+      // CRITICAL: Always reset sending to false
+      console.log('[Stream] Finally block, ensuring sending=false and status=idle');
       setSending(false);
+      setAiStatus('idle');
       // Only clear if this is still the current controller
       if (abortControllerRef.current === currentController) {
         abortControllerRef.current = null;
@@ -1765,88 +1915,30 @@ Please generate the complete email copy following all the guidelines we discusse
           onSidebarWidthChange={sidebarState.setSidebarWidth}
           onBulkAction={handleBulkAction}
           initialWidth={sidebarState.sidebarWidth}
+          allBrands={allBrands}
+          onBrandSwitch={(newBrandId) => router.push(`/brands/${newBrandId}/chat`)}
+          onNavigateHome={() => router.push('/')}
+          onNewFlow={() => {
+            handleNewConversation();
+            setShowFlowTypeSelector(true);
+          }}
         />
 
         {/* Main chat area - Full width on mobile, flex-1 on desktop */}
         <div className="flex flex-col h-screen w-full lg:flex-1 lg:w-auto min-w-0">
-        {/* Enhanced Navigation Header */}
+        {/* Enhanced Navigation Header - Cleaner without breadcrumb */}
         <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-          {/* Breadcrumb Navigation */}
-          <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
-            <div className="flex items-center gap-2 text-sm">
-              {/* Mobile hamburger menu */}
-              <button
-                onClick={() => setIsMobileSidebarOpen(true)}
-                className="lg:hidden p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors mr-1 flex-shrink-0"
-                aria-label="Open sidebar"
-              >
-                <svg className="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-
-              <button
-                onClick={() => router.push('/')}
-                className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors group cursor-pointer"
-              >
-                <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-                <span className="font-medium hidden sm:inline">All Brands</span>
-              </button>
-              <svg className="w-4 h-4 text-gray-400 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          {/* Mobile hamburger menu - only visible on mobile */}
+          <div className="lg:hidden px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
+            <button
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0"
+              aria-label="Open sidebar"
+            >
+              <svg className="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
-              
-              {/* Brand Switcher Dropdown */}
-              <div className="relative" ref={brandSwitcherRef}>
-                <button
-                  onClick={() => setShowBrandSwitcher(!showBrandSwitcher)}
-                  className="flex items-center gap-1.5 text-gray-900 dark:text-gray-100 font-semibold hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer group"
-                >
-                  <span className="truncate">{brand?.name || 'Brand'}</span>
-                  <svg 
-                    className={`w-4 h-4 transition-transform duration-200 ${showBrandSwitcher ? 'rotate-180' : ''}`} 
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-
-                {/* Dropdown Menu */}
-                {showBrandSwitcher && allBrands.length > 0 && (
-                  <div className="absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[200px] max-w-[300px] z-50">
-                    <div className="max-h-[400px] overflow-y-auto">
-                      {allBrands.map((b) => (
-                        <button
-                          key={b.id}
-                          onClick={() => {
-                            router.push(`/brands/${b.id}/chat`);
-                            setShowBrandSwitcher(false);
-                          }}
-                          className={`
-                            w-full px-4 py-3 text-left transition-colors duration-150 cursor-pointer flex items-center justify-between
-                            ${b.id === brandId
-                              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                            }
-                          `}
-                        >
-                          <span className="text-sm font-medium truncate">{b.name}</span>
-                          {b.id === brandId && (
-                            <svg className="w-4 h-4 flex-shrink-0 ml-2" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            </button>
           </div>
 
           {/* Flow Navigation for child conversations */}
@@ -1864,45 +1956,68 @@ Please generate the complete email copy following all the guidelines we discusse
             />
           )}
 
-          {/* Conversation Info Bar */}
+          {/* Conversation Info Bar - Clean and Minimal */}
           <div className="px-4 py-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <svg className="w-5 h-5 text-gray-400 dark:text-gray-500 flex-shrink-0 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              {/* Conversation Title */}
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <svg className="w-5 h-5 text-gray-400 dark:text-gray-500 flex-shrink-0 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+                <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">
+                  {currentConversation?.title || 'No Conversation Selected'}
+                </h2>
+              </div>
+              
+              {/* Three-dot menu - Clean! */}
+              {currentConversation && (
+                <button
+                  data-conversation-menu-trigger
+                  onClick={() => setShowConversationMenu(!showConversationMenu)}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
+                  title="Conversation Options"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
                   </svg>
-                  <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">
-                    {currentConversation?.title || 'No Conversation Selected'}
-                  </h2>
-                </div>
-                {currentConversation && messages.length > 0 && (
-                  <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full flex-shrink-0 hidden md:inline-flex">
-                    {messages.length} {messages.length === 1 ? 'message' : 'messages'}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-                {currentConversation && (
-                  <button
-                    onClick={() => setShowMemorySettings(true)}
-                    className="p-2 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-lg transition-colors relative group"
-                    title="Conversation Memory"
-                  >
-                    <svg className="w-5 h-5 text-gray-600 dark:text-gray-400 group-hover:text-purple-600 dark:group-hover:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                    </svg>
-                    <span className="hidden sm:inline ml-1 text-xs text-gray-600 dark:text-gray-400 group-hover:text-purple-600 dark:group-hover:text-purple-400">Memory</span>
-                  </button>
-                )}
-                <ThemeToggle />
-              </div>
+                </button>
+              )}
             </div>
           </div>
+          
+          {/* Conversation Options Menu */}
+          {showConversationMenu && currentConversation && (
+            <Suspense fallback={null}>
+              <ConversationOptionsMenu
+                conversationId={currentConversation.id}
+                conversationTitle={currentConversation.title || 'Conversation'}
+                onShowMemory={() => setShowMemorySettings(true)}
+                onToggleTheme={() => {
+                  // Trigger theme toggle
+                  const themeButton = document.querySelector('[data-theme-toggle]');
+                  if (themeButton instanceof HTMLElement) {
+                    themeButton.click();
+                  }
+                }}
+                onClose={() => setShowConversationMenu(false)}
+              />
+            </Suspense>
+          )}
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 bg-[#fcfcfc] dark:bg-gray-950">
+        <div 
+          className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 bg-[#fcfcfc] dark:bg-gray-950"
+          style={{
+            // Hardware acceleration and smooth scrolling
+            willChange: 'scroll-position',
+            WebkitOverflowScrolling: 'touch',
+            // Optimize scroll performance
+            scrollBehavior: 'smooth',
+            // Reduce layout thrashing
+            contain: 'layout style paint',
+          }}
+        >
           {!currentConversation ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
@@ -2028,16 +2143,24 @@ Please generate the complete email copy following all the guidelines we discusse
                 onRegenerateSection={handleRegenerateSection}
                 onEdit={handleEditMessage}
                 onReaction={handleMessageReaction}
+                aiStatus={aiStatus}
               />
               
-              {/* AI Status */}
-              {sending && aiStatus !== 'idle' && (
-                <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mb-4">
-                  <AIStatusIndicator status={aiStatus} />
+              <div ref={messagesEndRef} />
+              
+              {/* Show preparing indicator when sending but no AI message yet */}
+              {sending && messages.filter(m => m.role === 'assistant').length === messages.filter(m => m.role === 'user').length - 1 && (
+                <div className="mb-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-2 inline-block">
+                  <div className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-400">
+                    <div className="flex gap-1" style={{ minWidth: '28px' }}>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '200ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '400ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
+                    </div>
+                    <span className="font-medium">preparing response...</span>
+                  </div>
                 </div>
               )}
-              
-              <div ref={messagesEndRef} />
             </>
           ) : (
             /* Regular rendering for shorter conversations */
@@ -2081,17 +2204,26 @@ Please generate the complete email copy following all the guidelines we discusse
                       : undefined
                   }
                   isRegenerating={regeneratingMessageId === message.id}
+                  isStreaming={message.role === 'assistant' && index === messages.length - 1 && sending}
+                  aiStatus={aiStatus}
                 />
               ))}
               
-              {/* AI Status */}
-              {sending && aiStatus !== 'idle' && (
-                <div className="mb-4">
-                  <AIStatusIndicator status={aiStatus} />
+              <div ref={messagesEndRef} />
+              
+              {/* Show preparing indicator when sending but no AI message yet */}
+              {sending && messages.filter(m => m.role === 'assistant').length === messages.filter(m => m.role === 'user').length - 1 && (
+                <div className="mb-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-2 inline-block">
+                  <div className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-400">
+                    <div className="flex gap-1" style={{ minWidth: '28px' }}>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '200ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '400ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
+                    </div>
+                    <span className="font-medium">preparing response...</span>
+                  </div>
                 </div>
               )}
-              
-              <div ref={messagesEndRef} />
             </div>
           )}
         </div>
