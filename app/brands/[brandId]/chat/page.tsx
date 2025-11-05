@@ -62,6 +62,38 @@ const sanitizeContent = (content: string): string => {
   });
 };
 
+// Clean email content by removing any preamble before the actual email structure
+const cleanEmailContentFinal = (content: string): string => {
+  // Remove <email_strategy> tags and everything inside them
+  let cleaned = content.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
+  
+  // Find the start of the actual email (look for common email markers)
+  const emailStartMarkers = [
+    /HERO SECTION:/i,
+    /EMAIL SUBJECT LINE:/i,
+    /SUBJECT LINE:/i,
+  ];
+  
+  for (const marker of emailStartMarkers) {
+    const match = cleaned.match(marker);
+    if (match && match.index !== undefined && match.index > 0) {
+      // Remove everything before this marker (preamble)
+      cleaned = cleaned.substring(match.index);
+      break;
+    }
+  }
+  
+  // Remove common meta-commentary patterns
+  cleaned = cleaned
+    .replace(/^I need to.*?\n\n/i, '')
+    .replace(/^Let me.*?\n\n/i, '')
+    .replace(/^Based on.*?\n\n/i, '')
+    .replace(/^First,.*?\n\n/i, '')
+    .trim();
+  
+  return cleaned;
+};
+
 export default function ChatPage({ params }: { params: Promise<{ brandId: string }> }) {
   const resolvedParams = use(params);
   const brandId = resolvedParams.brandId;
@@ -1620,7 +1652,7 @@ Please generate the complete email copy following all the guidelines we discusse
             }
             
             // Clean markers from content (but keep accumulating for later product extraction)
-            const cleanChunk = chunk
+            let cleanChunk = chunk
               .replace(/\[STATUS:\w+\]/g, '')
               .replace(/\[TOOL:\w+:(START|END)\]/g, '') // Remove tool markers
               .replace(/\[THINKING:START\]/g, '')
@@ -1629,8 +1661,32 @@ Please generate the complete email copy following all the guidelines we discusse
               .replace(/\[PRODUCTS:[\s\S]*?\]/g, '') // Remove any partial product markers
               .replace(/\[REMEMBER:[^\]]+\]/g, ''); // Remove memory instruction markers
             
-            // Only process content chunks if we have actual content
+            // Only process content chunks if we have actual content and not in thinking
             if (cleanChunk && !isInThinkingBlock) {
+              // Aggressively filter out any leaked strategy tags or meta-commentary
+              cleanChunk = cleanChunk
+                .replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '')
+                .replace(/\*\*EMAIL_BRIEF Analysis:\*\*/gi, '')
+                .replace(/\*\*Context Analysis:\*\*/gi, '')
+                .replace(/\*\*Brief Analysis:\*\*/gi, '')
+                .replace(/\*\*Brand Analysis:\*\*/gi, '')
+                .replace(/\*\*Audience Psychology:\*\*/gi, '')
+                .replace(/\*\*Product Listing:\*\*/gi, '')
+                .replace(/\*\*Hero Strategy:\*\*/gi, '')
+                .replace(/\*\*Structure Planning:\*\*/gi, '')
+                .replace(/\*\*CTA Strategy:\*\*/gi, '')
+                .replace(/\*\*Objection Handling:\*\*/gi, '')
+                .replace(/\*\*Product Integration:\*\*/gi, '')
+                .replace(/^I need to (create|analyze|search for|work through)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+                .replace(/^Let me (start by|analyze|search for|create)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+                .replace(/^Based on (my analysis|the requirements)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '');
+              
+              // If chunk still doesn't contain email structure markers, skip it
+              // This prevents preamble from being added to content
+              const hasEmailMarker = /HERO SECTION|EMAIL SUBJECT|SECTION \d+|CALL-TO-ACTION|SUBJECT LINE/i.test(streamState.fullContent + cleanChunk);
+              if (!hasEmailMarker && streamState.fullContent.length === 0) {
+                continue; // Skip preamble chunks
+              }
               // Process chunk with advanced parser
               const result = processStreamChunk(streamState, cleanChunk);
               streamState = result.state;
@@ -1677,11 +1733,14 @@ Please generate the complete email copy following all the guidelines we discusse
           // Finalize stream
           streamState = finalizeStream(streamState);
           
+          // Post-process: Remove any preamble before the actual email structure
+          const cleanedContent = cleanEmailContentFinal(streamState.fullContent);
+          
           // Final update to ensure all content is rendered
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === aiMessageId
-                ? { ...msg, content: streamState.fullContent, thinking: thinkingContent }
+                ? { ...msg, content: cleanedContent, thinking: thinkingContent }
                 : msg
             )
           );

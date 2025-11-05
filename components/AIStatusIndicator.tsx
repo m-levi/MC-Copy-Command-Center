@@ -9,14 +9,14 @@ interface AIStatusIndicatorProps {
 
 const statusLabels: Record<AIStatus, string> = {
   idle: '',
-  thinking: 'thinking',
-  searching_web: 'searching web',
-  analyzing_brand: 'analyzing brand',
-  crafting_subject: 'crafting subject',
-  writing_hero: 'writing hero',
-  developing_body: 'writing body',
-  creating_cta: 'creating CTA',
-  finalizing: 'finalizing',
+  thinking: 'thinking through strategy',
+  searching_web: 'searching for information',
+  analyzing_brand: 'reviewing brand guidelines',
+  crafting_subject: 'writing subject line',
+  writing_hero: 'writing hero section',
+  developing_body: 'writing email body',
+  creating_cta: 'writing call-to-action',
+  finalizing: 'finalizing email',
 };
 
 // Memoized to prevent re-renders

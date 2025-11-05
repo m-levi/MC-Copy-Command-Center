@@ -11,25 +11,25 @@ interface StreamingProgressProps {
 
 const STATUS_LABELS: Record<AIStatus, string> = {
   idle: 'Ready',
-  thinking: 'Thinking deeply...',
-  searching_web: 'Searching the web...',
-  analyzing_brand: 'Analyzing brand context...',
-  crafting_subject: 'Crafting subject line...',
+  thinking: 'Thinking through strategy...',
+  searching_web: 'Searching for information...',
+  analyzing_brand: 'Reviewing brand guidelines...',
+  crafting_subject: 'Writing subject line...',
   writing_hero: 'Writing hero section...',
-  developing_body: 'Developing email body...',
-  creating_cta: 'Creating call-to-action...',
+  developing_body: 'Writing email body...',
+  creating_cta: 'Writing call-to-action...',
   finalizing: 'Finalizing email...',
 };
 
 const STATUS_PROGRESS: Record<AIStatus, number> = {
   idle: 0,
-  thinking: 5,
-  searching_web: 8,
-  analyzing_brand: 10,
-  crafting_subject: 25,
-  writing_hero: 40,
-  developing_body: 60,
-  creating_cta: 80,
+  thinking: 10,
+  searching_web: 15,
+  analyzing_brand: 20,
+  crafting_subject: 30,
+  writing_hero: 45,
+  developing_body: 65,
+  creating_cta: 85,
   finalizing: 95,
 };
 

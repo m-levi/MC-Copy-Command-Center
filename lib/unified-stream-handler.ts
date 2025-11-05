@@ -30,13 +30,14 @@ export interface ProductLink {
 
 /**
  * Status markers for tracking AI generation progress
+ * These are smart thresholds that detect actual content being written
  */
 const STATUS_SEQUENCE = [
-  { threshold: 0, status: 'crafting_subject' },
-  { threshold: 5, status: 'writing_hero' },
-  { threshold: 15, status: 'developing_body' },
-  { threshold: 30, status: 'creating_cta' },
-  { threshold: 50, status: 'finalizing' },
+  { threshold: 0, status: 'crafting_subject', keywords: ['SUBJECT', 'EMAIL SUBJECT'] },
+  { threshold: 10, status: 'writing_hero', keywords: ['HERO SECTION', 'ACCENT:', 'HEADLINE:'] },
+  { threshold: 30, status: 'developing_body', keywords: ['SECTION 2:', 'SECTION 3:', 'BODY'] },
+  { threshold: 60, status: 'creating_cta', keywords: ['CALL-TO-ACTION', 'CTA SECTION'] },
+  { threshold: 90, status: 'finalizing', keywords: [] },
 ] as const;
 
 /**
@@ -380,16 +381,29 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           
           // Handle regular content
           if (parsed.content) {
-            // Update status based on progress
+            fullResponse += parsed.content;
+            
+            // Smart status detection based on content keywords
             if (currentStatusIndex < STATUS_SEQUENCE.length) {
               const nextStatus = STATUS_SEQUENCE[currentStatusIndex];
-              if (chunkCount >= nextStatus.threshold) {
+              
+              // Check if we've hit the chunk threshold first
+              const hitThreshold = chunkCount >= nextStatus.threshold;
+              
+              // Check if content contains keywords for next stage
+              const hasKeywords = nextStatus.keywords.length > 0 && 
+                nextStatus.keywords.some(keyword => 
+                  fullResponse.toUpperCase().includes(keyword)
+                );
+              
+              // Advance status if threshold met OR keywords found
+              if (hitThreshold || hasKeywords) {
                 controller.enqueue(encoder.encode(`[STATUS:${nextStatus.status}]`));
                 currentStatusIndex++;
+                console.log(`[${provider.toUpperCase()}] Status: ${nextStatus.status} (chunks: ${chunkCount}, keywords: ${hasKeywords})`);
               }
             }
             
-            fullResponse += parsed.content;
             controller.enqueue(encoder.encode(parsed.content));
             chunkCount++;
             
