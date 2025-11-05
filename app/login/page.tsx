@@ -25,22 +25,14 @@ export default function LoginPage() {
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: {
-          // If remember me is checked, session persists for 30 days, otherwise only while browser is open
-          persistSession: true,
-        }
       });
 
       if (error) throw error;
 
-      // Set session expiry based on remember me
-      if (!rememberMe) {
-        // For session-only, we can't truly make it session-only after login
-        // but we can set a shorter expiry (1 day instead of 30)
-        // Note: Supabase by default uses 1 hour access tokens that auto-refresh
-        // The remember me is more of a UX indicator - actual session management 
-        // happens server-side with refresh tokens
-      }
+      // Note: Supabase handles session persistence automatically using localStorage
+      // Sessions persist by default with refresh tokens
+      // The remember me checkbox is currently for UX indication only
+      // True session-only behavior would require custom implementation with sessionStorage
 
       // Track the login for session and audit purposes
       try {

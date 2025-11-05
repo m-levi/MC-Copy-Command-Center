@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-export default function ConfirmPage() {
+function ConfirmPageContent() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('');
   const router = useRouter();
@@ -143,6 +143,28 @@ export default function ConfirmPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ConfirmPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-950 animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-md border border-gray-200 dark:border-gray-700 text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+              Loading...
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">
+              Please wait...
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <ConfirmPageContent />
+    </Suspense>
   );
 }
 
