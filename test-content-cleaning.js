@@ -217,3 +217,4 @@ console.log('\nCleaned length:', cleaned.length);
 console.log('Original length:', testContent.length);
 console.log('Removed:', testContent.length - cleaned.length, 'characters');
 
+

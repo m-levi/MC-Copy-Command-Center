@@ -14,3 +14,4 @@ CREATE INDEX IF NOT EXISTS idx_messages_has_strategy ON messages ((strategy IS N
 -- ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 -- Existing RLS policies should cover this column automatically
 
+

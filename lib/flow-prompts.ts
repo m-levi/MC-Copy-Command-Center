@@ -81,6 +81,15 @@ ${emailOutline.sequence === flowOutline.emails.length ? '- Final email - create 
 - Maintain consistency with brand voice throughout
 `.trim();
 
+  // Extract website URL from brandInfo string
+  const websiteMatch = brandInfo.match(/Website:\s*(.+)/);
+  const websiteUrl = websiteMatch ? websiteMatch[1].trim() : '';
+  
+  // Generate website hint if we have a URL
+  const websiteHint = websiteUrl 
+    ? ` (especially the brand's website: ${websiteUrl})` 
+    : '';
+
   // Choose the appropriate template (design or letter)
   const template = emailType === 'design' 
     ? STANDARD_EMAIL_PROMPT 
@@ -92,8 +101,8 @@ ${emailOutline.sequence === flowOutline.emails.length ? '- Final email - create 
     RAG_CONTEXT: ragContext || '',
     CONTEXT_INFO: '', // No additional context needed for flows
     MEMORY_CONTEXT: '', // Flows don't need memory context
-    WEBSITE_HINT: '', // Will be filled if needed
-    WEBSITE_URL: '', // Will be filled if needed
+    WEBSITE_HINT: websiteHint,
+    WEBSITE_URL: websiteUrl,
     EMAIL_BRIEF: emailBrief,
   });
 }

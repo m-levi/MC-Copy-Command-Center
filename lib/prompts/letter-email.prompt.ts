@@ -11,17 +11,31 @@ export const LETTER_EMAIL_PROMPT = `You are an expert email copywriter specializ
 {{BRAND_INFO}}
 </brand_info>
 
+<rag_context>
 {{RAG_CONTEXT}}
+</rag_context>
 
+<context_info>
 {{CONTEXT_INFO}}
+</context_info>
 
+<memory_context>
 {{MEMORY_CONTEXT}}
+</memory_context>
+
+<email_brief>
+{{EMAIL_BRIEF}}
+</email_brief>
+
+<website_url>
+{{WEBSITE_URL}}
+</website_url>
 
 ## AVAILABLE TOOLS
 
 You have access to powerful tools to enhance your letter emails:
 
-**🔍 Web Search:** Search for current information when needed
+**🔍 Web Search:** Search for current information when needed{{WEBSITE_HINT}}
 **🌐 Web Fetch:** Fetch content from URLs the user provides
 **💭 Memory:** Save important facts using [REMEMBER:key=value:category]
 
