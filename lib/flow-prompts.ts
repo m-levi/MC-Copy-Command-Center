@@ -2,7 +2,8 @@ import { FlowType, FlowOutlineEmail, FlowOutlineData, EmailType } from '@/types'
 import { getFlowTemplate } from './flow-templates';
 import { FLOW_OUTLINE_PROMPT } from './prompts/flow-outline.prompt';
 import { FLOW_BEST_PRACTICES } from './prompts/flow-best-practices';
-import { FLOW_EMAIL_PROMPT_DESIGN, FLOW_EMAIL_PROMPT_LETTER } from './prompts/flow-email.prompt';
+import { STANDARD_EMAIL_PROMPT } from './prompts/standard-email.prompt';
+import { LETTER_EMAIL_PROMPT } from './prompts/letter-email.prompt';
 
 /**
  * Replace placeholders in a prompt template
@@ -45,6 +46,7 @@ export function buildFlowOutlinePrompt(
 
 /**
  * Build the system prompt for generating an individual email within a flow
+ * Uses the standard email prompt to ensure consistent quality and format
  */
 export function buildFlowEmailPrompt(
   emailOutline: FlowOutlineEmail,
@@ -53,43 +55,45 @@ export function buildFlowEmailPrompt(
   ragContext: string,
   emailType: EmailType
 ): string {
-  // Determine position guidance
-  let positionGuidance = '';
-  if (emailOutline.sequence === 1) {
-    positionGuidance = '- First email - set the tone for the entire series, make a strong first impression';
-  } else if (emailOutline.sequence > 1 && emailOutline.sequence < flowOutline.emails.length) {
-    positionGuidance = '- Middle email - build on momentum from previous emails, maintain engagement';
-  } else if (emailOutline.sequence === flowOutline.emails.length) {
-    positionGuidance = '- Final email - create urgency and closure, strong call to action';
-  }
+  // Build the email brief based on the outline
+  const emailBrief = `
+You are writing Email ${emailOutline.sequence} of ${flowOutline.emails.length} in a ${flowOutline.flowName} automation.
 
-  // Determine subject line guidance based on position
-  const subjectLineGuidance = emailOutline.sequence === 1 
-    ? 'welcoming and inviting' 
-    : 'relevant to this email\'s position in the sequence';
+**Flow Context:**
+- Flow Goal: ${flowOutline.goal}
+- Target Audience: ${flowOutline.targetAudience}
+- Email Position: ${emailOutline.sequence} of ${flowOutline.emails.length}
 
-  // Format key points
-  const keyPoints = emailOutline.keyPoints.map(p => `- ${p}`).join('\n');
+**This Email's Details:**
+- Title: ${emailOutline.title}
+- Timing: ${emailOutline.timing}
+- Purpose: ${emailOutline.purpose}
+- Primary CTA: ${emailOutline.cta}
 
-  // Choose the appropriate template
+**Key Points to Cover:**
+${emailOutline.keyPoints.map(p => `- ${p}`).join('\n')}
+
+**Important Flow Considerations:**
+${emailOutline.sequence === 1 ? '- First email - set the tone for the entire series, make a strong first impression' : ''}
+${emailOutline.sequence > 1 && emailOutline.sequence < flowOutline.emails.length ? '- Middle email - build on momentum from previous emails, maintain engagement' : ''}
+${emailOutline.sequence === flowOutline.emails.length ? '- Final email - create urgency and closure, strong call to action' : ''}
+- Ensure this email works as part of the larger sequence
+- Maintain consistency with brand voice throughout
+`.trim();
+
+  // Choose the appropriate template (design or letter)
   const template = emailType === 'design' 
-    ? FLOW_EMAIL_PROMPT_DESIGN 
-    : FLOW_EMAIL_PROMPT_LETTER;
+    ? STANDARD_EMAIL_PROMPT 
+    : LETTER_EMAIL_PROMPT;
 
+  // Replace placeholders
   return replacePlaceholders(template, {
-    EMAIL_SEQUENCE: emailOutline.sequence.toString(),
-    TOTAL_EMAILS: flowOutline.emails.length.toString(),
-    FLOW_NAME: flowOutline.flowName,
     BRAND_INFO: brandInfo,
-    RAG_CONTEXT: ragContext,
-    FLOW_GOAL: flowOutline.goal,
-    TARGET_AUDIENCE: flowOutline.targetAudience,
-    EMAIL_TITLE: emailOutline.title,
-    EMAIL_TIMING: emailOutline.timing,
-    EMAIL_PURPOSE: emailOutline.purpose,
-    KEY_POINTS: keyPoints,
-    PRIMARY_CTA: emailOutline.cta,
-    SUBJECT_LINE_GUIDANCE: subjectLineGuidance,
-    POSITION_GUIDANCE: positionGuidance,
+    RAG_CONTEXT: ragContext || '',
+    CONTEXT_INFO: '', // No additional context needed for flows
+    MEMORY_CONTEXT: '', // Flows don't need memory context
+    WEBSITE_HINT: '', // Will be filled if needed
+    WEBSITE_URL: '', // Will be filled if needed
+    EMAIL_BRIEF: emailBrief,
   });
 }

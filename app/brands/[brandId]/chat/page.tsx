@@ -62,33 +62,115 @@ const sanitizeContent = (content: string): string => {
   });
 };
 
-// Clean email content by removing any preamble before the actual email structure
+// Comprehensive email content cleaning with multiple fallback strategies
 const cleanEmailContentFinal = (content: string): string => {
-  // Remove <email_strategy> tags and everything inside them
-  let cleaned = content.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
+  let cleaned = content;
   
-  // Find the start of the actual email (look for common email markers)
-  const emailStartMarkers = [
-    /HERO SECTION:/i,
-    /EMAIL SUBJECT LINE:/i,
-    /SUBJECT LINE:/i,
-  ];
+  // CRITICAL: Try multiple approaches to ensure we get ONLY email copy
   
-  for (const marker of emailStartMarkers) {
-    const match = cleaned.match(marker);
-    if (match && match.index !== undefined && match.index > 0) {
-      // Remove everything before this marker (preamble)
-      cleaned = cleaned.substring(match.index);
-      break;
+  // Approach 1: Extract everything after email_strategy closing tag
+  const afterStrategyMatch = cleaned.match(/<\/email_strategy>\s*([\s\S]*)/i);
+  if (afterStrategyMatch && afterStrategyMatch[1].trim()) {
+    cleaned = afterStrategyMatch[1].trim();
+  }
+  
+  // Approach 2: Remove email_strategy blocks (in case tags weren't closed properly)
+  cleaned = cleaned.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
+  // Handle unclosed tags - remove from opening tag to first email marker
+  if (cleaned.includes('<email_strategy>')) {
+    const parts = cleaned.split(/<email_strategy>/i);
+    if (parts.length > 1) {
+      // Take everything before the tag and everything after we find an email marker
+      const afterTag = parts.slice(1).join('');
+      const emailMatch = afterTag.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)[\s\S]*/i);
+      cleaned = parts[0] + (emailMatch ? emailMatch[0] : afterTag);
     }
   }
   
-  // Remove common meta-commentary patterns
+  // Approach 3: Extract only content starting with email structure markers
+  const emailStartMatch = cleaned.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)[\s\S]*/i);
+  if (emailStartMatch) {
+    cleaned = emailStartMatch[0];
+  }
+  
+  // Approach 4: Remove ALL strategy headers (comprehensive list)
+  const allStrategyPatterns = [
+    /\*\*Context Analysis:\*\*[^\n]*/gi,
+    /\*\*Brief Analysis:\*\*[^\n]*/gi,
+    /\*\*Brand Analysis:\*\*[^\n]*/gi,
+    /\*\*Audience Psychology:\*\*[^\n]*/gi,
+    /\*\*Product Listing:\*\*[^\n]*/gi,
+    /\*\*Hero Strategy:\*\*[^\n]*/gi,
+    /\*\*Structure Planning:\*\*[^\n]*/gi,
+    /\*\*CTA Strategy:\*\*[^\n]*/gi,
+    /\*\*Objection Handling:\*\*[^\n]*/gi,
+    /\*\*Product Integration:\*\*[^\n]*/gi,
+  ];
+  
+  allStrategyPatterns.forEach(pattern => {
+    cleaned = cleaned.replace(pattern, '');
+  });
+  
+  // Approach 5: Remove bullet lists that describe strategy
+  // Example: "- Section 3: Service benefits (warranty, delivery, expert support)"
+  cleaned = cleaned.replace(/^-\s+Section \d+:[^\n]*(?:\([^)]*\))?[^\n]*$/gim, '');
+  cleaned = cleaned.replace(/^-\s+Final CTA:[^\n]*$/gim, '');
+  cleaned = cleaned.replace(/^-\s+Hero CTA:[^\n]*$/gim, '');
+  cleaned = cleaned.replace(/^-\s+Section \d+ CTA:[^\n]*$/gim, '');
+  
+  // Remove entire paragraphs that list CTAs or sections
+  cleaned = cleaned.replace(/^\*\*CTA Strategy:\*\*[\s\S]*?(?=\n\n\*\*|HERO SECTION|$)/gim, '');
+  cleaned = cleaned.replace(/^\*\*Structure Planning:\*\*[\s\S]*?(?=\n\n\*\*|HERO SECTION|$)/gim, '');
+  
+  // Approach 6: Remove numbered strategy lists (1., 2., 3., etc.)
+  // Example: "1. Authenticity concerns - addressed through authentication..."
+  cleaned = cleaned.replace(/^\d+\.\s+\*\*[^:]+:\*\*[\s\S]*?(?=\n\n---|\n\nHERO|$)/gim, '');
+  cleaned = cleaned.replace(/^\d+\.\s+[A-Z][^-]*?\s*-\s*addressed[\s\S]*?(?=\n\n|HERO SECTION|$)/gim, '');
+  cleaned = cleaned.replace(/^\d+\.\s+[A-Za-z\s]+ concerns[\s\S]*?(?=\n\n|HERO SECTION|$)/gim, '');
+  
+  // Approach 7: Remove meta-commentary patterns
+  const metaPatterns = [
+    /^I (need to|will|should|must|can)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
+    /^Let me[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
+    /^Based on[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
+    /^First[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
+    /^Here's[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
+    /^Now[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
+    /^Since[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
+  ];
+  
+  metaPatterns.forEach(pattern => {
+    cleaned = cleaned.replace(pattern, '');
+  });
+  
+  // Approach 8: Remove any remaining [STRATEGY:END] or similar markers
+  cleaned = cleaned.replace(/\[STRATEGY:END\]/gi, '');
+  cleaned = cleaned.replace(/\[STRATEGY:START\]/gi, '');
+  
+  // Approach 9: Remove any text before the first email marker as a final safety
+  const finalMarkerMatch = cleaned.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)/i);
+  if (finalMarkerMatch && finalMarkerMatch.index !== undefined && finalMarkerMatch.index > 0) {
+    cleaned = cleaned.substring(finalMarkerMatch.index);
+  }
+  
+  // Approach 10: Clean up multi-line strategy blocks that might have been missed
+  // Remove any paragraph that contains multiple strategy keywords
+  const lines = cleaned.split('\n');
+  cleaned = lines.filter(line => {
+    const strategyKeywordCount = [
+      'CTA Strategy', 'Objection Handling', 'Structure Planning',
+      'Product Integration', 'Hero Strategy', 'addressed through'
+    ].filter(keyword => line.includes(keyword)).length;
+    
+    // Keep line if it's part of email structure or has < 2 strategy keywords
+    return strategyKeywordCount < 2 || 
+           line.match(/^(HERO SECTION|SECTION \d+|CALL-TO-ACTION|Headline:|Accent:|Subhead:|CTA:|Content:|---)/);
+  }).join('\n');
+  
+  // Final cleanup: Remove excessive whitespace
   cleaned = cleaned
-    .replace(/^I need to.*?\n\n/i, '')
-    .replace(/^Let me.*?\n\n/i, '')
-    .replace(/^Based on.*?\n\n/i, '')
-    .replace(/^First,.*?\n\n/i, '')
+    .replace(/\n{3,}/g, '\n\n') // Max 2 newlines
+    .replace(/^\s+$/gm, '') // Remove lines with only whitespace
     .trim();
   
   return cleaned;
@@ -156,7 +238,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   });
   
-  // Auto-save drafts
+  // Auto-save drafts (debounced in ChatInput component)
+  const handleDraftChange = (content: string) => {
+    setDraftContent(content);
+  };
+
   useDraftSave(currentConversation?.id || null, draftContent);
 
   // Auto-cleanup empty conversations on unmount
@@ -720,6 +806,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     if (conversation.is_flow) {
       setEmailType('flow');
       setSelectedFlowType(conversation.flow_type || null);
+    } else if (conversation.parent_conversation_id) {
+      // Child email in a flow - default to 'design' email type
+      setEmailType('design');
+    } else {
+      // Regular conversation - keep current email type or default to 'design'
+      // (only reset if coming from a flow conversation)
+      if (emailType === 'flow') {
+        setEmailType('design');
+      }
     }
     
     // Abort any ongoing AI generation before switching
@@ -1552,7 +1647,7 @@ Please generate the complete email copy following all the guidelines we discusse
       let productLinks: any[] = [];
       let checkpointCounter = 0;
       let rawStreamContent = ''; // Accumulate full raw content
-      let thinkingContent = ''; // Accumulate thinking content
+      let thinkingContent = ''; // Accumulate ALL non-email content (thinking + strategy)
       let isInThinkingBlock = false;
       const CHECKPOINT_INTERVAL = 100; // Create checkpoint every 100 chunks
       
@@ -1575,7 +1670,7 @@ Please generate the complete email copy following all the guidelines we discusse
               console.log('[Stream] First chunk received:', chunk.substring(0, 100));
             }
             
-            // Parse thinking markers
+            // Parse thinking markers - native AI thinking blocks
             if (chunk.includes('[THINKING:START]')) {
               isInThinkingBlock = true;
               continue;
@@ -1585,13 +1680,58 @@ Please generate the complete email copy following all the guidelines we discusse
               continue;
             }
             
-            // Parse thinking chunk content
+            // Parse thinking chunk content - from native AI thinking
             const thinkingChunkMatch = chunk.match(/\[THINKING:CHUNK\]([\s\S]*?)(?=\[|$)/);
             if (thinkingChunkMatch) {
               const thinkingText = thinkingChunkMatch[1];
               thinkingContent += thinkingText;
               
               // Update message with thinking content in real-time
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === aiMessageId
+                    ? { ...msg, thinking: thinkingContent }
+                    : msg
+                )
+              );
+              continue;
+            }
+            
+            // Parse email_strategy XML tags and add to thinking content
+            const strategyStartMatch = chunk.match(/<email_strategy>([\s\S]*)/);
+            if (strategyStartMatch) {
+              thinkingContent += '\n\n--- EMAIL STRATEGY ---\n\n' + strategyStartMatch[1];
+              isInThinkingBlock = true;
+              // Update message
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === aiMessageId
+                    ? { ...msg, thinking: thinkingContent }
+                    : msg
+                )
+              );
+              continue;
+            }
+            
+            const strategyEndMatch = chunk.match(/([\s\S]*)<\/email_strategy>/);
+            if (strategyEndMatch) {
+              thinkingContent += strategyEndMatch[1];
+              isInThinkingBlock = false;
+              // Update message
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === aiMessageId
+                    ? { ...msg, thinking: thinkingContent.trim() }
+                    : msg
+                )
+              );
+              continue;
+            }
+            
+            // If we're in thinking block (from either source), accumulate
+            if (isInThinkingBlock) {
+              thinkingContent += chunk;
+              // Update thinking in real-time
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === aiMessageId
@@ -1651,22 +1791,30 @@ Please generate the complete email copy following all the guidelines we discusse
               });
             }
             
-            // Clean markers from content (but keep accumulating for later product extraction)
-            let cleanChunk = chunk
+            // Comprehensive marker cleaning - multiple passes for robustness
+            let cleanChunk = chunk;
+            
+            // Pass 1: Remove all control markers
+            cleanChunk = cleanChunk
               .replace(/\[STATUS:\w+\]/g, '')
-              .replace(/\[TOOL:\w+:(START|END)\]/g, '') // Remove tool markers
+              .replace(/\[TOOL:\w+:(START|END)\]/g, '')
               .replace(/\[THINKING:START\]/g, '')
               .replace(/\[THINKING:END\]/g, '')
               .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
-              .replace(/\[PRODUCTS:[\s\S]*?\]/g, '') // Remove any partial product markers
-              .replace(/\[REMEMBER:[^\]]+\]/g, ''); // Remove memory instruction markers
+              .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
+              .replace(/\[REMEMBER:[^\]]+\]/g, '');
+            
+            // Pass 2: Remove XML strategy tags (both inline and multiline)
+            cleanChunk = cleanChunk
+              .replace(/<email_strategy>/gi, '')
+              .replace(/<\/email_strategy>/gi, '')
+              .replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
             
             // Only process content chunks if we have actual content and not in thinking
             if (cleanChunk && !isInThinkingBlock) {
-              // Aggressively filter out any leaked strategy tags or meta-commentary
+              // Pass 3: Aggressively remove ALL strategy-related content patterns
               cleanChunk = cleanChunk
-                .replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '')
-                .replace(/\*\*EMAIL_BRIEF Analysis:\*\*/gi, '')
+                // Remove strategy section headers
                 .replace(/\*\*Context Analysis:\*\*/gi, '')
                 .replace(/\*\*Brief Analysis:\*\*/gi, '')
                 .replace(/\*\*Brand Analysis:\*\*/gi, '')
@@ -1677,9 +1825,12 @@ Please generate the complete email copy following all the guidelines we discusse
                 .replace(/\*\*CTA Strategy:\*\*/gi, '')
                 .replace(/\*\*Objection Handling:\*\*/gi, '')
                 .replace(/\*\*Product Integration:\*\*/gi, '')
+                // Remove meta-commentary
                 .replace(/^I need to (create|analyze|search for|work through)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
                 .replace(/^Let me (start by|analyze|search for|create)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-                .replace(/^Based on (my analysis|the requirements)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '');
+                .replace(/^Based on (my analysis|the requirements)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+                // Remove any numbered list items that look like strategy points
+                .replace(/^\d+\.\s*\*\*[^:]+:\*\*[\s\S]*?(?=\n\n|HERO SECTION)/gim, '');
               
               // If chunk still doesn't contain email structure markers, skip it
               // This prevents preamble from being added to content
@@ -1733,8 +1884,48 @@ Please generate the complete email copy following all the guidelines we discusse
           // Finalize stream
           streamState = finalizeStream(streamState);
           
-          // Post-process: Remove any preamble before the actual email structure
-          const cleanedContent = cleanEmailContentFinal(streamState.fullContent);
+          // Post-process: Aggressively clean the email content with multiple fallback strategies
+          let cleanedContent = streamState.fullContent;
+          
+          // Strategy 1: Remove email_strategy XML tags and content
+          cleanedContent = cleanedContent.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
+          
+          // Strategy 2: Remove leaked strategy headers
+          const strategyHeaders = [
+            'Context Analysis:', 'Brief Analysis:', 'Brand Analysis:', 
+            'Audience Psychology:', 'Product Listing:', 'Hero Strategy:',
+            'Structure Planning:', 'CTA Strategy:', 'Objection Handling:', 
+            'Product Integration:'
+          ];
+          strategyHeaders.forEach(header => {
+            const escapedHeader = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            cleanedContent = cleanedContent.replace(new RegExp(`\\*\\*${escapedHeader}\\*\\*[^\\n]*`, 'gi'), '');
+          });
+          
+          // Strategy 3: Find and extract only the email structure
+          const emailStartMatch = cleanedContent.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)[\s\S]*/i);
+          if (emailStartMatch) {
+            cleanedContent = emailStartMatch[0];
+          }
+          
+          // Strategy 4: Remove any remaining preamble patterns
+          cleanedContent = cleanedContent
+            .replace(/^I (need to|will|should|must|can)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+            .replace(/^Let me[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+            .replace(/^Based on[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+            .replace(/^First[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+            .replace(/^Here's[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+            .replace(/^Now[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
+            .trim();
+          
+          // Strategy 5: Remove numbered list patterns that aren't part of email
+          cleanedContent = cleanedContent.replace(/^\d+\.\s*\*\*[^:]+:\*\*[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|\n\n---)/gim, '');
+          
+          // Strategy 6: Clean up any bullet point strategy items before email structure
+          cleanedContent = cleanedContent.replace(/^[-•]\s*Section \d+:[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT)/gim, '');
+          
+          // Final cleanup
+          cleanedContent = cleanedContent.trim();
           
           // Final update to ensure all content is rendered
           setMessages((prev) =>
@@ -2365,7 +2556,7 @@ Please generate the complete email copy following all the guidelines we discusse
             conversationId={currentConversation.id}
             mode={conversationMode}
             draftContent={draftContent}
-            onDraftChange={setDraftContent}
+            onDraftChange={handleDraftChange}
             onModeChange={handleToggleMode}
             selectedModel={selectedModel}
             onModelChange={(model) => setSelectedModel(model as AIModel)}

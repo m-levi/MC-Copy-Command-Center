@@ -249,6 +249,64 @@ body {
   animation: smooth-bounce 1.5s ease-in-out infinite;
 }
 
+/* Enhanced bounce animation for typing indicators */
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-8px);
+  }
+}
+
+/* Fade in animation for suggestions and indicators */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Slide in from bottom */
+@keyframes slide-in-from-bottom-2 {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-in-from-bottom-2 {
+  animation: slide-in-from-bottom-2 0.3s ease-out;
+}
+
+/* Slide in from top */
+@keyframes slide-in-from-top-2 {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-in-from-top-2 {
+  animation: slide-in-from-top-2 0.3s ease-out;
+}
+
 /* Performance Enhancements for Lighter UI Feel */
 
 /* Faster, snappier transitions (reduced from 200-300ms to 150ms) */

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, KeyboardEvent, useEffect } from 'react';
+import { useState, useRef, KeyboardEvent, useEffect, useCallback } from 'react';
 import { PROMPT_TEMPLATES, QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
 import { ConversationMode, EmailType } from '@/types';
 import VoiceInput from './VoiceInput';
@@ -44,9 +44,12 @@ export default function ChatInput({
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showEmailTypePicker, setShowEmailTypePicker] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const emailTypePickerRef = useRef<HTMLDivElement>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const onDraftChangeRef = useRef(onDraftChange);
 
   const slashCommands = [
     { command: '/shorten', label: 'Make it shorter', icon: '📏' },
@@ -77,14 +80,19 @@ export default function ChatInput({
     return emailTypes.find(t => t.id === type)?.name || 'Design Email';
   };
 
-  // Sync with draft content from parent
+  // Keep onDraftChange ref up-to-date
   useEffect(() => {
-    if (draftContent !== message) {
-      setMessage(draftContent);
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-        textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-      }
+    onDraftChangeRef.current = onDraftChange;
+  }, [onDraftChange]);
+
+  // Sync with draft content from parent
+  // Only update local state if draft content changes from parent
+  // Don't update if we just cleared the message locally (prevents re-population bug)
+  useEffect(() => {
+    setMessage(draftContent);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
   }, [draftContent]);
 
@@ -151,11 +159,28 @@ export default function ChatInput({
         else if (command === '/cta') finalMessage = QUICK_ACTION_PROMPTS.improve_cta;
       }
 
-      onSend(finalMessage);
+      // CRITICAL: Cancel any pending debounced saves to prevent draft from being saved after send
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
+      // Clear message BEFORE calling onSend to prevent race conditions
       setMessage('');
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
+      
+      // Clear the draft immediately via the callback
+      if (onDraftChange) {
+        onDraftChange('');
+      }
+      
+      // Clear saved time indicator
+      setLastSavedTime(null);
+      
+      // Then send the message
+      onSend(finalMessage);
     }
   };
 
@@ -187,18 +212,77 @@ export default function ChatInput({
     }
   };
 
+  // Debounced save handler - only saves after user stops typing for 1 second
+  // Note: onDraftChange is intentionally NOT in the dependency array to prevent
+  // the debounce from being reset on every parent re-render. We use a ref instead.
+  const debouncedSave = useCallback((value: string) => {
+    // Clear any pending save when called
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Only save if there's actual content
+    if (value.trim()) {
+      saveTimeoutRef.current = setTimeout(() => {
+        if (onDraftChangeRef.current) {
+          onDraftChangeRef.current(value);
+          // Update last saved time
+          const now = new Date();
+          setLastSavedTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
+      }, 1000); // Wait 1 second after user stops typing
+    }
+  }, []); // Empty deps - use ref to access latest onDraftChange
+
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
     setMessage(newValue);
-    if (onDraftChange) {
-      onDraftChange(newValue);
-    }
+    
+    // Debounce the save
+    debouncedSave(newValue);
+    
     // Auto-expand textarea
     e.target.style.height = 'auto';
     e.target.style.height = e.target.scrollHeight + 'px';
   };
 
+  // Cleanup timeout on unmount and when conversationId changes
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [conversationId]);
+
   const charCount = message.length;
+
+  // Contextual suggestions based on mode and conversation state
+  const getContextualSuggestions = () => {
+    if (hasMessages) return []; // Only show for empty conversations
+
+    if (mode === 'planning') {
+      return [
+        { text: 'What makes a good email subject line?', icon: '💡' },
+        { text: 'Help me understand our target audience', icon: '🎯' },
+        { text: 'How can I improve engagement rates?', icon: '📈' },
+      ];
+    } else if (emailType === 'flow') {
+      return [
+        { text: 'Create a welcome email sequence', icon: '👋' },
+        { text: 'Build a re-engagement campaign', icon: '🔄' },
+        { text: 'Design an abandoned cart flow', icon: '🛒' },
+      ];
+    } else {
+      return [
+        { text: 'Write a promotional email for a sale', icon: '🎉' },
+        { text: 'Create a product launch announcement', icon: '🚀' },
+        { text: 'Draft a newsletter update', icon: '📧' },
+      ];
+    }
+  };
+
+  const suggestions = getContextualSuggestions();
 
   const getPlaceholder = () => {
     if (mode === 'planning') {
@@ -214,9 +298,10 @@ export default function ChatInput({
     // Append transcript to current message
     const newMessage = message ? `${message} ${transcript}` : transcript;
     setMessage(newMessage);
-    if (onDraftChange) {
-      onDraftChange(newMessage);
-    }
+    
+    // Use debounced save for consistency with typed input
+    debouncedSave(newMessage);
+    
     // Auto-expand textarea
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -227,9 +312,42 @@ export default function ChatInput({
   return (
     <div className="bg-[#fcfcfc] dark:bg-gray-900 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
       <div className="max-w-5xl mx-auto">
+        {/* Contextual Suggestions - Only for empty conversations */}
+        {!hasMessages && suggestions.length > 0 && !message && (
+          <div className="mb-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="flex items-center gap-2 mb-2.5">
+              <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
+                {mode === 'planning' ? '💬 Quick Questions' : '✨ Suggested Prompts'}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map((suggestion, index) => (
+                <button
+                  key={index}
+                  onClick={() => {
+                    setMessage(suggestion.text);
+                    textareaRef.current?.focus();
+                  }}
+                  className="group px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-blue-950/30 border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">{suggestion.icon}</span>
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">
+                      {suggestion.text}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Slash Command Suggestions */}
         {showSlashCommands && (
-          <div className="mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden">
+          <div className="mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden backdrop-blur-xl">
+            <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+              <p className="text-xs font-semibold text-gray-600 dark:text-gray-400">QUICK COMMANDS</p>
+            </div>
             {slashCommands
               .filter(cmd => filteredCommands.includes(cmd.command))
               .map((cmd, index) => (
@@ -243,16 +361,18 @@ export default function ChatInput({
                     textareaRef.current?.focus();
                   }}
                   className={`
-                    w-full px-3 py-2 text-left text-sm flex items-center gap-2
+                    w-full px-4 py-2.5 text-left text-sm flex items-center gap-3 transition-all duration-150
                     ${index === selectedCommandIndex 
-                      ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300' 
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
+                      ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-l-2 border-blue-500' 
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-l-2 border-transparent'
                     }
                   `}
                 >
-                  <span>{cmd.icon}</span>
-                  <span className="font-mono font-semibold">{cmd.command}</span>
-                  <span className="text-gray-500 dark:text-gray-400">— {cmd.label}</span>
+                  <span className="text-lg">{cmd.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-mono font-semibold text-sm">{cmd.command}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{cmd.label}</div>
+                  </div>
                 </button>
               ))}
           </div>
@@ -402,7 +522,13 @@ export default function ChatInput({
 
             {/* Right: Voice Input & Send Button */}
             <div className="flex items-center gap-1.5 sm:gap-2">
-              {charCount > 0 && (
+              {/* Last saved time - subtle and static */}
+              {lastSavedTime && !isGenerating && charCount > 0 && (
+                <span className="text-[10px] text-gray-400 dark:text-gray-500 hidden sm:inline">
+                  Saved {lastSavedTime}
+                </span>
+              )}
+              {charCount > 0 && !lastSavedTime && (
                 <span className="text-xs text-gray-400 dark:text-gray-500 hidden sm:inline">{charCount}</span>
               )}
               

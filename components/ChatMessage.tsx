@@ -236,39 +236,36 @@ const ChatMessage = memo(function ChatMessage({
           </div>
         ) : (
           <div>
-            {/* AI Activity Indicator - Top of response during streaming */}
+            {/* Subtle AI Activity Indicator */}
             {isStreaming && aiStatus !== 'idle' && (
-              <div className="mb-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-2 inline-block">
-                <div className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-400">
-                  {/* Smooth pulsing dots */}
-                  <div className="flex gap-1" style={{ minWidth: '28px' }}>
+              <div className="mb-3 inline-block">
+                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  {/* Simple pulsing dots */}
+                  <div className="flex gap-1">
                     <div 
                       className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" 
                       style={{ 
                         animationDelay: '0ms', 
-                        animationDuration: '1.4s',
-                        animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)'
+                        animationDuration: '1.4s'
                       }}
                     ></div>
                     <div 
                       className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" 
                       style={{ 
                         animationDelay: '200ms', 
-                        animationDuration: '1.4s',
-                        animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)'
+                        animationDuration: '1.4s'
                       }}
                     ></div>
                     <div 
                       className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" 
                       style={{ 
                         animationDelay: '400ms', 
-                        animationDuration: '1.4s',
-                        animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)'
+                        animationDuration: '1.4s'
                       }}
                     ></div>
                   </div>
                   
-                  {/* Status text */}
+                  {/* Simple status text */}
                   <span className="font-medium">
                     {aiStatus === 'thinking' && 'thinking'}
                     {aiStatus === 'searching_web' && 'searching web'}
@@ -283,11 +280,11 @@ const ChatMessage = memo(function ChatMessage({
               </div>
             )}
 
-            {/* Thought Process - Show if available */}
+            {/* Thought Process - Show if available (includes strategy and all non-email content) */}
             {message.thinking && (
               <ThoughtProcess 
                 thinking={message.thinking} 
-                isStreaming={false}
+                isStreaming={isStreaming}
               />
             )}
 
@@ -319,12 +316,15 @@ const ChatMessage = memo(function ChatMessage({
               </div>
             )}
 
-            {/* Bottom Action Toolbar */}
-            <div className="flex items-center justify-between mt-3 px-1 py-2 border-t border-gray-200 dark:border-gray-700">
-              <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">
+            {/* Enhanced Bottom Action Toolbar with better hover states */}
+            <div className="flex items-center justify-between mt-4 px-2 py-2.5 border-t border-gray-200 dark:border-gray-700 rounded-b-lg bg-gray-50/50 dark:bg-gray-800/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              <span className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
                 {new Date(message.created_at).toLocaleTimeString()}
               </span>
-              <div className="flex items-center gap-0.5 sm:gap-1">
+              <div className="flex items-center gap-1 sm:gap-1.5">
                 {/* Email Preview Toggle - Only in email_copy mode */}
                 {isEmailMode && emailSections && (
                   <>
@@ -371,55 +371,76 @@ const ChatMessage = memo(function ChatMessage({
                 )}
                 <button
                   onClick={handleCopy}
-                  className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer touch-manipulation"
+                  className="group/btn p-2 hover:bg-blue-50 dark:hover:bg-blue-950/30 hover:border-blue-200 dark:hover:border-blue-800 border border-transparent rounded-lg transition-all duration-150 cursor-pointer touch-manipulation"
                   title="Copy all"
                 >
                   {copied ? (
-                    <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-green-600 dark:text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
+                    <div className="flex items-center gap-1.5">
+                      <svg className="w-4 h-4 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-xs font-medium text-green-600 dark:text-green-400">Copied!</span>
+                    </div>
                   ) : (
-                    <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
+                    <div className="flex items-center gap-1.5">
+                      <svg className="w-4 h-4 text-gray-600 dark:text-gray-400 group-hover/btn:text-blue-600 dark:group-hover/btn:text-blue-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400 group-hover/btn:text-blue-600 dark:group-hover/btn:text-blue-400 transition-colors hidden sm:inline">Copy</span>
+                    </div>
                   )}
                 </button>
                 {onRegenerate && (
                   <button
                     onClick={onRegenerate}
                     disabled={isRegenerating}
-                    className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer touch-manipulation"
+                    className="group/btn p-2 hover:bg-purple-50 dark:hover:bg-purple-950/30 hover:border-purple-200 dark:hover:border-purple-800 border border-transparent rounded-lg transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer touch-manipulation disabled:hover:bg-transparent disabled:hover:border-transparent"
                     title="Regenerate"
                   >
-                    <svg
-                      className={`w-4 h-4 sm:w-3.5 sm:h-3.5 text-gray-600 dark:text-gray-400 ${isRegenerating ? 'animate-spin' : ''}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
+                    <div className="flex items-center gap-1.5">
+                      <svg
+                        className={`w-4 h-4 text-gray-600 dark:text-gray-400 group-hover/btn:text-purple-600 dark:group-hover/btn:text-purple-400 transition-colors ${isRegenerating ? 'animate-spin' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400 group-hover/btn:text-purple-600 dark:group-hover/btn:text-purple-400 transition-colors hidden sm:inline">
+                        {isRegenerating ? 'Regenerating...' : 'Regenerate'}
+                      </span>
+                    </div>
                   </button>
                 )}
                 {onReaction && (
-                  <div className="hidden sm:flex items-center gap-0.5 sm:gap-1">
+                  <div className="hidden sm:flex items-center gap-1">
                     <button
                       onClick={() => handleReaction('thumbs_up')}
-                      className={`p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer touch-manipulation ${reaction === 'thumbs_up' ? 'bg-green-100 dark:bg-green-900/30' : ''}`}
+                      className={`group/btn p-2 hover:bg-green-50 dark:hover:bg-green-950/30 hover:border-green-200 dark:hover:border-green-800 border border-transparent rounded-lg transition-all duration-150 cursor-pointer touch-manipulation ${reaction === 'thumbs_up' ? 'bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-700' : ''}`}
                       title="👍 Helpful response - Mark as good"
                     >
-                      <svg className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${reaction === 'thumbs_up' ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400'}`} fill={reaction === 'thumbs_up' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-                      </svg>
+                      <div className="flex items-center gap-1.5">
+                        <svg className={`w-4 h-4 ${reaction === 'thumbs_up' ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400 group-hover/btn:text-green-600 dark:group-hover/btn:text-green-400'} transition-colors`} fill={reaction === 'thumbs_up' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                        </svg>
+                        {reaction === 'thumbs_up' && (
+                          <span className="text-xs font-medium text-green-600 dark:text-green-400">Helpful</span>
+                        )}
+                      </div>
                     </button>
                     <button
                       onClick={() => handleReaction('thumbs_down')}
-                      className={`p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer touch-manipulation ${reaction === 'thumbs_down' ? 'bg-red-100 dark:bg-red-900/30' : ''}`}
+                      className={`group/btn p-2 hover:bg-red-50 dark:hover:bg-red-950/30 hover:border-red-200 dark:hover:border-red-800 border border-transparent rounded-lg transition-all duration-150 cursor-pointer touch-manipulation ${reaction === 'thumbs_down' ? 'bg-red-100 dark:bg-red-900/30 border-red-300 dark:border-red-700' : ''}`}
                       title="👎 Needs improvement - Suggest regenerating"
                     >
-                      <svg className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${reaction === 'thumbs_down' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`} fill={reaction === 'thumbs_down' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
-                      </svg>
+                      <div className="flex items-center gap-1.5">
+                        <svg className={`w-4 h-4 ${reaction === 'thumbs_down' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400 group-hover/btn:text-red-600 dark:group-hover/btn:text-red-400'} transition-colors`} fill={reaction === 'thumbs_down' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+                        </svg>
+                        {reaction === 'thumbs_down' && (
+                          <span className="text-xs font-medium text-red-600 dark:text-red-400">Needs work</span>
+                        )}
+                      </div>
                     </button>
                   </div>
                 )}

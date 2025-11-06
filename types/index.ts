@@ -150,7 +150,7 @@ export interface Message {
   conversation_id: string;
   role: MessageRole;
   content: string;
-  thinking?: string; // Extended thinking/reasoning content from AI
+  thinking?: string; // Extended thinking/reasoning content from AI (includes strategy, analysis, and reasoning)
   created_at: string;
   metadata?: MessageMetadata;
   edited_at?: string;
