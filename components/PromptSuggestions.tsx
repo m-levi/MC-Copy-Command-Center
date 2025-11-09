@@ -47,7 +47,7 @@ export default function PromptSuggestions({
               key={category.id}
               onClick={() => setSelectedCategory(category.id as any)}
               className={`
-                px-4 py-2 rounded-lg text-sm font-medium transition-all
+                px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer
                 ${selectedCategory === category.id
                   ? 'bg-blue-600 text-white shadow-md'
                   : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -66,7 +66,7 @@ export default function PromptSuggestions({
             <button
               key={template.id}
               onClick={() => onSelectTemplate(template)}
-              className="group text-left p-4 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 hover:shadow-lg transition-all"
+              className="group text-left p-4 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-500 dark:hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
             >
               <div className="flex items-start justify-between mb-2">
                 <span className="text-2xl">{template.icon}</span>

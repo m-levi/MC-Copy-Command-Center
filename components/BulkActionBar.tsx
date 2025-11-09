@@ -41,7 +41,7 @@ export default function BulkActionBar({
           <div className="flex items-center gap-3">
             <button
               onClick={onCancel}
-              className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+              className="p-1 hover:bg-white/20 rounded-lg transition-colors cursor-pointer"
               title="Cancel selection"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -58,7 +58,7 @@ export default function BulkActionBar({
             {onSelectAll && totalCount > 0 && !allSelected && (
               <button
                 onClick={onSelectAll}
-                className="ml-2 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-md text-sm font-medium transition-colors"
+                className="ml-2 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-md text-sm font-medium transition-colors cursor-pointer"
               >
                 Select all ({totalCount})
               </button>
@@ -70,7 +70,7 @@ export default function BulkActionBar({
             {/* Pin */}
             <button
               onClick={() => onAction('pin')}
-              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative"
+              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative cursor-pointer"
               title="Pin selected"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -84,7 +84,7 @@ export default function BulkActionBar({
             {/* Unpin */}
             <button
               onClick={() => onAction('unpin')}
-              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative"
+              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative cursor-pointer"
               title="Unpin selected"
             >
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -98,7 +98,7 @@ export default function BulkActionBar({
             {/* Archive */}
             <button
               onClick={() => onAction('archive')}
-              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative"
+              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative cursor-pointer"
               title="Archive selected"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -112,7 +112,7 @@ export default function BulkActionBar({
             {/* Unarchive */}
             <button
               onClick={() => onAction('unarchive')}
-              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative"
+              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative cursor-pointer"
               title="Unarchive selected"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -126,7 +126,7 @@ export default function BulkActionBar({
             {/* Export */}
             <button
               onClick={() => onAction('export')}
-              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative"
+              className="p-2 hover:bg-white/20 rounded-lg transition-colors group relative cursor-pointer"
               title="Export selected"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -143,7 +143,7 @@ export default function BulkActionBar({
             {/* Delete */}
             <button
               onClick={handleDelete}
-              className={`px-3 py-2 rounded-lg transition-all font-medium ${
+              className={`px-3 py-2 rounded-lg transition-all font-medium cursor-pointer ${
                 showDeleteConfirm
                   ? 'bg-red-500 hover:bg-red-600 animate-pulse'
                   : 'bg-white/20 hover:bg-white/30'

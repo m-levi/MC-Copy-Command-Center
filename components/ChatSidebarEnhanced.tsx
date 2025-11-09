@@ -484,7 +484,7 @@ export default function ChatSidebarEnhanced({
                 {/* Mobile close button */}
                 <button
                   onClick={() => onMobileToggle?.(false)}
-                  className="lg:hidden mr-2 p-1.5 hover:bg-gray-200 dark:hover:bg-gray-800 rounded transition-colors"
+                  className="lg:hidden mr-2 p-1.5 hover:bg-gray-200 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
                   aria-label="Close sidebar"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -501,7 +501,7 @@ export default function ChatSidebarEnhanced({
                 <div className="flex items-center gap-1">
                   <button
                     onClick={toggleCollapse}
-                    className="hidden lg:block p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                    className="hidden lg:block p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors cursor-pointer"
                     title="Collapse sidebar (Cmd/Ctrl+B)"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -510,7 +510,7 @@ export default function ChatSidebarEnhanced({
                   </button>
                   <button
                     onClick={() => setIsExplorerOpen(true)}
-                    className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                    className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors cursor-pointer"
                     title="Expand View"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -525,7 +525,7 @@ export default function ChatSidebarEnhanced({
             <div className="hidden lg:flex flex-col items-center py-3 gap-3">
               <button
                 onClick={toggleCollapse}
-                className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 transition-all"
+                className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 transition-all cursor-pointer"
                 title="Expand sidebar (Cmd/Ctrl+B)"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -535,7 +535,7 @@ export default function ChatSidebarEnhanced({
               {/* Back home button (icon only) */}
               <button
                 onClick={onNavigateHome}
-                className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-500 transition-all"
+                className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-500 transition-all cursor-pointer"
                 title="All Brands"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -563,7 +563,7 @@ export default function ChatSidebarEnhanced({
             <div className="p-3 flex gap-2">
               <button
                 onClick={onNewConversation}
-                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 text-white"
+                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 text-white cursor-pointer"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -572,7 +572,7 @@ export default function ChatSidebarEnhanced({
               </button>
               <button
                 onClick={onNewFlow || onNewConversation}
-                className="flex-1 py-2.5 px-3 bg-purple-600 hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 text-white"
+                className="flex-1 py-2.5 px-3 bg-purple-600 hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 text-white cursor-pointer"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -603,7 +603,7 @@ export default function ChatSidebarEnhanced({
               {!bulkSelectMode && (
                 <button
                   onClick={handleToggleBulkSelect}
-                  className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                  className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors cursor-pointer"
                   title="Bulk select mode (Shift+Click for range, Cmd/Ctrl+Click for multi-select)"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -619,7 +619,7 @@ export default function ChatSidebarEnhanced({
             {/* New conversation icon */}
             <button
               onClick={onNewConversation}
-              className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md hover:shadow-lg"
+              className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md hover:shadow-lg cursor-pointer"
               title="New Conversation"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
@@ -630,7 +630,7 @@ export default function ChatSidebarEnhanced({
             {/* Search icon */}
             <button
               onClick={toggleCollapse}
-              className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 transition-all"
+              className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 transition-all cursor-pointer"
               title="Expand to search"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

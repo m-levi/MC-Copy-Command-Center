@@ -28,7 +28,7 @@ export default function FlowTypeSelector({ onSelect, onCancel }: FlowTypeSelecto
             </div>
             <button
               onClick={onCancel}
-              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
             >
               <svg className="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -47,7 +47,7 @@ export default function FlowTypeSelector({ onSelect, onCancel }: FlowTypeSelecto
                 onMouseEnter={() => setHoveredId(template.id)}
                 onMouseLeave={() => setHoveredId(null)}
                 className={`
-                  group relative text-left p-4 rounded-lg border transition-all duration-150
+                  group relative text-left p-4 rounded-lg border transition-all duration-150 cursor-pointer
                   ${hoveredId === template.id
                     ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-950/20 shadow-sm'
                     : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'

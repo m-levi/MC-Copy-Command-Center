@@ -97,7 +97,7 @@ export default function ConversationSearch({
               mr-2 p-1.5 rounded-full
               hover:bg-gray-100 dark:hover:bg-gray-700
               transition-all duration-150
-              group
+              group cursor-pointer
             "
             title="Clear search (Esc)"
           >

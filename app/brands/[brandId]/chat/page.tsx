@@ -1702,7 +1702,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       let productLinks: any[] = [];
       let checkpointCounter = 0;
       let rawStreamContent = ''; // Accumulate full raw content
-      let thinkingContent = ''; // Accumulate ALL non-email content (thinking + strategy)
+      let thinkingContent = ''; // Accumulate thinking blocks only
       let isInThinkingBlock = false;
       const CHECKPOINT_INTERVAL = 100; // Create checkpoint every 100 chunks
       
@@ -1757,14 +1757,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             if (strategyStartMatch) {
               thinkingContent += '\n\n--- EMAIL STRATEGY ---\n\n' + strategyStartMatch[1];
               isInThinkingBlock = true;
-              // Update message
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === aiMessageId
-                    ? { ...msg, thinking: thinkingContent }
-                    : msg
-                )
-              );
               continue;
             }
             
@@ -1772,21 +1764,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             if (strategyEndMatch) {
               thinkingContent += strategyEndMatch[1];
               isInThinkingBlock = false;
-              // Update message
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === aiMessageId
-                    ? { ...msg, thinking: thinkingContent.trim() }
-                    : msg
-                )
-              );
               continue;
             }
             
-            // If we're in thinking block (from either source), accumulate
+            // If we're in thinking block, accumulate to thinking
             if (isInThinkingBlock) {
               thinkingContent += chunk;
-              // Update thinking in real-time
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === aiMessageId
@@ -1915,53 +1898,87 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           // Finalize stream
           streamState = finalizeStream(streamState);
           
-          // Post-process: Clean the email content - SIMPLIFIED AND SAFER
+          // Post-process: Simple and reliable extraction from <email_copy> tags
           let cleanedContent = streamState.fullContent;
+          let additionalThinking = '';
           
-          // Only perform email content cleaning in email_copy mode
+          console.log('[Cleaning] Starting post-process, full content length:', cleanedContent.length);
+          console.log('[Cleaning] First 300 chars:', cleanedContent.substring(0, 300));
+          
+          // Only perform email content extraction in email_copy mode
           if (conversationMode === 'email_copy') {
-            // Strategy 1: Remove email_strategy XML tags and content
-            cleanedContent = cleanedContent.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
+            // Try to extract from <email_copy> tags first
+            const emailCopyMatch = cleanedContent.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
             
-            // Strategy 2: Remove leaked strategy headers (only if at start of content)
-            const strategyHeaders = [
-              'Context Analysis:', 'Brief Analysis:', 'Brand Analysis:', 
-              'Audience Psychology:', 'Product Listing:', 'Hero Strategy:',
-              'Structure Planning:', 'CTA Strategy:', 'Objection Handling:', 
-              'Product Integration:'
-            ];
-            strategyHeaders.forEach(header => {
-              const escapedHeader = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              // Only remove if it's at the very beginning (before email structure)
-              cleanedContent = cleanedContent.replace(new RegExp(`^[\\s\\S]*?\\*\\*${escapedHeader}\\*\\*[^\\n]*\\n`, 'i'), '');
-            });
-            
-            // Strategy 3: Remove ALL content before the first email marker
-            // Find the first occurrence of any email marker and cut everything before it
-            const emailMarkers = ['HERO SECTION:', 'EMAIL SUBJECT LINE:', 'SUBJECT LINE:', 'SUBJECT:'];
-            let firstMarkerIndex = -1;
-            
-            for (const marker of emailMarkers) {
-              const markerIndex = cleanedContent.indexOf(marker);
-              if (markerIndex >= 0 && (firstMarkerIndex === -1 || markerIndex < firstMarkerIndex)) {
-                firstMarkerIndex = markerIndex;
+            if (emailCopyMatch) {
+              // SUCCESS: Found tags, extract email only
+              const emailOnly = emailCopyMatch[1].trim();
+              
+              // Everything outside tags goes to thinking
+              const beforeTags = cleanedContent.substring(0, emailCopyMatch.index || 0);
+              const afterTags = cleanedContent.substring((emailCopyMatch.index || 0) + emailCopyMatch[0].length);
+              additionalThinking = (beforeTags + '\n\n' + afterTags).trim();
+              
+              console.log('[Cleaning] ✅ Extracted from <email_copy> tags');
+              console.log('[Cleaning] Email:', emailOnly.length, 'chars');
+              console.log('[Cleaning] Outside tags:', additionalThinking.length, 'chars → thinking');
+              
+              cleanedContent = emailOnly;
+            } else {
+              // FALLBACK: No tags found, use aggressive cleaning
+              console.log('[Cleaning] ⚠️ No <email_copy> tags, using aggressive cleaning');
+              
+              // Remove email_strategy tags
+              cleanedContent = cleanedContent.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
+              
+              // Remove strategic analysis sections
+              const strategicAnalysisMatch = cleanedContent.match(/([\s\S]*?)(?=HERO SECTION:|SUBJECT LINE:|EMAIL SUBJECT LINE:|SUBJECT:)/i);
+              if (strategicAnalysisMatch && strategicAnalysisMatch[1].includes('Strategic Analysis')) {
+                additionalThinking = strategicAnalysisMatch[1].trim();
+                cleanedContent = cleanedContent.replace(strategicAnalysisMatch[1], '');
+                console.log('[Cleaning] Removed strategic analysis:', additionalThinking.length, 'chars → thinking');
               }
+              
+              // NUCLEAR: Cut everything before first email marker
+              const emailMarkers = ['HERO SECTION:', 'EMAIL SUBJECT LINE:', 'SUBJECT LINE:', 'SUBJECT:'];
+              let firstMarkerIndex = -1;
+              
+              for (const marker of emailMarkers) {
+                const idx = cleanedContent.indexOf(marker);
+                if (idx >= 0 && (firstMarkerIndex === -1 || idx < firstMarkerIndex)) {
+                  firstMarkerIndex = idx;
+                }
+              }
+              
+              if (firstMarkerIndex > 0) {
+                const removed = cleanedContent.substring(0, firstMarkerIndex);
+                console.log('[Cleaning] NUCLEAR: Cut', firstMarkerIndex, 'chars before marker');
+                if (removed.trim() && !additionalThinking) {
+                  additionalThinking = removed.trim();
+                }
+                cleanedContent = cleanedContent.substring(firstMarkerIndex);
+              }
+              
+              cleanedContent = cleanedContent.trim();
             }
             
-            // If we found a marker, cut everything before it
-            if (firstMarkerIndex > 0) {
-              cleanedContent = cleanedContent.substring(firstMarkerIndex);
-            }
-            
-            // Final cleanup - just trim whitespace
-            cleanedContent = cleanedContent.trim();
+            console.log('[Cleaning] Final email content:', cleanedContent.length, 'chars');
+            console.log('[Cleaning] First 200 chars of email:', cleanedContent.substring(0, 200));
           }
+          
+          // Combine thinking from all sources
+          const finalThinking = [thinkingContent, additionalThinking]
+            .filter(t => t.trim().length > 0)
+            .join('\n\n---\n\n');
+          
+          console.log('[Cleaning] Final thinking:', finalThinking.length, 'chars');
+          console.log('[Cleaning] Sources: thinking blocks:', thinkingContent.length, ', extracted:', additionalThinking.length);
           
           // Final update to ensure all content is rendered
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === aiMessageId
-                ? { ...msg, content: cleanedContent, thinking: thinkingContent }
+                ? { ...msg, content: cleanedContent, thinking: finalThinking }
                 : msg
             )
           );

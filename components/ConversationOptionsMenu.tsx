@@ -225,7 +225,7 @@ export default function ConversationOptionsMenu({
           <button
             key={item.label}
             onClick={item.onClick}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${item.color}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer ${item.color}`}
           >
             {item.icon}
             <span>{item.label}</span>

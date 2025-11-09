@@ -218,7 +218,7 @@ const ChatMessage = memo(function ChatMessage({
                   {onEdit && (
                     <button
                       onClick={handleEdit}
-                      className="text-xs font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors touch-manipulation"
+                      className="text-xs font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors touch-manipulation cursor-pointer"
                       title="Edit message"
                     >
                       EDIT

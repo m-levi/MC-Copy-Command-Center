@@ -42,7 +42,7 @@ export default function EmailPreview({
   productLinks = [],
 }: EmailPreviewProps) {
   const [copied, setCopied] = useState(false);
-  const [showProductLinks, setShowProductLinks] = useState(true);
+  const [showProductLinks, setShowProductLinks] = useState(false);
 
   // Strip URLs from content (they'll be in the product links section)
   const cleanContent = stripURLsFromContent(content);

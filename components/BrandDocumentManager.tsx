@@ -148,7 +148,7 @@ export default function BrandDocumentManager({ brandId, brandName }: BrandDocume
         </div>
         <button
           onClick={() => setShowUploadForm(!showUploadForm)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -209,7 +209,7 @@ export default function BrandDocumentManager({ brandId, brandName }: BrandDocume
             <button
               type="button"
               onClick={() => setShowUploadForm(false)}
-              className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+              className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors cursor-pointer"
             >
               Cancel
             </button>
@@ -262,7 +262,7 @@ export default function BrandDocumentManager({ brandId, brandName }: BrandDocume
                   </div>
                   <button
                     onClick={() => handleDelete(doc.id)}
-                    className="ml-4 p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                    className="ml-4 p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
                     title="Delete document"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
