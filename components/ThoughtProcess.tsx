@@ -6,6 +6,7 @@ import { AIStatus } from '@/types';
 
 interface ThoughtProcessProps {
   thinking?: string;
+  emailStrategy?: string;
   isStreaming?: boolean;
   aiStatus?: AIStatus;
 }
@@ -41,11 +42,33 @@ function formatThinkingContent(content: string) {
   });
 }
 
-export default function ThoughtProcess({ thinking, isStreaming = false, aiStatus = 'idle' }: ThoughtProcessProps) {
+export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = false, aiStatus = 'idle' }: ThoughtProcessProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Show the block if there's thinking content OR if actively streaming
-  if (!thinking && !isStreaming) return null;
+  // Parse thinking and emailStrategy from combined thinking content if needed
+  let parsedThinking = thinking || '';
+  let parsedEmailStrategy = emailStrategy || '';
+  
+  // If emailStrategy is not provided separately, try to extract it from thinking
+  if (!emailStrategy && thinking) {
+    // First try to match <email_strategy> XML tags
+    const xmlStrategyMatch = thinking.match(/<email_strategy>([\s\S]*?)<\/email_strategy>/i);
+    if (xmlStrategyMatch) {
+      parsedEmailStrategy = xmlStrategyMatch[1].trim();
+      // Remove the email_strategy block from thinking
+      parsedThinking = thinking.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/i, '').trim();
+    } else {
+      // Fallback: try to match the marker format
+      const markerStrategyMatch = thinking.match(/--- EMAIL STRATEGY ---\s*([\s\S]*)/);
+      if (markerStrategyMatch) {
+        parsedEmailStrategy = markerStrategyMatch[1].trim();
+        parsedThinking = thinking.substring(0, markerStrategyMatch.index).trim();
+      }
+    }
+  }
+
+  // Show the block if there's any content OR if actively streaming
+  if (!parsedThinking && !parsedEmailStrategy && !isStreaming) return null;
 
   // Get the display label based on status
   const getDisplayLabel = () => {
@@ -87,11 +110,31 @@ export default function ThoughtProcess({ thinking, isStreaming = false, aiStatus
         )}
       </button>
       
-      {isExpanded && thinking && (
-        <div className="px-4 pb-4 pt-3 border-t border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words leading-relaxed max-w-full">
-            {formatThinkingContent(thinking)}
-          </div>
+      {isExpanded && (parsedThinking || parsedEmailStrategy) && (
+        <div className="border-t border-gray-200 dark:border-gray-700 overflow-hidden">
+          {/* Thought Section */}
+          {parsedThinking && (
+            <div className="px-4 py-4">
+              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
+                Thought
+              </h4>
+              <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words leading-relaxed max-w-full">
+                {formatThinkingContent(parsedThinking)}
+              </div>
+            </div>
+          )}
+          
+          {/* Email Strategy Section */}
+          {parsedEmailStrategy && (
+            <div className={`px-4 py-4 ${parsedThinking ? 'border-t border-gray-200 dark:border-gray-700' : ''}`}>
+              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
+                Email Strategy
+              </h4>
+              <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words leading-relaxed max-w-full">
+                {formatThinkingContent(parsedEmailStrategy)}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

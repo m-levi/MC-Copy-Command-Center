@@ -176,6 +176,93 @@ const cleanEmailContentFinal = (content: string): string => {
   return cleaned;
 };
 
+/**
+ * Parse streamed content into separate sections
+ * "Accumulate Then Parse" approach - clean, simple, reliable
+ */
+function parseStreamedContent(fullContent: string): {
+  emailCopy: string;
+  emailStrategy: string;
+  thoughtContent: string;
+} {
+  // Clean any stray markers that might have leaked through
+  let cleaned = fullContent
+    .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')  // Remove product markers
+    .replace(/\[REMEMBER:[^\]]+\]/g, '')     // Remove memory markers
+    .replace(/\[STATUS:\w+\]/g, '')          // Remove status markers
+    .replace(/\[TOOL:\w+:(START|END)\]/g, '') // Remove tool markers
+    .replace(/\s*\]\s*$/g, '')               // Remove stray closing brackets at end
+    .trim();
+  
+  // Extract email_strategy tags (if present)
+  const strategyMatches = [...cleaned.matchAll(/<email_strategy>([\s\S]*?)<\/email_strategy>/gi)];
+  let emailStrategy = strategyMatches.map(m => m[1].trim()).join('\n\n');
+  
+  // Remove email_strategy from content
+  let remaining = cleaned.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '').trim();
+  
+  // Extract email_copy tags (if present)
+  const emailCopyMatch = remaining.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
+  
+  let emailCopy = '';
+  let thoughtContent = '';
+  
+  if (emailCopyMatch) {
+    // Found email_copy tags - extract content
+    emailCopy = emailCopyMatch[1].trim();
+    
+    // Everything outside email_copy tags is thought
+    const beforeTags = remaining.substring(0, emailCopyMatch.index || 0);
+    const afterTags = remaining.substring((emailCopyMatch.index || 0) + emailCopyMatch[0].length);
+    thoughtContent = (beforeTags + '\n\n' + afterTags).trim();
+  } else {
+    // No email_copy tags - FALLBACK: Look for email structure markers
+    const emailMarkers = ['HERO SECTION:', 'EMAIL SUBJECT LINE:', 'SUBJECT LINE:', 'SUBJECT:'];
+    let firstMarkerIndex = -1;
+    
+    for (const marker of emailMarkers) {
+      const idx = remaining.indexOf(marker);
+      if (idx >= 0 && (firstMarkerIndex === -1 || idx < firstMarkerIndex)) {
+        firstMarkerIndex = idx;
+      }
+    }
+    
+    if (firstMarkerIndex >= 0) {
+      // Found email marker - split content
+      thoughtContent = remaining.substring(0, firstMarkerIndex).trim();
+      emailCopy = remaining.substring(firstMarkerIndex).trim();
+    } else {
+      // No markers found - everything is email copy
+      emailCopy = remaining;
+      thoughtContent = '';
+    }
+  }
+  
+  // Final cleanup: Remove any stray markers or brackets that leaked through
+  emailCopy = emailCopy
+    .replace(/\s*\]\s*$/g, '')  // Remove trailing brackets
+    .replace(/\s*\[\s*$/g, '')  // Remove trailing opening brackets
+    .trim();
+  
+  emailStrategy = emailStrategy
+    .replace(/\s*\]\s*$/g, '')
+    .replace(/\s*\[\s*$/g, '')
+    .trim();
+  
+  thoughtContent = thoughtContent
+    .replace(/\s*\]\s*$/g, '')
+    .replace(/\s*\[\s*$/g, '')
+    .trim();
+  
+  console.log('[Parser] Extracted:', {
+    emailCopy: emailCopy.length,
+    emailStrategy: emailStrategy.length,
+    thoughtContent: thoughtContent.length
+  });
+  
+  return { emailCopy, emailStrategy, thoughtContent };
+}
+
 export default function ChatPage({ params }: { params: Promise<{ brandId: string }> }) {
   const resolvedParams = use(params);
   const brandId = resolvedParams.brandId;
@@ -1702,8 +1789,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       let productLinks: any[] = [];
       let checkpointCounter = 0;
       let rawStreamContent = ''; // Accumulate full raw content
-      let thinkingContent = ''; // Accumulate thinking blocks only
-      let isInThinkingBlock = false;
+      let allStreamedContent = ''; // Accumulate ALL content (thinking + main response)
+      let finalEmailCopy = ''; // Final parsed email copy
+      let finalThinking = ''; // Final parsed thinking content
       const CHECKPOINT_INTERVAL = 100; // Create checkpoint every 100 chunks
       
       // Throttle UI updates to 60fps max for smoother performance
@@ -1725,62 +1813,34 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               console.log('[Stream] First chunk received:', chunk.substring(0, 100));
             }
             
-            // Parse thinking markers - native AI thinking blocks
+            // Parse thinking markers - native AI thinking blocks (for status indication only)
             if (chunk.includes('[THINKING:START]')) {
-              isInThinkingBlock = true;
+              setAiStatus('thinking');
               continue;
             }
             if (chunk.includes('[THINKING:END]')) {
-              isInThinkingBlock = false;
+              setAiStatus('analyzing_brand');
               continue;
             }
             
-            // Parse thinking chunk content - from native AI thinking
+            // Parse thinking chunk content - accumulate to allStreamedContent
             const thinkingChunkMatch = chunk.match(/\[THINKING:CHUNK\]([\s\S]*?)(?=\[|$)/);
             if (thinkingChunkMatch) {
               const thinkingText = thinkingChunkMatch[1];
-              thinkingContent += thinkingText;
+              allStreamedContent += thinkingText;
               
-              // Update message with thinking content in real-time
+              // Update message - show everything in thinking during stream
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === aiMessageId
-                    ? { ...msg, thinking: thinkingContent }
+                    ? { ...msg, thinking: allStreamedContent, content: '' }
                     : msg
                 )
               );
               continue;
             }
             
-            // Parse email_strategy XML tags and add to thinking content
-            const strategyStartMatch = chunk.match(/<email_strategy>([\s\S]*)/);
-            if (strategyStartMatch) {
-              thinkingContent += '\n\n--- EMAIL STRATEGY ---\n\n' + strategyStartMatch[1];
-              isInThinkingBlock = true;
-              continue;
-            }
-            
-            const strategyEndMatch = chunk.match(/([\s\S]*)<\/email_strategy>/);
-            if (strategyEndMatch) {
-              thinkingContent += strategyEndMatch[1];
-              isInThinkingBlock = false;
-              continue;
-            }
-            
-            // If we're in thinking block, accumulate to thinking
-            if (isInThinkingBlock) {
-              thinkingContent += chunk;
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === aiMessageId
-                    ? { ...msg, thinking: thinkingContent }
-                    : msg
-                )
-              );
-              continue;
-            }
-            
-            // Parse tool markers - handle web search in thinking block
+            // Parse tool markers - add to accumulated content
             const toolMatch = chunk.match(/\[TOOL:(\w+):(START|END)\]/g);
             if (toolMatch) {
               toolMatch.forEach((match) => {
@@ -1789,25 +1849,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   const [, toolName, action] = toolParts;
                   if (action === 'START') {
                     console.log(`[Tool] ${toolName} started`);
-                    // Add tool usage to thinking content
-                    thinkingContent += `\n\n[Using web search to find information...]\n\n`;
-                    setMessages((prev) =>
-                      prev.map((msg) =>
-                        msg.id === aiMessageId
-                          ? { ...msg, thinking: thinkingContent }
-                          : msg
-                      )
-                    );
+                    setAiStatus('searching_web');
+                    allStreamedContent += `\n\n[Using web search to find information...]\n\n`;
                   } else if (action === 'END') {
                     console.log(`[Tool] ${toolName} completed`);
-                    thinkingContent += `\n[Web search complete]\n\n`;
-                    setMessages((prev) =>
-                      prev.map((msg) =>
-                        msg.id === aiMessageId
-                          ? { ...msg, thinking: thinkingContent }
-                          : msg
-                      )
-                    );
+                    allStreamedContent += `\n[Web search complete]\n\n`;
                   }
                 }
               });
@@ -1829,11 +1875,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               });
             }
             
-            // Comprehensive marker cleaning - multiple passes for robustness
-            let cleanChunk = chunk;
-            
-            // Pass 1: Remove all control markers
-            cleanChunk = cleanChunk
+            // Clean control markers from chunk
+            let cleanChunk = chunk
               .replace(/\[STATUS:\w+\]/g, '')
               .replace(/\[TOOL:\w+:(START|END)\]/g, '')
               .replace(/\[THINKING:START\]/g, '')
@@ -1842,23 +1885,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
               .replace(/\[REMEMBER:[^\]]+\]/g, '');
             
-            // Pass 2: Remove XML strategy tags (both inline and multiline)
-            cleanChunk = cleanChunk
-              .replace(/<email_strategy>/gi, '')
-              .replace(/<\/email_strategy>/gi, '')
-              .replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
-            
-            // Only process content chunks if we have actual content and not in thinking
-            if (cleanChunk && !isInThinkingBlock) {
-              // Minimal chunk-level cleaning - let post-processing handle the rest
-              // This prevents cutting off actual email content during streaming
-              // Process chunk with advanced parser
-              const result = processStreamChunk(streamState, cleanChunk);
-              streamState = result.state;
+            // Accumulate ALL content (including tags) to allStreamedContent
+            if (cleanChunk) {
+              allStreamedContent += cleanChunk;
               
               // Throttle UI updates to prevent choppy scrolling
               const now = Date.now();
-              if (result.shouldRender && (now - lastUpdateTime >= UPDATE_THROTTLE || !pendingUpdate)) {
+              if (now - lastUpdateTime >= UPDATE_THROTTLE || !pendingUpdate) {
                 lastUpdateTime = now;
                 pendingUpdate = true;
                 
@@ -1867,12 +1900,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   setMessages((prev) => {
                     const updated = prev.map((msg) =>
                       msg.id === aiMessageId
-                        ? { ...msg, content: streamState.fullContent, thinking: thinkingContent }
+                        ? { ...msg, thinking: allStreamedContent, content: '' }
                         : msg
                     );
                     
                     if (checkpointCounter % 50 === 0) {
-                      console.log('[Stream] Updating message, content length:', streamState.fullContent.length);
+                      console.log('[Stream] Updating thinking, length:', allStreamedContent.length);
                     }
                     
                     return updated;
@@ -1888,97 +1921,50 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               saveCheckpoint({
                 conversationId: currentConversation.id,
                 messageId: aiMessageId,
-                content: streamState.fullContent,
+                content: allStreamedContent,
                 timestamp: Date.now(),
                 isComplete: false,
               });
             }
           }
           
-          // Finalize stream
-          streamState = finalizeStream(streamState);
+          // ====================================================================
+          // POST-PROCESSING: Parse complete content after streaming finishes
+          // ====================================================================
           
-          // Post-process: Simple and reliable extraction from <email_copy> tags
-          let cleanedContent = streamState.fullContent;
-          let additionalThinking = '';
+          console.log('[PostProcess] Stream complete, parsing accumulated content...');
+          console.log('[PostProcess] Total accumulated:', allStreamedContent.length, 'chars');
+          console.log('[PostProcess] First 300 chars:', allStreamedContent.substring(0, 300));
           
-          console.log('[Cleaning] Starting post-process, full content length:', cleanedContent.length);
-          console.log('[Cleaning] First 300 chars:', cleanedContent.substring(0, 300));
+          // Use the clean parser function - one pass, no booleans
+          const parsed = parseStreamedContent(allStreamedContent);
           
-          // Only perform email content extraction in email_copy mode
-          if (conversationMode === 'email_copy') {
-            // Try to extract from <email_copy> tags first
-            const emailCopyMatch = cleanedContent.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
-            
-            if (emailCopyMatch) {
-              // SUCCESS: Found tags, extract email only
-              const emailOnly = emailCopyMatch[1].trim();
-              
-              // Everything outside tags goes to thinking
-              const beforeTags = cleanedContent.substring(0, emailCopyMatch.index || 0);
-              const afterTags = cleanedContent.substring((emailCopyMatch.index || 0) + emailCopyMatch[0].length);
-              additionalThinking = (beforeTags + '\n\n' + afterTags).trim();
-              
-              console.log('[Cleaning] ✅ Extracted from <email_copy> tags');
-              console.log('[Cleaning] Email:', emailOnly.length, 'chars');
-              console.log('[Cleaning] Outside tags:', additionalThinking.length, 'chars → thinking');
-              
-              cleanedContent = emailOnly;
-            } else {
-              // FALLBACK: No tags found, use aggressive cleaning
-              console.log('[Cleaning] ⚠️ No <email_copy> tags, using aggressive cleaning');
-              
-              // Remove email_strategy tags
-              cleanedContent = cleanedContent.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
-              
-              // Remove strategic analysis sections
-              const strategicAnalysisMatch = cleanedContent.match(/([\s\S]*?)(?=HERO SECTION:|SUBJECT LINE:|EMAIL SUBJECT LINE:|SUBJECT:)/i);
-              if (strategicAnalysisMatch && strategicAnalysisMatch[1].includes('Strategic Analysis')) {
-                additionalThinking = strategicAnalysisMatch[1].trim();
-                cleanedContent = cleanedContent.replace(strategicAnalysisMatch[1], '');
-                console.log('[Cleaning] Removed strategic analysis:', additionalThinking.length, 'chars → thinking');
-              }
-              
-              // NUCLEAR: Cut everything before first email marker
-              const emailMarkers = ['HERO SECTION:', 'EMAIL SUBJECT LINE:', 'SUBJECT LINE:', 'SUBJECT:'];
-              let firstMarkerIndex = -1;
-              
-              for (const marker of emailMarkers) {
-                const idx = cleanedContent.indexOf(marker);
-                if (idx >= 0 && (firstMarkerIndex === -1 || idx < firstMarkerIndex)) {
-                  firstMarkerIndex = idx;
-                }
-              }
-              
-              if (firstMarkerIndex > 0) {
-                const removed = cleanedContent.substring(0, firstMarkerIndex);
-                console.log('[Cleaning] NUCLEAR: Cut', firstMarkerIndex, 'chars before marker');
-                if (removed.trim() && !additionalThinking) {
-                  additionalThinking = removed.trim();
-                }
-                cleanedContent = cleanedContent.substring(firstMarkerIndex);
-              }
-              
-              cleanedContent = cleanedContent.trim();
-            }
-            
-            console.log('[Cleaning] Final email content:', cleanedContent.length, 'chars');
-            console.log('[Cleaning] First 200 chars of email:', cleanedContent.substring(0, 200));
+          // Build final thinking content with sections
+          const finalThinkingSections = [];
+          
+          // Add thought content (if any)
+          if (parsed.thoughtContent) {
+            finalThinkingSections.push(parsed.thoughtContent);
           }
           
-          // Combine thinking from all sources
-          const finalThinking = [thinkingContent, additionalThinking]
-            .filter(t => t.trim().length > 0)
-            .join('\n\n---\n\n');
+          // Add email strategy with marker for ThoughtProcess component to parse
+          if (parsed.emailStrategy) {
+            finalThinkingSections.push('<email_strategy>\n' + parsed.emailStrategy + '\n</email_strategy>');
+          }
           
-          console.log('[Cleaning] Final thinking:', finalThinking.length, 'chars');
-          console.log('[Cleaning] Sources: thinking blocks:', thinkingContent.length, ', extracted:', additionalThinking.length);
+          finalThinking = finalThinkingSections.join('\n\n');
+          finalEmailCopy = parsed.emailCopy;
           
-          // Final update to ensure all content is rendered
+          console.log('[PostProcess] Final separation:');
+          console.log('[PostProcess] - Email copy:', finalEmailCopy.length, 'chars');
+          console.log('[PostProcess] - Thinking:', finalThinking.length, 'chars');
+          console.log('[PostProcess] - Strategy:', parsed.emailStrategy.length, 'chars');
+          
+          // Final update with cleanly separated content
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === aiMessageId
-                ? { ...msg, content: cleanedContent, thinking: finalThinking }
+                ? { ...msg, content: finalEmailCopy, thinking: finalThinking }
                 : msg
             )
           );
@@ -2059,14 +2045,45 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           // Try to recover from last checkpoint
           const recovered = loadCheckpoint(aiMessageId);
           if (recovered) {
-            console.log('Recovered stream from checkpoint:', recovered);
-            streamState.fullContent = recovered.content;
+            console.log('[Recovery] Recovered stream from checkpoint:', recovered.content.length, 'chars');
+            
+            // Re-parse the recovered content to separate email/thinking/strategy
+            allStreamedContent = recovered.content;
+            const parsed = parseStreamedContent(allStreamedContent);
+            
+            finalThinking = '';
+            if (parsed.thoughtContent) {
+              finalThinking = parsed.thoughtContent;
+            }
+            if (parsed.emailStrategy) {
+              finalThinking = finalThinking 
+                ? finalThinking + '\n\n<email_strategy>\n' + parsed.emailStrategy + '\n</email_strategy>'
+                : '<email_strategy>\n' + parsed.emailStrategy + '\n</email_strategy>';
+            }
+            finalEmailCopy = parsed.emailCopy;
+            
+            console.log('[Recovery] Parsed recovered content:');
+            console.log('[Recovery] - Email copy:', finalEmailCopy.length, 'chars');
+            console.log('[Recovery] - Thinking:', finalThinking.length, 'chars');
+            
+            // Update UI with recovered content
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMessageId
+                  ? { ...msg, content: finalEmailCopy, thinking: finalThinking }
+                  : msg
+              )
+            );
+            
+            console.log('[Recovery] UI updated with recovered content');
+          } else {
+            console.log('[Recovery] No checkpoint found for recovery');
           }
           throw streamError;
         }
       }
 
-      const fullContent = streamState.fullContent;
+      const fullContent = finalEmailCopy;
 
       // IMPORTANT: Reset AI status to idle IMMEDIATELY after stream completes
       console.log('[Stream] Completed successfully, resetting status to idle');
@@ -2077,8 +2094,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       sidebarState.updateConversationStatus(currentConversation.id, 'idle');
 
       // Sanitize content before saving to database (XSS protection)
-      const sanitizedContent = sanitizeContent(fullContent);
-      const sanitizedThinking = thinkingContent ? sanitizeContent(thinkingContent) : null;
+      const sanitizedContent = sanitizeContent(finalEmailCopy);
+      const sanitizedThinking = finalThinking ? sanitizeContent(finalThinking) : null;
 
       // Save complete AI message to database with product links and thinking
       console.log('[Database] Saving message with product links:', productLinks.length, 'links');
@@ -2143,10 +2160,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Detect campaign ideas in planning mode
       if (conversationMode === 'planning') {
         console.log('[Campaign] Checking for campaign idea in planning mode');
-        console.log('[Campaign] Full content length:', fullContent.length);
-        console.log('[Campaign] Content preview:', fullContent.substring(0, 200));
+        console.log('[Campaign] Full content length:', finalEmailCopy.length);
+        console.log('[Campaign] Content preview:', finalEmailCopy.substring(0, 200));
         
-        const campaignIdea = extractCampaignIdea(fullContent);
+        const campaignIdea = extractCampaignIdea(finalEmailCopy);
         console.log('[Campaign] Extracted campaign idea:', campaignIdea);
         
         if (campaignIdea) {
