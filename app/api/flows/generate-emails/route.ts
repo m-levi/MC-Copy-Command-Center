@@ -13,7 +13,11 @@ const openai = new OpenAI({
 });
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  // Add beta headers for web search and memory tools
+  defaultHeaders: {
+    'anthropic-beta': 'web-search-2025-03-05,context-management-2025-06-27'
+  }
 });
 
 export async function POST(request: NextRequest) {
@@ -77,14 +81,21 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
 
     // Generate each email sequentially with progress updates
     const results = [];
+    const startTime = Date.now();
+    
+    console.log(`[Flow Generator] Starting generation of ${outline.emails.length} emails for flow: ${outline.flowName}`);
     
     for (let i = 0; i < outline.emails.length; i++) {
       const emailOutline = outline.emails[i];
+      const emailStartTime = Date.now();
       
       try {
-        console.log(`[Flow Generator] Creating email ${emailOutline.sequence} of ${outline.emails.length}`);
+        console.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} START =====`);
+        console.log(`[Flow Generator] Title: ${emailOutline.title}`);
+        console.log(`[Flow Generator] Purpose: ${emailOutline.purpose}`);
         
         // Create child conversation
+        console.log(`[Flow Generator] Creating child conversation...`);
         const { data: childConversation, error: childError } = await supabase
           .from('conversations')
           .insert({
@@ -102,13 +113,21 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           .select()
           .single();
 
-        if (childError || !childConversation) {
-          throw new Error(`Failed to create child conversation for email ${emailOutline.sequence}`);
+        if (childError) {
+          console.error(`[Flow Generator] Database error creating conversation:`, childError);
+          throw new Error(`Failed to create child conversation: ${childError.message}`);
+        }
+        
+        if (!childConversation) {
+          throw new Error(`Failed to create child conversation: No data returned`);
         }
 
-        console.log(`[Flow Generator] Generating content for email ${emailOutline.sequence}`);
+        console.log(`[Flow Generator] Child conversation created: ${childConversation.id}`);
+        console.log(`[Flow Generator] Generating email content using ${emailType} format...`);
         
         // Generate email content using STANDARD email format
+        // buildFlowEmailPrompt uses STANDARD_EMAIL_PROMPT for 'design' type
+        // and LETTER_EMAIL_PROMPT for 'letter' type (see lib/flow-prompts.ts line 94-96)
         const prompt = buildFlowEmailPrompt(
           emailOutline,
           outline,
@@ -116,45 +135,45 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           '', // RAG context - can be added later
           emailType
         );
+        
+        console.log(`[Flow Generator] Using standard email prompt: ${emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT'}`);
 
+        console.log(`[Flow Generator] Calling Claude API...`);
         let emailContent = '';
 
-        if (model === 'claude-4.5-sonnet') {
-          const response = await anthropic.messages.create({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 4000,
-            thinking: {
-              type: 'enabled',
-              budget_tokens: 2000
-            },
-            messages: [{
-              role: 'user',
-              content: prompt
-            }]
-          });
+        // Always use Claude Sonnet 4.5 for writing emails in flows
+        // (Planning can use GPT-5, but writing should be Claude-only)
+        const response = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4000,
+          thinking: {
+            type: 'enabled',
+            budget_tokens: 2000
+          },
+          messages: [{
+            role: 'user',
+            content: prompt
+          }]
+        });
 
-          // Extract content from response
-          for (const block of response.content) {
-            if (block.type === 'text') {
-              emailContent += block.text;
-            }
+        console.log(`[Flow Generator] Claude API response received`);
+        console.log(`[Flow Generator] Response contains ${response.content.length} blocks`);
+
+        // Extract content from response
+        for (const block of response.content) {
+          if (block.type === 'text') {
+            emailContent += block.text;
           }
-        } else {
-          // GPT-5 or other OpenAI models
-          const response = await openai.chat.completions.create({
-            model: model === 'gpt-5' ? 'gpt-5-preview' : 'gpt-4o',
-            messages: [{
-              role: 'user',
-              content: prompt
-            }],
-            max_completion_tokens: 4000,
-            reasoning_effort: 'high'
-          });
+        }
 
-          emailContent = response.choices[0]?.message?.content || '';
+        console.log(`[Flow Generator] Extracted ${emailContent.length} characters of content`);
+        
+        if (!emailContent || emailContent.length === 0) {
+          throw new Error(`No content generated for email ${emailOutline.sequence}`);
         }
 
         // Save email as first message in child conversation
+        console.log(`[Flow Generator] Saving message to database...`);
         const { error: messageError } = await supabase
           .from('messages')
           .insert({
@@ -164,10 +183,13 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           });
 
         if (messageError) {
-          throw new Error(`Failed to save message for email ${emailOutline.sequence}`);
+          console.error(`[Flow Generator] Database error saving message:`, messageError);
+          throw new Error(`Failed to save message: ${messageError.message}`);
         }
 
-        console.log(`[Flow Generator] Successfully created email ${emailOutline.sequence}`);
+        const emailDuration = Date.now() - emailStartTime;
+        console.log(`[Flow Generator] ✅ Email ${emailOutline.sequence} completed in ${emailDuration}ms`);
+        console.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} END =====\n`);
         
         results.push({
           success: true,
@@ -175,7 +197,11 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           sequence: emailOutline.sequence
         });
       } catch (error) {
-        console.error(`Error generating email ${emailOutline.sequence}:`, error);
+        const emailDuration = Date.now() - emailStartTime;
+        console.error(`[Flow Generator] ❌ Email ${emailOutline.sequence} FAILED after ${emailDuration}ms`);
+        console.error(`[Flow Generator] Error details:`, error);
+        console.error(`[Flow Generator] Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
+        
         results.push({
           success: false,
           sequence: emailOutline.sequence,
@@ -183,6 +209,12 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         });
       }
     }
+    
+    const totalDuration = Date.now() - startTime;
+    console.log(`[Flow Generator] ===== FLOW GENERATION COMPLETE =====`);
+    console.log(`[Flow Generator] Total time: ${totalDuration}ms (${(totalDuration / 1000).toFixed(1)}s)`);
+    console.log(`[Flow Generator] Successful: ${results.filter(r => r.success).length}/${outline.emails.length}`);
+    console.log(`[Flow Generator] Failed: ${results.filter(r => !r.success).length}/${outline.emails.length}`);
     
     // Check for failures
     const failures = results.filter(r => !r.success);

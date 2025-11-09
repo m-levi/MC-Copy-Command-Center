@@ -14,6 +14,10 @@ function getOpenAIClient() {
 function getAnthropicClient() {
   return new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY!,
+    // Add beta headers for web search and memory tools
+    defaultHeaders: {
+      'anthropic-beta': 'web-search-2025-03-05,context-management-2025-06-27'
+    }
   });
 }
 

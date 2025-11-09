@@ -22,7 +22,7 @@ interface VirtualizedConversationListProps {
   height: number;
   bulkSelectMode?: boolean;
   selectedConversationIds?: Set<string>;
-  onToggleSelect?: (conversationId: string) => void;
+  onToggleSelect?: (conversationId: string, event?: React.MouseEvent) => void;
 }
 
 export default function VirtualizedConversationList({
@@ -102,7 +102,7 @@ export default function VirtualizedConversationList({
               onAction={(action) => handleQuickAction(conversation.id, action)}
               bulkSelectMode={bulkSelectMode}
               isSelected={selectedConversationIds.has(conversation.id)}
-              onToggleSelect={() => onToggleSelect?.(conversation.id)}
+              onToggleSelect={(event) => onToggleSelect?.(conversation.id, event)}
             />
           </div>
         ))}

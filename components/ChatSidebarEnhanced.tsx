@@ -87,6 +87,7 @@ export default function ChatSidebarEnhanced({
   const [listHeight, setListHeight] = useState(600);
   const [bulkSelectMode, setBulkSelectMode] = useState(false);
   const [selectedConversationIds, setSelectedConversationIds] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
 
   const handleDelete = useCallback((e: React.MouseEvent, conversationId: string) => {
     e.stopPropagation();
@@ -119,29 +120,82 @@ export default function ChatSidebarEnhanced({
     setEditingTitle('');
   }, []);
 
-  // Bulk selection handlers (basic ones that don't depend on orderedConversations)
+  // Memoize filtered conversations to avoid unnecessary re-filters
+  const filteredConversations = useMemo(() => {
+    return conversations.filter(conv => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      return (
+        conv.title?.toLowerCase().includes(query) ||
+        conv.last_message_preview?.toLowerCase().includes(query) ||
+        conv.created_by_name?.toLowerCase().includes(query)
+      );
+    });
+  }, [conversations, searchQuery]);
+
+  // Memoize ordered conversations
+  const orderedConversations = useMemo(() => {
+    const pinnedConversations = filteredConversations.filter(c => pinnedConversationIds.includes(c.id));
+    const unpinnedConversations = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
+    return [...pinnedConversations, ...unpinnedConversations];
+  }, [filteredConversations, pinnedConversationIds]);
+
+  // Bulk selection handlers
   const handleToggleBulkSelect = useCallback(() => {
     setBulkSelectMode(!bulkSelectMode);
     if (bulkSelectMode) {
       setSelectedConversationIds(new Set());
+      setLastSelectedIndex(null);
     }
   }, [bulkSelectMode]);
 
-  const handleToggleConversationSelect = useCallback((conversationId: string) => {
-    setSelectedConversationIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(conversationId)) {
-        newSet.delete(conversationId);
-      } else {
-        newSet.add(conversationId);
-      }
-      return newSet;
-    });
-  }, []);
+  const handleToggleConversationSelect = useCallback((conversationId: string, event?: React.MouseEvent) => {
+    const currentIndex = orderedConversations.findIndex(c => c.id === conversationId);
+    
+    // Shift+Click: Range selection
+    if (event?.shiftKey && lastSelectedIndex !== null && currentIndex !== -1) {
+      const start = Math.min(lastSelectedIndex, currentIndex);
+      const end = Math.max(lastSelectedIndex, currentIndex);
+      const rangeIds = orderedConversations.slice(start, end + 1).map(c => c.id);
+      
+      setSelectedConversationIds(prev => {
+        const newSet = new Set(prev);
+        rangeIds.forEach(id => newSet.add(id));
+        return newSet;
+      });
+    }
+    // Cmd/Ctrl+Click: Multi-select (toggle individual)
+    else if (event?.metaKey || event?.ctrlKey) {
+      setSelectedConversationIds(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(conversationId)) {
+          newSet.delete(conversationId);
+        } else {
+          newSet.add(conversationId);
+        }
+        return newSet;
+      });
+      setLastSelectedIndex(currentIndex);
+    }
+    // Regular click in bulk mode: Toggle single
+    else {
+      setSelectedConversationIds(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(conversationId)) {
+          newSet.delete(conversationId);
+        } else {
+          newSet.add(conversationId);
+        }
+        return newSet;
+      });
+      setLastSelectedIndex(currentIndex);
+    }
+  }, [orderedConversations, lastSelectedIndex]);
 
   const handleCancelBulkSelect = useCallback(() => {
     setBulkSelectMode(false);
     setSelectedConversationIds(new Set());
+    setLastSelectedIndex(null);
   }, []);
 
   // Toggle collapse/expand
@@ -224,26 +278,6 @@ export default function ChatSidebarEnhanced({
     return () => window.removeEventListener('resize', calculateHeight);
   }, [searchQuery]);
 
-  // Memoize filtered conversations to avoid unnecessary re-filters
-  const filteredConversations = useMemo(() => {
-    return conversations.filter(conv => {
-      if (!searchQuery) return true;
-      const query = searchQuery.toLowerCase();
-      return (
-        conv.title?.toLowerCase().includes(query) ||
-        conv.last_message_preview?.toLowerCase().includes(query) ||
-        conv.created_by_name?.toLowerCase().includes(query)
-      );
-    });
-  }, [conversations, searchQuery]);
-
-  // Memoize ordered conversations
-  const orderedConversations = useMemo(() => {
-    const pinnedConversations = filteredConversations.filter(c => pinnedConversationIds.includes(c.id));
-    const unpinnedConversations = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
-    return [...pinnedConversations, ...unpinnedConversations];
-  }, [filteredConversations, pinnedConversationIds]);
-
   // Bulk action handlers that depend on orderedConversations
   const handleSelectAll = useCallback(() => {
     setSelectedConversationIds(new Set(orderedConversations.map(c => c.id)));
@@ -303,19 +337,42 @@ export default function ChatSidebarEnhanced({
     }
   }, [showBrandSwitcher]);
 
-  // Keyboard shortcut: Cmd/Ctrl + B to toggle collapse
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Check for Cmd (Mac) or Ctrl (Windows/Linux) + B
+      // Cmd/Ctrl + B: Toggle collapse
       if ((event.metaKey || event.ctrlKey) && event.key === 'b') {
         event.preventDefault();
         toggleCollapse();
+      }
+      
+      // Cmd/Ctrl + A: Select all (when in bulk select mode)
+      if ((event.metaKey || event.ctrlKey) && event.key === 'a' && bulkSelectMode) {
+        event.preventDefault();
+        handleSelectAll();
+      }
+      
+      // Escape: Cancel bulk select mode
+      if (event.key === 'Escape' && bulkSelectMode) {
+        event.preventDefault();
+        handleCancelBulkSelect();
+      }
+      
+      // Delete/Backspace: Delete selected conversations (with confirmation)
+      if ((event.key === 'Delete' || event.key === 'Backspace') && bulkSelectMode && selectedConversationIds.size > 0) {
+        // Only trigger if not focused on an input
+        if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+          event.preventDefault();
+          if (confirm(`Are you sure you want to delete ${selectedConversationIds.size} conversation${selectedConversationIds.size > 1 ? 's' : ''}?`)) {
+            handleBulkAction('delete');
+          }
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleCollapse]);
+  }, [toggleCollapse, bulkSelectMode, selectedConversationIds, handleSelectAll, handleCancelBulkSelect, handleBulkAction]);
 
   return (
     <>
@@ -534,13 +591,26 @@ export default function ChatSidebarEnhanced({
               />
             </div>
 
-            {/* Search bar */}
-            <div className="px-3 pb-3">
-              <ConversationSearch
-                value={searchQuery}
-                onChange={setSearchQuery}
-                onClear={() => setSearchQuery('')}
-              />
+            {/* Search bar and bulk select button */}
+            <div className="px-3 pb-3 flex gap-2">
+              <div className="flex-1">
+                <ConversationSearch
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  onClear={() => setSearchQuery('')}
+                />
+              </div>
+              {!bulkSelectMode && (
+                <button
+                  onClick={handleToggleBulkSelect}
+                  className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                  title="Bulk select mode (Shift+Click for range, Cmd/Ctrl+Click for multi-select)"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                  </svg>
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -619,7 +689,7 @@ export default function ChatSidebarEnhanced({
                         onPrefetch={() => onPrefetchConversation?.(conversation.id)}
                         bulkSelectMode={bulkSelectMode}
                         isSelected={selectedConversationIds.has(conversation.id)}
-                        onToggleSelect={() => handleToggleConversationSelect(conversation.id)}
+                        onToggleSelect={(event) => handleToggleConversationSelect(conversation.id, event)}
                       />
                     ))}
                   </div>

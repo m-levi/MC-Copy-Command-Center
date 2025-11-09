@@ -46,8 +46,10 @@ export default function FlowGenerationProgress({
         <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
           {displayedProgress === 0 ? (
             'Preparing to generate emails...'
-          ) : displayedProgress === totalEmails ? (
-            'Finalizing...'
+          ) : displayedProgress >= totalEmails ? (
+            'Completing generation and saving...'
+          ) : displayedProgress === totalEmails - 1 ? (
+            `Creating final email (${totalEmails} of ${totalEmails})...`
           ) : (
             `Creating email ${displayedProgress} of ${totalEmails}...`
           )}

@@ -79,7 +79,7 @@ export interface Conversation {
   title: string;
   model: string;
   conversation_type: ConversationType;
-  mode?: ConversationMode; // Optional for backward compatibility
+  mode: ConversationMode; // Set at creation, cannot be changed
   created_at: string;
   updated_at: string;
   is_pinned?: boolean;

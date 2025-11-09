@@ -59,9 +59,29 @@ Use web search to find products on the brand's website, verify current product a
 Categories: user_preference, brand_context, campaign_info, product_details, decision, fact
 Example: [REMEMBER:tone_preference=professional:user_preference]
 
-**CRITICAL: SMART TOOL USAGE**
+**CRITICAL: SMART TOOL USAGE - HIDE ALL RESEARCH FROM EMAIL**
 
-When using tools (web search, web fetch, memory), use them silently without announcing your actions in your visible response. Users want results, not process narration.
+When using tools (web search, web fetch, memory):
+
+1. **DO ALL RESEARCH IN YOUR THINKING PROCESS** - Never in the email itself
+2. **NEVER include these phrases in the email:**
+   - "Based on my research..."
+   - "Based on my web search..."
+   - "I can see that..."
+   - "Let me search..."
+   - "From the search results..."
+   - "According to my research..."
+   - Any mention of searching, researching, or finding information
+
+3. **START THE EMAIL IMMEDIATELY** - No preamble, no research notes, no explanations
+4. **Use research results naturally** - Just write the email with the information you found
+5. **Include product URLs** - When mentioning products, include the full URL in quotes after the product name
+
+Example of WRONG approach:
+"Based on my research, I found that Product X costs $99..."
+
+Example of CORRECT approach:
+Just write the email naturally: "Product X" (URL will be extracted automatically)
 
 ## YOUR TASK
 

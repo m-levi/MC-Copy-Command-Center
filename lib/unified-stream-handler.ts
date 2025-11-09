@@ -9,7 +9,8 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { Message } from '@/types';
 import { parseMemoryInstructions, saveMemory } from '@/lib/conversation-memory-store';
 import { extractProductMentions, constructProductUrl } from '@/lib/web-search';
-import { smartExtractProductLinks, extractURLsFromSearchContext } from '@/lib/url-extractor';
+import { smartExtractProductLinks, extractURLsFromSearchContext, convertToProductLinks } from '@/lib/url-extractor';
+import { cleanWithLogging } from '@/lib/content-cleaner';
 
 export type AIProvider = 'openai' | 'anthropic';
 
@@ -49,7 +50,13 @@ async function getClient(provider: AIProvider) {
     return new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
   } else {
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
-    return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+    return new Anthropic({ 
+      apiKey: process.env.ANTHROPIC_API_KEY!,
+      // Add beta headers for web search and memory tools
+      defaultHeaders: {
+        'anthropic-beta': 'web-search-2025-03-05,context-management-2025-06-27'
+      }
+    });
   }
 }
 
@@ -198,6 +205,7 @@ function parseChunk(chunk: any, provider: AIProvider): {
   isThinking?: boolean;
   toolUse?: string;
   toolResult?: string;
+  toolResultContent?: string;
 } {
   if (provider === 'openai') {
     const reasoningContent = (chunk.choices[0]?.delta as any)?.reasoning_content || '';
@@ -233,11 +241,30 @@ function parseChunk(chunk: any, provider: AIProvider): {
       return { toolUse: chunk.content_block.name };
     }
     
-    // Add web_search_tool_result detection
+    // Add web_search_tool_result detection - capture the full result
     if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'web_search_tool_result') {
+      // The search results are in content_block.content (it's an array)
+      const searchResults = (chunk.content_block as any);
+      const content = searchResults.content;
+      
+      // Extract URLs from search results array
+      if (Array.isArray(content)) {
+        const urls = content
+          .filter((r: any) => r.type === 'web_search_result' && r.url)
+          .map((r: any) => `${r.title} - ${r.url}`)
+          .join('\n');
+        
+        if (urls) {
+          console.log('[Anthropic] Extracted URLs from search results:', content.length, 'results');
+          console.log('[Anthropic] URLs preview:', urls.substring(0, 200));
+          return { toolResult: 'web_search', toolResultContent: urls };
+        }
+      }
+      
       return { toolResult: 'web_search' };
     }
     
+    // Capture text content
     if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
       return { content: chunk.delta.text };
     }
@@ -248,11 +275,14 @@ function parseChunk(chunk: any, provider: AIProvider): {
 
 /**
  * Handle product link extraction - uses smart extraction for REAL URLs only
+ * Now includes thinking content and web search results
  */
 async function extractProductLinks(
   websiteUrl: string | undefined,
   content: string,
-  userMessages: Message[]
+  userMessages: Message[],
+  thinkingContent?: string,
+  webSearchContent?: string
 ): Promise<ProductLink[]> {
   try {
     // Extract user message content
@@ -260,8 +290,49 @@ async function extractProductLinks(
       .filter(m => m.role === 'user')
       .map(m => m.content);
     
+    // Combine all content sources for extraction
+    // Web search results often contain URLs that need to be extracted
+    const allContent = [
+      content, // Main response
+      thinkingContent || '', // Thinking content (where web search results are often mentioned)
+      webSearchContent || '', // Direct web search results if captured
+    ].filter(Boolean).join('\n\n');
+    
+    console.log('[ProductLinks] Extracting from:', {
+      mainResponse: content.length,
+      thinking: thinkingContent?.length || 0,
+      webSearch: webSearchContent?.length || 0,
+      total: allContent.length
+    });
+    
+    // Debug: Log first 500 chars of thinking to see what's there
+    if (thinkingContent && thinkingContent.length > 0) {
+      console.log('[ProductLinks] Thinking content preview:', thinkingContent.substring(0, 500));
+      console.log('[ProductLinks] Thinking has URLs?', /https?:\/\//.test(thinkingContent));
+    }
+    
+    // Debug: Log first 500 chars of response
+    console.log('[ProductLinks] Response preview:', content.substring(0, 500));
+    console.log('[ProductLinks] Response has URLs?', /https?:\/\//.test(content));
+    
     // Use smart extraction to find real URLs only
-    const links = smartExtractProductLinks(content, userMessageTexts, websiteUrl);
+    const links = smartExtractProductLinks(allContent, userMessageTexts, websiteUrl);
+    
+    // Also try extracting from web search context specifically
+    if (webSearchContent || thinkingContent) {
+      const searchText = [webSearchContent, thinkingContent].filter(Boolean).join('\n\n');
+      const searchUrls = extractURLsFromSearchContext(searchText, websiteUrl);
+      if (searchUrls.length > 0) {
+        const searchLinks = convertToProductLinks(searchUrls, websiteUrl);
+        // Merge with existing links, avoiding duplicates
+        searchLinks.forEach((link: ProductLink) => {
+          if (!links.some(l => l.url === link.url)) {
+            links.push(link);
+          }
+        });
+        console.log('[ProductLinks] Added', searchLinks.length, 'links from web search context');
+      }
+    }
     
     console.log('[ProductLinks] Smart extraction found', links.length, 'real product links');
     
@@ -329,7 +400,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         let thinkingContent = '';
         let isInThinkingBlock = false;
         let currentStatusIndex = 0;
-        let webSearchContent = ''; // Track content from web searches
+        let webSearchContent = ''; // Track content from web searches (if directly available)
         
         for await (const chunk of stream) {
           const parsed = parseChunk(chunk, provider);
@@ -342,20 +413,26 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
             continue;
           }
           
+          // Capture web search tool result content FIRST (before handling toolResult)
+          if (parsed.toolResultContent) {
+            webSearchContent += parsed.toolResultContent + '\n\n';
+            console.log(`[${provider.toUpperCase()}] Captured web search content (${parsed.toolResultContent.length} chars)`);
+            // Don't continue - also need to handle toolResult marker
+          }
+          
           if (parsed.toolResult) {
             console.log(`[${provider.toUpperCase()}] Tool result received: ${parsed.toolResult}`);
             controller.enqueue(encoder.encode(`[TOOL:${parsed.toolResult}:END]`));
             controller.enqueue(encoder.encode('[STATUS:analyzing_brand]'));
             
-            // Capture the context around web search for URL extraction
-            // The AI's response after using web search often contains the URLs it found
-            if (parsed.toolResult === 'web_search') {
-              webSearchContent = fullResponse; // Snapshot current content
+            if (parsed.toolResult === 'web_search' && webSearchContent) {
+              console.log(`[${provider.toUpperCase()}] Web search completed - captured ${webSearchContent.length} chars of URLs`);
             }
             continue;
           }
           
           // Handle thinking content
+          // Web search results are often mentioned in thinking content - this is where URLs are typically found
           if (parsed.thinkingStart || parsed.isThinking) {
             if (!isInThinkingBlock) {
               controller.enqueue(encoder.encode('[THINKING:START]'));
@@ -421,8 +498,22 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         }
         
         // Extract and send product links (ONLY real URLs, no fake construction)
-        if (fullResponse) {
-          const productLinks = await extractProductLinks(websiteUrl, fullResponse, messages);
+        // Include thinking content and web search content for better URL extraction
+        if (fullResponse || thinkingContent || webSearchContent) {
+          console.log('[Stream] Extracting product links from:', {
+            response: fullResponse.length,
+            thinking: thinkingContent.length,
+            webSearch: webSearchContent.length
+          });
+          
+          const productLinks = await extractProductLinks(
+            websiteUrl, 
+            fullResponse, 
+            messages,
+            thinkingContent,
+            webSearchContent
+          );
+          
           if (productLinks.length > 0) {
             console.log('[Stream] Sending', productLinks.length, 'product links to client');
             controller.enqueue(encoder.encode(`\n\n[PRODUCTS:${JSON.stringify(productLinks)}]`));

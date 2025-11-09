@@ -14,7 +14,6 @@ import { executeBulkAction } from '@/lib/conversation-actions';
 
 // Lazy load heavy/optional components
 const VirtualizedMessageList = lazy(() => import('@/components/VirtualizedMessageList'));
-const PlanningStageIndicator = lazy(() => import('@/components/PlanningStageIndicator'));
 const MemorySettings = lazy(() => import('@/components/MemorySettings'));
 const FlowTypeSelector = lazy(() => import('@/components/FlowTypeSelector'));
 const FlowOutlineDisplay = lazy(() => import('@/components/FlowOutlineDisplay'));
@@ -50,6 +49,7 @@ import { ChatPageSkeleton } from '@/components/SkeletonLoader';
 import DOMPurify from 'dompurify';
 import { detectFlowOutline, isOutlineApprovalMessage } from '@/lib/flow-outline-parser';
 import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
+import { extractCampaignIdea, stripCampaignTags } from '@/lib/campaign-parser';
 
 export const dynamic = 'force-dynamic';
 
@@ -214,6 +214,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [pendingOutlineApproval, setPendingOutlineApproval] = useState<FlowOutlineData | null>(null);
   const [isGeneratingFlow, setIsGeneratingFlow] = useState(false);
   const [flowGenerationProgress, setFlowGenerationProgress] = useState(0);
+  
+  // Campaign detection state (for Planning mode)
+  const [detectedCampaign, setDetectedCampaign] = useState<{ title: string; brief: string } | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const brandSwitcherRef = useRef<HTMLDivElement>(null);
@@ -764,7 +767,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           title: 'New Conversation',
           model: selectedModel,
           conversation_type: 'email',
-          mode: 'email_copy', // Default to email copy mode
+          mode: 'email_copy', // Start with writing mode by default
         })
         .select()
         .single();
@@ -774,14 +777,35 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setCurrentConversation(data);
       setConversationMode('email_copy');
       setMessages([]);
-      setEmailType('design'); // Always default to design email
-      setDraftContent(''); // Clear draft when switching
+      setEmailType('design');
+      setDraftContent('');
+      setDetectedCampaign(null);
       await loadConversations();
       toast.success('New conversation created');
       trackEvent('conversation_created', { conversationId: data.id });
     } catch (error) {
       console.error('Error creating conversation:', error);
       toast.error('Failed to create conversation');
+    }
+  };
+
+  const handleToggleMode = async (newMode: ConversationMode) => {
+    if (!currentConversation || messages.length > 0) return;
+    
+    try {
+      const { error } = await supabase
+        .from('conversations')
+        .update({ mode: newMode })
+        .eq('id', currentConversation.id);
+
+      if (error) throw error;
+
+      setConversationMode(newMode);
+      setCurrentConversation({ ...currentConversation, mode: newMode });
+      toast.success(`Switched to ${newMode === 'planning' ? 'Planning' : 'Writing'} mode`);
+    } catch (error) {
+      console.error('Error updating mode:', error);
+      toast.error('Failed to update mode');
     }
   };
 
@@ -801,6 +825,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     setSelectedModel(conversation.model as AIModel);
     setConversationMode(conversation.mode || 'planning');
     setDraftContent(''); // Clear draft when switching
+    setDetectedCampaign(null); // Clear any detected campaign
     
     // Set email type based on conversation
     if (conversation.is_flow) {
@@ -925,26 +950,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   };
 
-  const handleToggleMode = async (newMode: ConversationMode) => {
-    if (!currentConversation) return;
-    
-    try {
-      const { error } = await supabase
-        .from('conversations')
-        .update({ mode: newMode })
-        .eq('id', currentConversation.id);
-
-      if (error) throw error;
-
-      setConversationMode(newMode);
-      setCurrentConversation({ ...currentConversation, mode: newMode });
-      toast.success(`Switched to ${newMode === 'planning' ? 'Planning' : 'Email Copy'} mode`);
-    } catch (error) {
-      console.error('Error updating mode:', error);
-      toast.error('Failed to update mode');
-    }
-  };
-
   // Handle email type change with Flow type selector
   const handleEmailTypeChange = (type: EmailType) => {
     if (type === 'flow') {
@@ -1060,17 +1065,22 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setIsGeneratingFlow(true);
       setFlowGenerationProgress(0);
       
+      console.log('[Flow UI] Starting flow generation for', outline.emails.length, 'emails');
+      
       // Simulate progress for better UX (actual generation happens on server)
+      // Each email takes approximately 10-15 seconds
       const progressInterval = setInterval(() => {
         setFlowGenerationProgress(prev => {
-          if (prev >= outline.emails.length) {
-            clearInterval(progressInterval);
+          // Don't go past the total - 1 (let the API completion set it to total)
+          if (prev >= outline.emails.length - 1) {
             return prev;
           }
+          console.log('[Flow UI] Progress update:', prev + 1, '/', outline.emails.length);
           return prev + 1;
         });
-      }, 5000); // Update every 5 seconds (approximate)
+      }, 12000); // Update every 12 seconds (more realistic timing)
       
+      console.log('[Flow UI] Calling generate-emails API...');
       const response = await fetch('/api/flows/generate-emails', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1084,9 +1094,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       });
 
       clearInterval(progressInterval);
+      console.log('[Flow UI] API call completed, response status:', response.status);
+      
+      // Set progress to completion
       setFlowGenerationProgress(outline.emails.length);
 
       const result = await response.json();
+      console.log('[Flow UI] Generation result:', result);
       
       if (result.success) {
         toast.success(`Generated ${result.generated} emails successfully!`, {
@@ -1121,11 +1135,29 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           return prev;
         });
       } else {
-        toast.error(`Generated ${result.generated} emails, but ${result.failed} failed`);
+        console.warn('[Flow UI] Partial success:', result);
+        toast.error(`Generated ${result.generated} emails, but ${result.failed} failed. Check console for details.`);
+        
+        // Still reload to show successful emails
+        if (result.generated > 0) {
+          await loadFlowData(currentConversation.id);
+          await loadConversations();
+        }
       }
     } catch (error) {
-      console.error('Error approving outline:', error);
-      toast.error('Failed to generate emails');
+      console.error('[Flow UI] Error approving outline:', error);
+      
+      // Provide more detailed error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(`Failed to generate emails: ${errorMessage}`);
+      
+      // Try to reload anyway in case some emails were created
+      try {
+        await loadFlowData(currentConversation.id);
+        await loadConversations();
+      } catch (reloadError) {
+        console.error('[Flow UI] Error reloading after failure:', reloadError);
+      }
     } finally {
       setSending(false);
       setIsGeneratingFlow(false);
@@ -1133,30 +1165,53 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   };
 
-  const handleTransferPlanToEmail = async () => {
-    if (!currentConversation || messages.length === 0) return;
-
-    // Get all the conversation context
-    const allMessages = messages.map(m => `${m.role === 'user' ? 'User' : 'Planning Session'}: ${m.content}`).join('\n\n---\n\n');
-    
+  const handleCreateCampaignFromPlan = async (campaignTitle: string, campaignBrief: string) => {
     try {
-      // Switch to email copy mode
-      await handleToggleMode('email_copy');
+      // Get current user
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) {
+        console.error('[Campaign] No user found');
+        toast.error('Failed to create campaign');
+        return;
+      }
 
-      // Create a comprehensive brief from the planning conversation
-      const briefPrompt = `Based on our planning discussion, create an email campaign. Here's what we discussed:
+      // Create new conversation in email_copy mode
+      const conversationData = {
+        brand_id: brandId,
+        user_id: user.user.id,
+        title: campaignTitle,
+        model: selectedModel,
+        conversation_type: 'email' as const,
+        mode: 'email_copy' as const,
+      };
 
-${allMessages.substring(0, 2000)}${allMessages.length > 2000 ? '\n\n[Additional context from planning conversation]' : ''}
+      const { data: newConversation, error } = await supabase
+        .from('conversations')
+        .insert(conversationData)
+        .select()
+        .single();
 
-Please generate the complete email copy following all the guidelines we discussed in the planning phase.`;
+      if (error) {
+        console.error('[Campaign] Error creating conversation:', error);
+        throw error;
+      }
+
+      // Pre-fill the draft with the campaign brief
+      setDraftContent(`Create an email for this campaign:\n\nCampaign: ${campaignTitle}\n\n${campaignBrief}`);
       
-      // Pre-fill the input with the comprehensive brief
-      setDraftContent(briefPrompt);
+      // Switch to the new conversation
+      setCurrentConversation(newConversation);
+      setConversationMode('email_copy');
+      setMessages([]);
+      setDetectedCampaign(null); // Clear the detected campaign
       
-      toast.success('Plan transferred to Email Copy mode! Review the brief and click send to generate.');
+      // Reload conversations to show the new one in sidebar
+      await loadConversations();
+      
+      toast.success(`Campaign conversation created! Ready to write your email.`);
     } catch (error) {
-      console.error('Error transferring plan:', error);
-      toast.error('Failed to transfer plan');
+      console.error('Error creating campaign conversation:', error);
+      toast.error('Failed to create campaign');
     }
   };
 
@@ -1812,32 +1867,8 @@ Please generate the complete email copy following all the guidelines we discusse
             
             // Only process content chunks if we have actual content and not in thinking
             if (cleanChunk && !isInThinkingBlock) {
-              // Pass 3: Aggressively remove ALL strategy-related content patterns
-              cleanChunk = cleanChunk
-                // Remove strategy section headers
-                .replace(/\*\*Context Analysis:\*\*/gi, '')
-                .replace(/\*\*Brief Analysis:\*\*/gi, '')
-                .replace(/\*\*Brand Analysis:\*\*/gi, '')
-                .replace(/\*\*Audience Psychology:\*\*/gi, '')
-                .replace(/\*\*Product Listing:\*\*/gi, '')
-                .replace(/\*\*Hero Strategy:\*\*/gi, '')
-                .replace(/\*\*Structure Planning:\*\*/gi, '')
-                .replace(/\*\*CTA Strategy:\*\*/gi, '')
-                .replace(/\*\*Objection Handling:\*\*/gi, '')
-                .replace(/\*\*Product Integration:\*\*/gi, '')
-                // Remove meta-commentary
-                .replace(/^I need to (create|analyze|search for|work through)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-                .replace(/^Let me (start by|analyze|search for|create)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-                .replace(/^Based on (my analysis|the requirements)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-                // Remove any numbered list items that look like strategy points
-                .replace(/^\d+\.\s*\*\*[^:]+:\*\*[\s\S]*?(?=\n\n|HERO SECTION)/gim, '');
-              
-              // If chunk still doesn't contain email structure markers, skip it
-              // This prevents preamble from being added to content
-              const hasEmailMarker = /HERO SECTION|EMAIL SUBJECT|SECTION \d+|CALL-TO-ACTION|SUBJECT LINE/i.test(streamState.fullContent + cleanChunk);
-              if (!hasEmailMarker && streamState.fullContent.length === 0) {
-                continue; // Skip preamble chunks
-              }
+              // Minimal chunk-level cleaning - let post-processing handle the rest
+              // This prevents cutting off actual email content during streaming
               // Process chunk with advanced parser
               const result = processStreamChunk(streamState, cleanChunk);
               streamState = result.state;
@@ -1884,48 +1915,47 @@ Please generate the complete email copy following all the guidelines we discusse
           // Finalize stream
           streamState = finalizeStream(streamState);
           
-          // Post-process: Aggressively clean the email content with multiple fallback strategies
+          // Post-process: Clean the email content - SIMPLIFIED AND SAFER
           let cleanedContent = streamState.fullContent;
           
-          // Strategy 1: Remove email_strategy XML tags and content
-          cleanedContent = cleanedContent.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
-          
-          // Strategy 2: Remove leaked strategy headers
-          const strategyHeaders = [
-            'Context Analysis:', 'Brief Analysis:', 'Brand Analysis:', 
-            'Audience Psychology:', 'Product Listing:', 'Hero Strategy:',
-            'Structure Planning:', 'CTA Strategy:', 'Objection Handling:', 
-            'Product Integration:'
-          ];
-          strategyHeaders.forEach(header => {
-            const escapedHeader = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            cleanedContent = cleanedContent.replace(new RegExp(`\\*\\*${escapedHeader}\\*\\*[^\\n]*`, 'gi'), '');
-          });
-          
-          // Strategy 3: Find and extract only the email structure
-          const emailStartMatch = cleanedContent.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)[\s\S]*/i);
-          if (emailStartMatch) {
-            cleanedContent = emailStartMatch[0];
+          // Only perform email content cleaning in email_copy mode
+          if (conversationMode === 'email_copy') {
+            // Strategy 1: Remove email_strategy XML tags and content
+            cleanedContent = cleanedContent.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
+            
+            // Strategy 2: Remove leaked strategy headers (only if at start of content)
+            const strategyHeaders = [
+              'Context Analysis:', 'Brief Analysis:', 'Brand Analysis:', 
+              'Audience Psychology:', 'Product Listing:', 'Hero Strategy:',
+              'Structure Planning:', 'CTA Strategy:', 'Objection Handling:', 
+              'Product Integration:'
+            ];
+            strategyHeaders.forEach(header => {
+              const escapedHeader = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              // Only remove if it's at the very beginning (before email structure)
+              cleanedContent = cleanedContent.replace(new RegExp(`^[\\s\\S]*?\\*\\*${escapedHeader}\\*\\*[^\\n]*\\n`, 'i'), '');
+            });
+            
+            // Strategy 3: Remove ALL content before the first email marker
+            // Find the first occurrence of any email marker and cut everything before it
+            const emailMarkers = ['HERO SECTION:', 'EMAIL SUBJECT LINE:', 'SUBJECT LINE:', 'SUBJECT:'];
+            let firstMarkerIndex = -1;
+            
+            for (const marker of emailMarkers) {
+              const markerIndex = cleanedContent.indexOf(marker);
+              if (markerIndex >= 0 && (firstMarkerIndex === -1 || markerIndex < firstMarkerIndex)) {
+                firstMarkerIndex = markerIndex;
+              }
+            }
+            
+            // If we found a marker, cut everything before it
+            if (firstMarkerIndex > 0) {
+              cleanedContent = cleanedContent.substring(firstMarkerIndex);
+            }
+            
+            // Final cleanup - just trim whitespace
+            cleanedContent = cleanedContent.trim();
           }
-          
-          // Strategy 4: Remove any remaining preamble patterns
-          cleanedContent = cleanedContent
-            .replace(/^I (need to|will|should|must|can)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-            .replace(/^Let me[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-            .replace(/^Based on[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-            .replace(/^First[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-            .replace(/^Here's[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-            .replace(/^Now[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i, '')
-            .trim();
-          
-          // Strategy 5: Remove numbered list patterns that aren't part of email
-          cleanedContent = cleanedContent.replace(/^\d+\.\s*\*\*[^:]+:\*\*[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|\n\n---)/gim, '');
-          
-          // Strategy 6: Clean up any bullet point strategy items before email structure
-          cleanedContent = cleanedContent.replace(/^[-•]\s*Section \d+:[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT)/gim, '');
-          
-          // Final cleanup
-          cleanedContent = cleanedContent.trim();
           
           // Final update to ensure all content is rendered
           setMessages((prev) =>
@@ -1938,31 +1968,72 @@ Please generate the complete email copy following all the guidelines we discusse
           
           // Extract product links from complete stream (after all chunks received)
           console.log('[ProductExtract] Checking for PRODUCTS marker in stream...');
-          const productMatch = rawStreamContent.match(/\[PRODUCTS:([\s\S]*?)\](?:\s|$)/);
-          if (productMatch) {
-            console.log('[ProductExtract] PRODUCTS marker found!', productMatch[1].substring(0, 100));
-            try {
-              const jsonString = productMatch[1].trim();
-              // Validate JSON before parsing
-              if (jsonString && jsonString.startsWith('[') && jsonString.endsWith(']')) {
-                productLinks = JSON.parse(jsonString);
-                console.log('[ProductExtract] Parsed product links:', productLinks);
-                // Validate structure
-                if (!Array.isArray(productLinks)) {
-                  console.warn('Product links is not an array, resetting');
+          console.log('[ProductExtract] Raw stream length:', rawStreamContent.length);
+          console.log('[ProductExtract] Raw stream last 500 chars:', rawStreamContent.slice(-500));
+          
+          // Improved regex: Match [PRODUCTS:...] where ... is JSON that may contain brackets
+          // Strategy: Find [PRODUCTS: then match balanced brackets to find the closing ]
+          const productsMarkerIndex = rawStreamContent.indexOf('[PRODUCTS:');
+          if (productsMarkerIndex !== -1) {
+            console.log('[ProductExtract] PRODUCTS marker found at index:', productsMarkerIndex);
+            
+            // Extract everything after [PRODUCTS:
+            const afterMarker = rawStreamContent.substring(productsMarkerIndex + '[PRODUCTS:'.length);
+            
+            // Find the closing ] by counting brackets (handles nested JSON arrays/objects)
+            let bracketCount = 0;
+            let jsonEndIndex = -1;
+            
+            for (let i = 0; i < afterMarker.length; i++) {
+              const char = afterMarker[i];
+              if (char === '[') bracketCount++;
+              if (char === ']') {
+                if (bracketCount === 0) {
+                  // Found the closing ] of [PRODUCTS:...]
+                  jsonEndIndex = i;
+                  break;
+                }
+                bracketCount--;
+              }
+            }
+            
+            if (jsonEndIndex !== -1) {
+              const jsonString = afterMarker.substring(0, jsonEndIndex).trim();
+              console.log('[ProductExtract] Extracted JSON string length:', jsonString.length);
+              console.log('[ProductExtract] JSON preview:', jsonString.substring(0, 200));
+              
+              try {
+                // Validate JSON before parsing
+                if (jsonString && jsonString.startsWith('[') && jsonString.endsWith(']')) {
+                  productLinks = JSON.parse(jsonString);
+                  console.log('[ProductExtract] Parsed product links:', productLinks);
+                  // Validate structure
+                  if (!Array.isArray(productLinks)) {
+                    console.warn('Product links is not an array, resetting');
+                    productLinks = [];
+                  } else {
+                    console.log('[ProductExtract] Successfully parsed', productLinks.length, 'product links');
+                  }
+                } else {
+                  console.warn('Invalid product links format - JSON does not start/end with brackets:', jsonString.substring(0, 50));
                   productLinks = [];
                 }
-              } else {
-                console.warn('Invalid product links format, skipping:', jsonString.substring(0, 50));
+              } catch (e) {
+                console.error('Failed to parse product links JSON:', e);
+                console.error('JSON string:', jsonString.substring(0, 500));
+                // Silent fail - product links are optional
                 productLinks = [];
               }
-            } catch (e) {
-              console.error('Failed to parse product links:', e);
-              // Silent fail - product links are optional
-              productLinks = [];
+            } else {
+              console.warn('[ProductExtract] Could not find closing bracket for PRODUCTS marker');
             }
           } else {
             console.log('[ProductExtract] No PRODUCTS marker found in stream');
+            // Debug: Check if there are any similar patterns
+            const similarPatterns = rawStreamContent.match(/\[PRODUCT[^\]]*/g);
+            if (similarPatterns) {
+              console.log('[ProductExtract] Found similar patterns:', similarPatterns);
+            }
           }
           
           // Clear checkpoint after successful completion
@@ -1998,6 +2069,17 @@ Please generate the complete email copy following all the guidelines we discusse
         console.log('[Database] Product links to save:', productLinks);
       }
       
+      // Verify user session before inserting (RLS requires it)
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.error('[Database] No authenticated user - cannot save message');
+        throw new Error('Not authenticated');
+      }
+      
+      console.log('[Database] User authenticated:', user.id);
+      console.log('[Database] Conversation ID:', currentConversation.id);
+      console.log('[Database] Brand ID:', brand.id);
+      
       const { data: savedAiMessage, error: aiError } = await supabase
         .from('messages')
         .insert({
@@ -2010,7 +2092,16 @@ Please generate the complete email copy following all the guidelines we discusse
         .select()
         .single();
 
-      if (aiError) throw aiError;
+      if (aiError) {
+        console.error('[Database] Error saving message:', aiError);
+        console.error('[Database] Error details:', {
+          message: aiError.message,
+          code: aiError.code,
+          details: aiError.details,
+          hint: aiError.hint,
+        });
+        throw aiError;
+      }
 
       // Replace placeholder with saved message and remove any duplicates
       setMessages((prev) => {
@@ -2030,6 +2121,26 @@ Please generate the complete email copy following all the guidelines we discusse
       if (userMessage && savedAiMessage) {
         addCachedMessage(currentConversation.id, userMessage);
         addCachedMessage(currentConversation.id, savedAiMessage);
+      }
+      
+      // Detect campaign ideas in planning mode
+      if (conversationMode === 'planning') {
+        console.log('[Campaign] Checking for campaign idea in planning mode');
+        console.log('[Campaign] Full content length:', fullContent.length);
+        console.log('[Campaign] Content preview:', fullContent.substring(0, 200));
+        
+        const campaignIdea = extractCampaignIdea(fullContent);
+        console.log('[Campaign] Extracted campaign idea:', campaignIdea);
+        
+        if (campaignIdea) {
+          console.log('[Campaign] Setting detected campaign:', campaignIdea.title);
+          setDetectedCampaign({
+            title: campaignIdea.title,
+            brief: campaignIdea.brief
+          });
+        } else {
+          console.log('[Campaign] No campaign idea detected');
+        }
       }
       
       // Cache the response for potential regenerations
@@ -2313,12 +2424,12 @@ Please generate the complete email copy following all the guidelines we discusse
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-2">
                   {conversationMode === 'planning' 
-                    ? 'Let\'s Talk Strategy' 
+                    ? 'Your Brand Strategy Partner' 
                     : 'Create Your Email'}
                 </h3>
                 <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mb-6">
                   {conversationMode === 'planning'
-                    ? 'Ask questions, explore ideas, or plan your next campaign. This is your space to think and strategize.'
+                    ? 'Get marketing advice, brainstorm campaigns, explore creative ideas, and develop winning strategies for your brand.'
                     : 'Describe the email you want to create and I\'ll generate it for you with high-converting copy.'}
                 </p>
                 <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 text-left">
@@ -2328,20 +2439,20 @@ Please generate the complete email copy following all the guidelines we discusse
                   {conversationMode === 'planning' ? (
                     <div className="space-y-3">
                       <div className="text-sm text-blue-800 dark:text-blue-200">
-                        <p className="font-medium mb-1">💬 Ask Questions</p>
-                        <p className="text-xs ml-3">"What makes a good subject line?" or "How do I improve open rates?"</p>
+                        <p className="font-medium mb-1">💬 Get Marketing Advice</p>
+                        <p className="text-xs ml-3">"What are best practices for abandoned cart emails?"</p>
                       </div>
                       <div className="text-sm text-blue-800 dark:text-blue-200">
-                        <p className="font-medium mb-1">🔍 Explore Ideas</p>
-                        <p className="text-xs ml-3">"Tell me about our target audience" or "What's our brand voice?"</p>
+                        <p className="font-medium mb-1">🎨 Brainstorm Creative Ideas</p>
+                        <p className="text-xs ml-3">"I need creative campaign ideas for our new product launch"</p>
                       </div>
                       <div className="text-sm text-blue-800 dark:text-blue-200">
-                        <p className="font-medium mb-1">📋 Plan Campaigns</p>
-                        <p className="text-xs ml-3">"I want to promote our sale" - I'll help you build a strategy</p>
+                        <p className="font-medium mb-1">🎯 Develop Strategy</p>
+                        <p className="text-xs ml-3">"Help me plan a re-engagement campaign for inactive customers"</p>
                       </div>
                       <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-800">
                         <p className="text-xs text-blue-700 dark:text-blue-300">
-                          <strong>Note:</strong> When you're ready to write the actual email, switch to Email Copy mode or use the Transfer Plan button.
+                          <strong>Note:</strong> When we develop a campaign concept together, I'll offer to create it in Writing mode.
                         </p>
                       </div>
                     </div>
@@ -2350,7 +2461,7 @@ Please generate the complete email copy following all the guidelines we discusse
                       <li>• Be specific about your product or offer</li>
                       <li>• Mention your target audience</li>
                       <li>• Include any key details like discounts or timeframes</li>
-                      <li>• Switch to Planning mode if you need to brainstorm first</li>
+                      <li>• Provide context about the email's purpose and goal</li>
                     </ul>
                   )}
                 </div>
@@ -2376,13 +2487,6 @@ Please generate the complete email copy following all the guidelines we discusse
           ) : messages.length > 50 ? (
             /* Use virtualized list for long conversations (50+ messages) */
             <>
-              <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                {/* Planning Stage Indicator (only in planning mode) */}
-                {conversationMode === 'planning' && (
-                  <PlanningStageIndicator messages={messages} />
-                )}
-              </div>
-              
               <VirtualizedMessageList
                 messages={messages}
                 brandId={brandId}
@@ -2400,14 +2504,14 @@ Please generate the complete email copy following all the guidelines we discusse
               
               {/* Show preparing indicator when sending but no AI message yet */}
               {sending && messages.filter(m => m.role === 'assistant').length === messages.filter(m => m.role === 'user').length - 1 && (
-                <div className="mb-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-2 inline-block">
-                  <div className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-400">
-                    <div className="flex gap-1" style={{ minWidth: '28px' }}>
-                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '200ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '400ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
+                <div className="mb-3 inline-block">
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms', animationDuration: '1.4s' }}></div>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '200ms', animationDuration: '1.4s' }}></div>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '400ms', animationDuration: '1.4s' }}></div>
                     </div>
-                    <span className="font-medium">preparing response...</span>
+                    <span className="font-medium">preparing response</span>
                   </div>
                 </div>
               )}
@@ -2425,10 +2529,6 @@ Please generate the complete email copy following all the guidelines we discusse
                 />
               )}
 
-              {/* Planning Stage Indicator (only in planning mode) */}
-              {conversationMode === 'planning' && (
-                <PlanningStageIndicator messages={messages} />
-              )}
               
               {/* Messages */}
               {messages.map((message, index) => (
@@ -2463,14 +2563,14 @@ Please generate the complete email copy following all the guidelines we discusse
               
               {/* Show preparing indicator when sending but no AI message yet */}
               {sending && messages.filter(m => m.role === 'assistant').length === messages.filter(m => m.role === 'user').length - 1 && (
-                <div className="mb-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-2 inline-block">
-                  <div className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-400">
-                    <div className="flex gap-1" style={{ minWidth: '28px' }}>
-                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '200ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
-                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '400ms', animationDuration: '1.4s', animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)' }}></div>
+                <div className="mb-3 inline-block">
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms', animationDuration: '1.4s' }}></div>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '200ms', animationDuration: '1.4s' }}></div>
+                      <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '400ms', animationDuration: '1.4s' }}></div>
                     </div>
-                    <span className="font-medium">preparing response...</span>
+                    <span className="font-medium">preparing response</span>
                   </div>
                 </div>
               )}
@@ -2495,49 +2595,35 @@ Please generate the complete email copy following all the guidelines we discusse
           </div>
         )}
 
-        {/* Transfer Plan Button (Planning Mode) - Only show after meaningful planning */}
+        {/* Create Campaign Button (Planning Mode with detected campaign) */}
         {currentConversation && 
          conversationMode === 'planning' && 
-         messages.length >= 4 && // At least 2 back-and-forth exchanges
+         detectedCampaign && 
+         messages.length > 0 &&
          messages[messages.length - 1]?.role === 'assistant' && 
-         !sending && 
-         (() => {
-           // Check if there's been substantial planning content
-           const userMessages = messages.filter(m => m.role === 'user');
-           const assistantMessages = messages.filter(m => m.role === 'assistant');
-           const totalLength = messages.reduce((sum, m) => sum + m.content.length, 0);
-           
-           // Show only if:
-           // 1. At least 2 exchanges
-           // 2. Total content > 500 chars (meaningful conversation)
-           // 3. Last message is substantial (> 100 chars)
-           return userMessages.length >= 2 && 
-                  assistantMessages.length >= 2 && 
-                  totalLength > 500 &&
-                  messages[messages.length - 1].content.length > 100;
-         })() && (
-          <div className="border-t border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 px-4 py-3">
+         !sending && (
+          <div className="border-t border-gray-200 dark:border-gray-700 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 px-4 py-3">
             <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="flex-shrink-0 w-10 h-10 bg-blue-600 dark:bg-blue-500 rounded-full flex items-center justify-center">
+                <div className="flex-shrink-0 w-10 h-10 bg-green-600 dark:bg-green-500 rounded-full flex items-center justify-center">
                   <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                    Ready to create your email?
+                    Campaign idea ready!
                   </p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 hidden sm:block">
-                    Transfer this plan to Email Copy mode to generate your email
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    {detectedCampaign.title}
                   </p>
                 </div>
               </div>
               <button
-                onClick={handleTransferPlanToEmail}
-                className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+                onClick={() => handleCreateCampaignFromPlan(detectedCampaign.title, detectedCampaign.brief)}
+                className="w-full sm:w-auto px-4 py-2 bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600 text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center gap-2"
               >
-                <span>Transfer Plan</span>
+                <span>Create Campaign in Writing Mode</span>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>

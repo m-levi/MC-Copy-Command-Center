@@ -1,14 +1,14 @@
 'use client';
 
 import { Message, ConversationMode } from '@/types';
-import { useState, useEffect, memo, useMemo } from 'react';
-import EmailSectionCard, { parseEmailSections } from './EmailSectionCard';
+import { useState, useEffect, memo } from 'react';
 import MessageEditor from './MessageEditor';
-import EmailRenderer from './EmailRenderer';
 import EmailPreview from './EmailPreview';
 import ThoughtProcess from './ThoughtProcess';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
+import ReactMarkdown from 'react-markdown';
+import { stripCampaignTags } from '@/lib/campaign-parser';
 
 interface ChatMessageProps {
   message: Message;
@@ -37,16 +37,15 @@ const ChatMessage = memo(function ChatMessage({
   aiStatus = 'idle',
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
-  const [showSections, setShowSections] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [reaction, setReaction] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
   const [isStarred, setIsStarred] = useState(false);
   const [isStarring, setIsStarring] = useState(false);
-  const [useEmailPreview, setUseEmailPreview] = useState(true); // Use beautiful preview by default
   const supabase = createClient();
   
-  // Email Preview only available in email_copy mode
+  // Determine mode for display logic
   const isEmailMode = mode === 'email_copy';
+  const isPlanningMode = mode === 'planning';
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(message.content);
@@ -188,11 +187,6 @@ const ChatMessage = memo(function ChatMessage({
   };
 
   const isUser = message.role === 'user';
-  
-  // Memoize expensive parsing operation
-  const emailSections = useMemo(() => {
-    return !isUser ? parseEmailSections(message.content) : null;
-  }, [isUser, message.content]);
 
   return (
     <div 
@@ -236,83 +230,48 @@ const ChatMessage = memo(function ChatMessage({
           </div>
         ) : (
           <div>
-            {/* Subtle AI Activity Indicator */}
-            {isStreaming && aiStatus !== 'idle' && (
-              <div className="mb-3 inline-block">
-                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                  {/* Simple pulsing dots */}
-                  <div className="flex gap-1">
-                    <div 
-                      className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" 
-                      style={{ 
-                        animationDelay: '0ms', 
-                        animationDuration: '1.4s'
-                      }}
-                    ></div>
-                    <div 
-                      className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" 
-                      style={{ 
-                        animationDelay: '200ms', 
-                        animationDuration: '1.4s'
-                      }}
-                    ></div>
-                    <div 
-                      className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" 
-                      style={{ 
-                        animationDelay: '400ms', 
-                        animationDuration: '1.4s'
-                      }}
-                    ></div>
-                  </div>
-                  
-                  {/* Simple status text */}
-                  <span className="font-medium">
-                    {aiStatus === 'thinking' && 'thinking'}
-                    {aiStatus === 'searching_web' && 'searching web'}
-                    {aiStatus === 'analyzing_brand' && 'analyzing brand'}
-                    {aiStatus === 'crafting_subject' && 'crafting subject'}
-                    {aiStatus === 'writing_hero' && 'writing hero'}
-                    {aiStatus === 'developing_body' && 'writing body'}
-                    {aiStatus === 'creating_cta' && 'creating CTA'}
-                    {aiStatus === 'finalizing' && 'finalizing'}
-                  </span>
-                </div>
-              </div>
-            )}
-
             {/* Thought Process - Show if available (includes strategy and all non-email content) */}
-            {message.thinking && (
+            {(message.thinking || isStreaming) && (
               <ThoughtProcess 
                 thinking={message.thinking} 
                 isStreaming={isStreaming}
+                aiStatus={aiStatus}
               />
             )}
 
-            {/* Message Content */}
-            {isEmailMode && emailSections && showSections ? (
-              // Email Sections View (only in email_copy mode)
-              <div className="space-y-1">
-                {emailSections.map((section, index) => (
-                  <EmailSectionCard
-                    key={index}
-                    section={section}
-                    onRegenerateSection={onRegenerateSection || (() => {})}
-                    isRegenerating={isRegenerating}
-                  />
-                ))}
-              </div>
-            ) : isEmailMode && useEmailPreview && emailSections ? (
-              // Email Preview (only in email_copy mode)
+            {/* Message Content - Contextually Intelligent Display */}
+            {isEmailMode ? (
+              // EMAIL MODE: Show EmailPreview with starring capability and product links
               <EmailPreview
                 content={message.content}
                 isStarred={isStarred}
                 onToggleStar={brandId ? handleToggleStar : undefined}
                 isStarring={isStarring}
+                productLinks={message.metadata?.productLinks}
               />
-            ) : (
-              // Simple chat view (planning mode) or raw markdown (email_copy mode)
+            ) : isPlanningMode ? (
+              // PLANNING MODE: Rich text formatting for strategic conversations
+              // Strip campaign XML tags for clean display
               <div className="bg-white dark:bg-gray-800 border border-[#d2d2d2] dark:border-gray-700 rounded-2xl sm:rounded-[20px] px-4 sm:px-7 py-4 sm:py-6">
-                <EmailRenderer content={message.content} />
+                <div className="prose dark:prose-invert max-w-none 
+                  prose-headings:font-bold prose-headings:text-gray-900 dark:prose-headings:text-gray-100
+                  prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg 
+                  prose-p:text-gray-800 dark:prose-p:text-gray-200 prose-p:leading-relaxed
+                  prose-strong:text-gray-900 dark:prose-strong:text-gray-100 prose-strong:font-semibold
+                  prose-ul:list-disc prose-ul:ml-4 prose-ol:list-decimal prose-ol:ml-4
+                  prose-li:text-gray-800 dark:prose-li:text-gray-200 prose-li:my-1
+                  prose-code:text-blue-600 dark:prose-code:text-blue-400 prose-code:bg-blue-50 dark:prose-code:bg-blue-900/20 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                  prose-blockquote:border-l-4 prose-blockquote:border-gray-300 dark:prose-blockquote:border-gray-600 prose-blockquote:pl-4 prose-blockquote:italic
+                  prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline">
+                  <ReactMarkdown>{stripCampaignTags(message.content || 'No content')}</ReactMarkdown>
+                </div>
+              </div>
+            ) : (
+              // FALLBACK: Simple text display
+              <div className="bg-white dark:bg-gray-800 border border-[#d2d2d2] dark:border-gray-700 rounded-2xl sm:rounded-[20px] px-4 sm:px-7 py-4 sm:py-6">
+                <div className="text-gray-900 dark:text-gray-100 whitespace-pre-wrap leading-relaxed">
+                  {message.content || 'No content'}
+                </div>
               </div>
             )}
 
@@ -325,50 +284,6 @@ const ChatMessage = memo(function ChatMessage({
                 {new Date(message.created_at).toLocaleTimeString()}
               </span>
               <div className="flex items-center gap-1 sm:gap-1.5">
-                {/* Email Preview Toggle - Only in email_copy mode */}
-                {isEmailMode && emailSections && (
-                  <>
-                    <button
-                      onClick={() => setUseEmailPreview(!useEmailPreview)}
-                      className="px-1.5 sm:px-2 py-1 text-[10px] sm:text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer touch-manipulation hidden sm:flex"
-                      title={useEmailPreview ? 'Show raw markdown' : 'Show email preview'}
-                    >
-                      <span className="flex items-center gap-1">
-                        <svg className="w-3 h-3 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          {useEmailPreview ? (
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                          ) : (
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          )}
-                        </svg>
-                        {useEmailPreview ? 'Raw' : 'Preview'}
-                      </span>
-                    </button>
-                    {!useEmailPreview && (
-                      <button
-                        onClick={() => setShowSections(!showSections)}
-                        className="px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-                        title={showSections ? 'Show markdown view' : 'Show sections view'}
-                      >
-                        {showSections ? (
-                          <span className="flex items-center gap-1">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                            </svg>
-                            Markdown
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                            </svg>
-                            Sections
-                          </span>
-                        )}
-                      </button>
-                    )}
-                  </>
-                )}
                 <button
                   onClick={handleCopy}
                   className="group/btn p-2 hover:bg-blue-50 dark:hover:bg-blue-950/30 hover:border-blue-200 dark:hover:border-blue-800 border border-transparent rounded-lg transition-all duration-150 cursor-pointer touch-manipulation"
@@ -447,50 +362,7 @@ const ChatMessage = memo(function ChatMessage({
               </div>
             </div>
 
-            {/* Product Links Section - Cleaner Design */}
-            {message.metadata?.productLinks && Array.isArray(message.metadata.productLinks) && message.metadata.productLinks.length > 0 && (
-              <div className="mt-4 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3">
-                <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-3 flex items-center gap-1.5 uppercase tracking-wide">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-                  </svg>
-                  Products Mentioned
-                </h4>
-                <div className="space-y-2">
-                  {message.metadata.productLinks.map((product: any, index: number) => {
-                    // Validate product has required fields
-                    if (!product?.url || !product?.name) return null;
-                    
-                    return (
-                      <a
-                        key={index}
-                        href={product.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-start gap-2.5 p-2.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all group"
-                      >
-                        <svg className="w-4 h-4 text-gray-400 dark:text-gray-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 mt-0.5 flex-shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors mb-0.5">
-                            {product.name}
-                          </div>
-                          {product.description && (
-                            <div className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 mb-1">
-                              {product.description}
-                            </div>
-                          )}
-                          <div className="text-xs text-gray-500 dark:text-gray-500 truncate font-mono">
-                            {product.url.replace(/^https?:\/\/(www\.)?/, '')}
-                          </div>
-                        </div>
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {/* Product Links Section - Now integrated into EmailPreview component */}
           </div>
         )}
       </div>

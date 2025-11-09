@@ -15,7 +15,7 @@ interface ConversationCardProps {
   onPrefetch?: () => void;
   bulkSelectMode?: boolean;
   isSelected?: boolean;
-  onToggleSelect?: () => void;
+  onToggleSelect?: (event?: React.MouseEvent) => void;
 }
 
 export default function ConversationCard({
@@ -165,9 +165,9 @@ export default function ConversationCard({
         onPrefetch?.();
       }}
       onMouseLeave={() => setShowActions(false)}
-      onClick={() => {
+      onClick={(e) => {
         if (bulkSelectMode && onToggleSelect) {
-          onToggleSelect();
+          onToggleSelect(e);
         } else {
           onSelect();
         }
@@ -194,7 +194,7 @@ export default function ConversationCard({
             className="absolute top-2 left-2 z-10"
             onClick={(e) => {
               e.stopPropagation();
-              onToggleSelect?.();
+              onToggleSelect?.(e);
             }}
           >
             <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all cursor-pointer ${

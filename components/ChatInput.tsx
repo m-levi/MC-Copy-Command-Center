@@ -60,10 +60,16 @@ export default function ChatInput({
     { command: '/cta', label: 'Improve CTAs', icon: '🎯' },
   ];
 
-  const models = [
-    { id: 'gpt-5', name: 'GPT-5' },
-    { id: 'claude-4.5-sonnet', name: 'SONNET 4.5' },
-  ];
+  // For writing mode (email_copy), only show Claude Sonnet 4.5
+  // For planning mode, show both GPT-5 and Claude Sonnet 4.5
+  const models = mode === 'planning' 
+    ? [
+        { id: 'gpt-5', name: 'GPT-5' },
+        { id: 'claude-4.5-sonnet', name: 'SONNET 4.5' },
+      ]
+    : [
+        { id: 'claude-4.5-sonnet', name: 'SONNET 4.5' },
+      ];
 
   const emailTypes = [
     { id: 'design' as const, name: 'Design Email', description: 'Full structured marketing email' },
@@ -84,6 +90,13 @@ export default function ChatInput({
   useEffect(() => {
     onDraftChangeRef.current = onDraftChange;
   }, [onDraftChange]);
+
+  // Auto-switch to Claude Sonnet 4.5 when switching from planning to writing mode
+  useEffect(() => {
+    if (mode === 'email_copy' && selectedModel === 'gpt-5') {
+      onModelChange?.('claude-4.5-sonnet');
+    }
+  }, [mode, selectedModel, onModelChange]);
 
   // Sync with draft content from parent
   // Only update local state if draft content changes from parent
@@ -401,77 +414,82 @@ export default function ChatInput({
               <div className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full p-0.5 flex items-center gap-0.5">
                 <button
                   onClick={() => onModeChange?.('planning')}
-                  disabled={mode === 'email_copy' && hasMessages}
+                  disabled={hasMessages}
                   className={`
                     px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-semibold transition-all duration-150
                     ${mode === 'planning'
                       ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105 cursor-pointer'
-                      : mode === 'email_copy' && hasMessages
+                      : hasMessages
                       ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
                       : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105 cursor-pointer'
                     }
                   `}
-                  title={mode === 'email_copy' && hasMessages ? "Can't switch to planning mode after starting write mode" : "Planning mode - brainstorm and strategize"}
+                  title={hasMessages ? "Can't switch modes after starting conversation" : "Planning mode - brainstorm and strategize"}
                 >
                   PLAN
                 </button>
                 <button
                   onClick={() => onModeChange?.('email_copy')}
+                  disabled={hasMessages}
                   className={`
                     px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-semibold transition-all duration-150 cursor-pointer
                     ${mode === 'email_copy'
                       ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105'
+                      : hasMessages
+                      ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
                       : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105'
                     }
                   `}
-                  title="Email copy mode - generate email content"
+                  title={hasMessages ? "Can't switch modes after starting conversation" : "Email copy mode - generate email content"}
                 >
                   WRITE
                 </button>
               </div>
               
-              {/* Model Selector Dropdown */}
-              <div className="relative hidden sm:block" ref={modelPickerRef}>
-                <button
-                  onClick={() => setShowModelPicker(!showModelPicker)}
-                  className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-2.5 py-1 flex items-center gap-1 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
-                >
-                  <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
-                    {getModelName(selectedModel)}
-                  </span>
-                  <svg 
-                    className={`w-2 h-2 text-gray-600 dark:text-gray-400 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} 
-                    fill="currentColor" 
-                    viewBox="0 0 10 5"
+              {/* Model Selector Dropdown - Only show if multiple models available */}
+              {models.length > 1 && (
+                <div className="relative hidden sm:block" ref={modelPickerRef}>
+                  <button
+                    onClick={() => setShowModelPicker(!showModelPicker)}
+                    className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-2.5 py-1 flex items-center gap-1 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
                   >
-                    <path d="M0 0L5 5L10 0H0Z" />
-                  </svg>
-                </button>
-                
-                {/* Dropdown Menu */}
-                {showModelPicker && (
-                  <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[140px] z-50">
-                    {models.map((model) => (
-                      <button
-                        key={model.id}
-                        onClick={() => {
-                          onModelChange?.(model.id);
-                          setShowModelPicker(false);
-                        }}
-                        className={`
-                          w-full px-3 py-2 text-left text-[10px] font-semibold transition-colors duration-150 cursor-pointer
-                          ${selectedModel === model.id
-                            ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
-                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                          }
-                        `}
-                      >
-                        {model.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                    <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                      {getModelName(selectedModel)}
+                    </span>
+                    <svg 
+                      className={`w-2 h-2 text-gray-600 dark:text-gray-400 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} 
+                      fill="currentColor" 
+                      viewBox="0 0 10 5"
+                    >
+                      <path d="M0 0L5 5L10 0H0Z" />
+                    </svg>
+                  </button>
+                  
+                  {/* Dropdown Menu */}
+                  {showModelPicker && (
+                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[140px] z-50">
+                      {models.map((model) => (
+                        <button
+                          key={model.id}
+                          onClick={() => {
+                            onModelChange?.(model.id);
+                            setShowModelPicker(false);
+                          }}
+                          className={`
+                            w-full px-3 py-2 text-left text-[10px] font-semibold transition-colors duration-150 cursor-pointer
+                            ${selectedModel === model.id
+                              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            }
+                          `}
+                        >
+                          {model.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Email Type Dropdown - Only in Write Mode */}
               {mode === 'email_copy' && (

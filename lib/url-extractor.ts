@@ -112,22 +112,54 @@ export function extractMarkdownLinks(text: string): ExtractedURL[] {
  * Examples:
  * - "Check out our Premium Coffee at https://..."
  * - "Shop the Winter Collection: https://..."
+ * - "Ultimate First Responder Trauma kit" followed by URL in text
  */
 export function extractProductMentionsWithURLs(text: string): ProductLink[] {
   const products: ProductLink[] = [];
   
-  // Pattern: Product name followed by URL
-  // Matches: "Product Name at/on https://..." or "Product Name: https://..."
-  const productUrlPattern = /["']([^"']+)["']\s*(?:at|on|:|–|-|—)\s*(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
+  // Pattern 1: Product name in quotes followed by URL
+  // Matches: "Product Name" at/on https://... or "Product Name": https://...
+  const quotedProductPattern = /["']([^"']+)["']\s*(?:at|on|:|–|-|—)?\s*(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
   
   let match;
-  while ((match = productUrlPattern.exec(text)) !== null) {
+  while ((match = quotedProductPattern.exec(text)) !== null) {
     const [, name, url] = match;
     products.push({
       name: name.trim(),
       url: url.replace(/[.,;:!?)\]]+$/, ''), // Remove trailing punctuation
-      description: `Product page for ${name.trim()}`,
+      description: `View ${name.trim()}`,
     });
+  }
+  
+  // Pattern 2: Product names mentioned in research sections
+  // Look for "Ultimate First Responder Trauma kit O2 W/Bleeding Control" type patterns
+  // followed by URLs in the same paragraph
+  const productMentionPattern = /(?:the\s+)?["']?([A-Z][^"'\n.!?]{10,100}(?:kit|Kit|KIT|system|System|package|Package|bundle|Bundle))["']?/gi;
+  const urlPattern = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
+  
+  // Split into paragraphs
+  const paragraphs = text.split(/\n\n+/);
+  
+  for (const paragraph of paragraphs) {
+    const productMatches = Array.from(paragraph.matchAll(productMentionPattern));
+    const urlMatches = Array.from(paragraph.matchAll(urlPattern));
+    
+    // If we have both product mentions and URLs in the same paragraph, pair them
+    if (productMatches.length > 0 && urlMatches.length > 0) {
+      for (let i = 0; i < Math.min(productMatches.length, urlMatches.length); i++) {
+        const productName = productMatches[i][1].trim();
+        const url = urlMatches[i][0].replace(/[.,;:!?)\]]+$/, '');
+        
+        // Avoid duplicates
+        if (!products.some(p => p.url === url)) {
+          products.push({
+            name: productName,
+            url,
+            description: `View ${productName}`,
+          });
+        }
+      }
+    }
   }
   
   return products;

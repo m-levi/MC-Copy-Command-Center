@@ -15,7 +15,7 @@ interface ConversationListItemProps {
   onAction?: (action: ConversationQuickAction) => void;
   bulkSelectMode?: boolean;
   isSelected?: boolean;
-  onToggleSelect?: () => void;
+  onToggleSelect?: (event?: React.MouseEvent) => void;
 }
 
 function ConversationListItem({
@@ -138,9 +138,9 @@ function ConversationListItem({
     }
   }, [onAction]);
 
-  const handleClick = useCallback(() => {
+  const handleClick = useCallback((event: React.MouseEvent) => {
     if (bulkSelectMode && onToggleSelect) {
-      onToggleSelect();
+      onToggleSelect(event);
     } else {
       onSelect();
     }
@@ -172,7 +172,7 @@ function ConversationListItem({
             className="flex-shrink-0"
             onClick={(e) => {
               e.stopPropagation();
-              onToggleSelect?.();
+              onToggleSelect?.(e);
             }}
           >
             <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all cursor-pointer ${
