@@ -1667,6 +1667,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     setDraftContent('');
 
     let currentController: AbortController | null = null;
+    let aiMessageId: string | null = null; // Declare outside try block for catch block access
 
     try {
       let userMessage: Message | undefined;
@@ -1762,7 +1763,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       // Create placeholder for AI message
-      const aiMessageId = crypto.randomUUID();
+      aiMessageId = crypto.randomUUID();
       const aiMessage: Message = {
         id: aiMessageId,
         conversation_id: currentConversation.id,
@@ -2075,12 +2076,27 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               )
             );
             
-            console.log('[Recovery] UI updated with recovered content');
+            console.log('[Recovery] Recovery successful - continuing to save recovered content to database');
+            // DON'T re-throw - let execution continue to save the recovered content
           } else {
-            console.log('[Recovery] No checkpoint found for recovery');
+            // No checkpoint found - recovery failed, re-throw the error
+            console.log('[Recovery] No checkpoint found for recovery - re-throwing error');
+            throw streamError;
           }
-          throw streamError;
         }
+      } else {
+        // No readable stream available - this should never happen with proper API responses
+        console.error('[Stream] No readable stream available from response');
+        throw new Error('No readable stream available from response. The API may not support streaming.');
+      }
+
+      // Validate that we have usable parsed content before proceeding
+      // Check the parsed outputs (finalEmailCopy or finalThinking), not raw stream data
+      // This allows legitimate partial responses (thinking without email, or email without thinking)
+      if (!finalEmailCopy && !finalThinking) {
+        console.error('[Stream] No usable content after parsing. Raw stream length:', allStreamedContent.length);
+        console.error('[Stream] First 200 chars of raw stream:', allStreamedContent.substring(0, 200));
+        throw new Error('No usable content could be extracted from the response. The AI may have returned an empty or malformed response.');
       }
 
       const fullContent = finalEmailCopy;
@@ -2193,6 +2209,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         responseLength: fullContent.length
       });
     } catch (error: any) {
+      // Remove the placeholder AI message on error (if it was created)
+      if (aiMessageId) {
+        setMessages((prev) => prev.filter((msg) => msg.id !== aiMessageId));
+        console.log('[Error] Removed placeholder AI message:', aiMessageId);
+      }
+      
       if (error.name === 'AbortError') {
         toast.error('Generation stopped');
         sidebarState.updateConversationStatus(currentConversation.id, 'idle');
@@ -2327,7 +2349,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           <div className="lg:hidden px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
             <button
               onClick={() => setIsMobileSidebarOpen(true)}
-              className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0"
+              className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
               aria-label="Open sidebar"
             >
               <svg className="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">

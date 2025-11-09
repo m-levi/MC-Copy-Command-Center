@@ -86,7 +86,7 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
   };
 
   return (
-    <div className={`mb-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden ${isStreaming ? 'animate-pulse' : ''}`}>
+    <div className={`mb-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden ${isStreaming ? 'shadow-lg' : ''}`}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer group"
@@ -109,6 +109,53 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
           <ChevronRightIcon className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors" />
         )}
       </button>
+      
+      {/* Mini peek during streaming - show most recent content */}
+      {isStreaming && !isExpanded && (parsedThinking || parsedEmailStrategy) && (
+        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gradient-to-b from-transparent to-gray-50/50 dark:to-gray-900/50">
+          <div className="relative overflow-hidden h-12">
+            <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed transition-all duration-300 ease-out">
+              {(() => {
+                // Show the LATEST content (tail end) with smooth word boundaries
+                const fullText = parsedThinking || parsedEmailStrategy;
+                
+                // Get last ~200 chars for better context
+                const tailLength = 200;
+                let tail = fullText.length > tailLength 
+                  ? fullText.substring(fullText.length - tailLength)
+                  : fullText;
+                
+                // Find the first complete sentence or phrase
+                // Look for sentence breaks (. ! ? :) or line breaks
+                const sentenceBreak = tail.search(/[.!?:]\s+/);
+                if (sentenceBreak > 0 && sentenceBreak < 50) {
+                  // Start after the sentence break for cleaner display
+                  tail = tail.substring(sentenceBreak + 2);
+                } else {
+                  // Otherwise, start at first word boundary
+                  const firstSpace = tail.indexOf(' ');
+                  if (firstSpace > 0 && firstSpace < 20) {
+                    tail = tail.substring(firstSpace + 1);
+                  }
+                }
+                
+                // Trim to reasonable display length and end at word boundary
+                if (tail.length > 150) {
+                  tail = tail.substring(0, 150);
+                  const lastSpace = tail.lastIndexOf(' ');
+                  if (lastSpace > 100) {
+                    tail = tail.substring(0, lastSpace);
+                  }
+                }
+                
+                return '...' + tail.trim();
+              })()}
+            </div>
+            {/* Fade effect at bottom - smoother gradient */}
+            <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-white via-white/80 dark:from-gray-800 dark:via-gray-800/80 to-transparent pointer-events-none"></div>
+          </div>
+        </div>
+      )}
       
       {isExpanded && (parsedThinking || parsedEmailStrategy) && (
         <div className="border-t border-gray-200 dark:border-gray-700 overflow-hidden">

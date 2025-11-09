@@ -242,13 +242,22 @@ const ChatMessage = memo(function ChatMessage({
             {/* Message Content - Contextually Intelligent Display */}
             {isEmailMode ? (
               // EMAIL MODE: Show EmailPreview with starring capability and product links
-              <EmailPreview
-                content={message.content}
-                isStarred={isStarred}
-                onToggleStar={brandId ? handleToggleStar : undefined}
-                isStarring={isStarring}
-                productLinks={message.metadata?.productLinks}
-              />
+              // Hide during streaming until content is populated
+              message.content ? (
+                <EmailPreview
+                  content={message.content}
+                  isStarred={isStarred}
+                  onToggleStar={brandId ? handleToggleStar : undefined}
+                  isStarring={isStarring}
+                  productLinks={message.metadata?.productLinks}
+                />
+              ) : isStreaming ? (
+                // Subtle pulsing placeholder during streaming
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-6 py-8 animate-pulse">
+                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-3"></div>
+                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+                </div>
+              ) : null
             ) : isPlanningMode ? (
               // PLANNING MODE: Rich text formatting for strategic conversations
               // Strip campaign XML tags for clean display
