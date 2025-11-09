@@ -54,6 +54,8 @@ export default function ConversationOptionsMenu({
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
         onClose();
       }
     };
@@ -133,8 +135,7 @@ export default function ConversationOptionsMenu({
           url: url
         });
       } catch (err) {
-        // User cancelled or error occurred
-        console.log('Share cancelled');
+        // User cancelled or error occurred - silently handle
       }
     } else {
       // Fallback to copy

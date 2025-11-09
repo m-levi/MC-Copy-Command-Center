@@ -1,63 +1,49 @@
 /**
- * Production-safe logger utility
- * Replaces console.log calls to prevent sensitive data exposure
+ * Logger utility - only logs in development mode
+ * Replaces console.log/error/warn to improve production performance
  */
 
-const IS_DEV = process.env.NODE_ENV === 'development';
-const IS_DEBUG = process.env.NEXT_PUBLIC_DEBUG_MODE === 'true';
+const isDevelopment = process.env.NODE_ENV === 'development';
 
 export const logger = {
-  /**
-   * Log general information (only in development)
-   */
-  log: (...args: any[]) => {
-    if (IS_DEV || IS_DEBUG) {
+  log: (...args: unknown[]) => {
+    if (isDevelopment) {
       console.log(...args);
     }
   },
   
-  /**
-   * Log errors (always shown, also sent to error tracking)
-   */
-  error: (...args: any[]) => {
-    console.error(...args);
-    // TODO: Send to error tracking service (Sentry, LogRocket, etc.)
-    // if (typeof window !== 'undefined' && window.Sentry) {
-    //   window.Sentry.captureException(args[0]);
-    // }
+  error: (...args: unknown[]) => {
+    // Always log errors, but format them better in production
+    if (isDevelopment) {
+      console.error(...args);
+    } else {
+      // In production, send to error tracking service if needed
+      console.error(...args);
+    }
   },
   
-  /**
-   * Log warnings (only in development)
-   */
-  warn: (...args: any[]) => {
-    if (IS_DEV || IS_DEBUG) {
+  warn: (...args: unknown[]) => {
+    if (isDevelopment) {
       console.warn(...args);
     }
   },
   
-  /**
-   * Log debug information (only when DEBUG_MODE is enabled)
-   */
-  debug: (...args: any[]) => {
-    if (IS_DEBUG) {
+  debug: (...args: unknown[]) => {
+    if (isDevelopment) {
       console.debug(...args);
     }
   },
   
-  /**
-   * Log information with context (for structured logging)
-   */
-  info: (message: string, context?: Record<string, any>) => {
-    if (IS_DEV || IS_DEBUG) {
-      if (context) {
-        console.log(`[INFO] ${message}`, context);
-      } else {
-        console.log(`[INFO] ${message}`);
-      }
+  info: (...args: unknown[]) => {
+    if (isDevelopment) {
+      console.info(...args);
     }
   },
 };
 
-export default logger;
-
+// Export individual functions for convenience
+export const log = logger.log;
+export const logError = logger.error;
+export const logWarn = logger.warn;
+export const logDebug = logger.debug;
+export const logInfo = logger.info;

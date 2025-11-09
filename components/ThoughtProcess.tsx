@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 import { AIStatus } from '@/types';
+import ReactMarkdown from 'react-markdown';
 
 interface ThoughtProcessProps {
   thinking?: string;
@@ -86,7 +87,7 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
   };
 
   return (
-    <div className={`mb-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden ${isStreaming ? 'animate-pulse' : ''}`}>
+    <div className={`mb-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden ${isStreaming ? 'shadow-lg' : ''}`}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer group"
@@ -110,6 +111,53 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
         )}
       </button>
       
+      {/* Mini peek during streaming - show most recent content */}
+      {isStreaming && !isExpanded && (parsedThinking || parsedEmailStrategy) && (
+        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gradient-to-b from-transparent to-gray-50/50 dark:to-gray-900/50">
+          <div className="relative overflow-hidden h-12">
+            <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed transition-all duration-300 ease-out">
+              {(() => {
+                // Show the LATEST content (tail end) with smooth word boundaries
+                const fullText = parsedThinking || parsedEmailStrategy;
+                
+                // Get last ~200 chars for better context
+                const tailLength = 200;
+                let tail = fullText.length > tailLength 
+                  ? fullText.substring(fullText.length - tailLength)
+                  : fullText;
+                
+                // Find the first complete sentence or phrase
+                // Look for sentence breaks (. ! ? :) or line breaks
+                const sentenceBreak = tail.search(/[.!?:]\s+/);
+                if (sentenceBreak > 0 && sentenceBreak < 50) {
+                  // Start after the sentence break for cleaner display
+                  tail = tail.substring(sentenceBreak + 2);
+                } else {
+                  // Otherwise, start at first word boundary
+                  const firstSpace = tail.indexOf(' ');
+                  if (firstSpace > 0 && firstSpace < 20) {
+                    tail = tail.substring(firstSpace + 1);
+                  }
+                }
+                
+                // Trim to reasonable display length and end at word boundary
+                if (tail.length > 150) {
+                  tail = tail.substring(0, 150);
+                  const lastSpace = tail.lastIndexOf(' ');
+                  if (lastSpace > 100) {
+                    tail = tail.substring(0, lastSpace);
+                  }
+                }
+                
+                return '...' + tail.trim();
+              })()}
+            </div>
+            {/* Fade effect at bottom - matches background colors for seamless blend */}
+            <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-gray-50/50 via-gray-50/30 dark:from-gray-900/50 dark:via-gray-900/30 to-transparent pointer-events-none"></div>
+          </div>
+        </div>
+      )}
+      
       {isExpanded && (parsedThinking || parsedEmailStrategy) && (
         <div className="border-t border-gray-200 dark:border-gray-700 overflow-hidden">
           {/* Thought Section */}
@@ -118,8 +166,41 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
               <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
                 Thought
               </h4>
-              <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words leading-relaxed max-w-full">
-                {formatThinkingContent(parsedThinking)}
+              <div className="prose prose-sm dark:prose-invert max-w-none text-gray-600 dark:text-gray-400">
+                <ReactMarkdown
+                  components={{
+                    // Preserve web search indicators as styled components
+                    p: ({ children, ...props }) => {
+                      const text = String(children);
+                      if (text.includes('[Using web search to find information...]') || text.includes('[Web search complete]')) {
+                        return formatThinkingContent(text);
+                      }
+                      return <p {...props}>{children}</p>;
+                    },
+                    // Style code blocks
+                    code: ({ node, ...props }) => {
+                      const className = node?.properties?.className;
+                      const isInline = !className || (typeof className === 'string' && !className.includes('language'));
+                      if (isInline) {
+                        return <code className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-sm" {...props} />;
+                      }
+                      return <code className="block bg-gray-100 dark:bg-gray-800 p-3 rounded text-sm overflow-x-auto" {...props} />;
+                    },
+                    // Style lists
+                    ul: ({ ...props }) => <ul className="list-disc pl-5 space-y-1" {...props} />,
+                    ol: ({ ...props }) => <ol className="list-decimal pl-5 space-y-1" {...props} />,
+                    // Style headings
+                    h1: ({ ...props }) => <h1 className="text-lg font-bold mt-4 mb-2" {...props} />,
+                    h2: ({ ...props }) => <h2 className="text-base font-bold mt-3 mb-2" {...props} />,
+                    h3: ({ ...props }) => <h3 className="text-sm font-semibold mt-2 mb-1" {...props} />,
+                    // Style blockquotes
+                    blockquote: ({ ...props }) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 italic my-2" {...props} />,
+                    // Style links
+                    a: ({ ...props }) => <a className="text-blue-600 dark:text-blue-400 hover:underline" {...props} />,
+                  }}
+                >
+                  {parsedThinking}
+                </ReactMarkdown>
               </div>
             </div>
           )}
@@ -130,8 +211,41 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
               <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
                 Email Strategy
               </h4>
-              <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words leading-relaxed max-w-full">
-                {formatThinkingContent(parsedEmailStrategy)}
+              <div className="prose prose-sm dark:prose-invert max-w-none text-gray-600 dark:text-gray-400">
+                <ReactMarkdown
+                  components={{
+                    // Preserve web search indicators as styled components
+                    p: ({ children, ...props }) => {
+                      const text = String(children);
+                      if (text.includes('[Using web search to find information...]') || text.includes('[Web search complete]')) {
+                        return formatThinkingContent(text);
+                      }
+                      return <p {...props}>{children}</p>;
+                    },
+                    // Style code blocks
+                    code: ({ node, ...props }) => {
+                      const className = node?.properties?.className;
+                      const isInline = !className || (typeof className === 'string' && !className.includes('language'));
+                      if (isInline) {
+                        return <code className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-sm" {...props} />;
+                      }
+                      return <code className="block bg-gray-100 dark:bg-gray-800 p-3 rounded text-sm overflow-x-auto" {...props} />;
+                    },
+                    // Style lists
+                    ul: ({ ...props }) => <ul className="list-disc pl-5 space-y-1" {...props} />,
+                    ol: ({ ...props }) => <ol className="list-decimal pl-5 space-y-1" {...props} />,
+                    // Style headings
+                    h1: ({ ...props }) => <h1 className="text-lg font-bold mt-4 mb-2" {...props} />,
+                    h2: ({ ...props }) => <h2 className="text-base font-bold mt-3 mb-2" {...props} />,
+                    h3: ({ ...props }) => <h3 className="text-sm font-semibold mt-2 mb-1" {...props} />,
+                    // Style blockquotes
+                    blockquote: ({ ...props }) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 italic my-2" {...props} />,
+                    // Style links
+                    a: ({ ...props }) => <a className="text-blue-600 dark:text-blue-400 hover:underline" {...props} />,
+                  }}
+                >
+                  {parsedEmailStrategy}
+                </ReactMarkdown>
               </div>
             </div>
           )}

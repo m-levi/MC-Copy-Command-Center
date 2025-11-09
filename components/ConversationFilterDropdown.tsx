@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { OrganizationMember } from '@/types';
 
-export type FilterType = 'all' | 'mine' | 'person' | 'emails' | 'flows' | 'planning';
+export type FilterType = 'all' | 'mine' | 'person' | 'emails' | 'flows' | 'planning' | 'archived';
 
 interface ConversationFilterDropdownProps {
   currentFilter: FilterType;
@@ -38,6 +38,7 @@ export default function ConversationFilterDropdown({
     if (currentFilter === 'emails') return 'Emails Only';
     if (currentFilter === 'flows') return 'Flows Only';
     if (currentFilter === 'planning') return 'Planning Mode';
+    if (currentFilter === 'archived') return 'Archived';
     if (currentFilter === 'person' && selectedPersonId) {
       const member = teamMembers.find(m => m.user_id === selectedPersonId);
       return member?.profile?.full_name || member?.profile?.email || 'Selected Person';
@@ -152,6 +153,26 @@ export default function ConversationFilterDropdown({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
               </svg>
               Planning Mode
+            </div>
+          </button>
+
+          {/* Status Section */}
+          <div className="border-t border-gray-200 dark:border-gray-700 mt-1"></div>
+          <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            Status
+          </div>
+
+          <button
+            onClick={() => handleFilterSelect('archived')}
+            className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+              currentFilter === 'archived' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+              Archived
             </div>
           </button>
 

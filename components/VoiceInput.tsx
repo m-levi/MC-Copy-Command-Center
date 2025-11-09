@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { logger } from '@/lib/logger';
 
 interface VoiceInputProps {
   onTranscript: (text: string) => void;
@@ -41,7 +42,7 @@ export default function VoiceInput({ onTranscript, disabled }: VoiceInputProps) 
         duration: 3000,
       });
     } catch (error) {
-      console.error('Error starting recording:', error);
+      logger.error('Error starting recording:', error);
       toast.error('Microphone access denied or not available');
     }
   };
@@ -80,7 +81,7 @@ export default function VoiceInput({ onTranscript, disabled }: VoiceInputProps) 
         toast.error('No speech detected');
       }
     } catch (error) {
-      console.error('Transcription error:', error);
+      logger.error('Transcription error:', error);
       toast.error('Failed to transcribe audio');
     } finally {
       setIsTranscribing(false);

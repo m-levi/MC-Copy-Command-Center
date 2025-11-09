@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { BrandDocument } from '@/types';
 import { CompactEmailPreview } from './EmailPreview';
 import toast from 'react-hot-toast';
+import { logger } from '@/lib/logger';
 
 interface StarredEmailsManagerProps {
   brandId: string;
@@ -38,7 +39,7 @@ export default function StarredEmailsManager({
       if (error) throw error;
       setStarredEmails(data || []);
     } catch (error) {
-      console.error('Error loading starred emails:', error);
+      logger.error('Error loading starred emails:', error);
       toast.error('Failed to load starred emails');
     } finally {
       setLoading(false);
@@ -61,7 +62,7 @@ export default function StarredEmailsManager({
       
       toast.success('Email removed from favorites');
     } catch (error) {
-      console.error('Error removing starred email:', error);
+      logger.error('Error removing starred email:', error);
       toast.error('Failed to remove email');
     }
   };

@@ -2,6 +2,7 @@
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { trackError } from '@/lib/analytics';
+import { logger } from '@/lib/logger';
 
 interface Props {
   children: ReactNode;
@@ -35,7 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logger.error('ErrorBoundary caught an error:', error, errorInfo);
     
     // Track error for analytics
     trackError(error, 'ErrorBoundary');
@@ -130,7 +131,7 @@ export function SectionErrorBoundary({ children, sectionName }: { children: Reac
         </div>
       }
       onError={(error) => {
-        console.error(`Error in ${sectionName}:`, error);
+        logger.error(`Error in ${sectionName}:`, error);
       }}
     >
       {children}

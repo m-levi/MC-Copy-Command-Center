@@ -3,6 +3,7 @@
 import { ConversationWithStatus, ConversationQuickAction, Conversation } from '@/types';
 import { useState, useRef, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { logger } from '@/lib/logger';
 
 interface ConversationCardProps {
   conversation: ConversationWithStatus;
@@ -59,7 +60,7 @@ export default function ConversationCard({
         setFlowChildrenCount(count);
       }
     } catch (error) {
-      console.error('Error loading flow children count:', error);
+      logger.error('Error loading flow children count:', error);
     }
   };
 
@@ -81,7 +82,7 @@ export default function ConversationCard({
   const loadFlowChildren = async () => {
     if (!conversation.is_flow) return;
     
-    console.log(`[ConversationCard] Loading children for flow:`, conversation.id);
+    logger.log(`[ConversationCard] Loading children for flow:`, conversation.id);
     setLoadingChildren(true);
     try {
       const { data } = await supabase
@@ -90,12 +91,12 @@ export default function ConversationCard({
         .eq('parent_conversation_id', conversation.id)
         .order('flow_sequence_order', { ascending: true });
 
-      console.log(`[ConversationCard] Loaded ${data?.length || 0} children for flow ${conversation.id}`);
+      logger.log(`[ConversationCard] Loaded ${data?.length || 0} children for flow ${conversation.id}`);
       if (data) {
         setFlowChildren(data);
       }
     } catch (error) {
-      console.error('Error loading flow children:', error);
+      logger.error('Error loading flow children:', error);
     } finally {
       setLoadingChildren(false);
     }
@@ -103,10 +104,10 @@ export default function ConversationCard({
 
   const handleToggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
-    console.log('[ConversationCard] Toggle expand clicked for', conversation.id, 'Current:', isExpanded);
+    logger.log('[ConversationCard] Toggle expand clicked for', conversation.id, 'Current:', isExpanded);
     if (conversation.is_flow) {
       setIsExpanded(!isExpanded);
-      console.log('[ConversationCard] Setting expanded to:', !isExpanded);
+      logger.log('[ConversationCard] Setting expanded to:', !isExpanded);
     }
   };
 
@@ -178,7 +179,7 @@ export default function ConversationCard({
         transition-all duration-200
         cursor-pointer overflow-hidden
         ${isSelected
-          ? 'bg-blue-100 dark:bg-blue-900/30 shadow-lg ring-2 ring-blue-500 dark:ring-blue-400'
+          ? 'bg-blue-50 dark:bg-blue-950/30 shadow-md border-2 border-blue-200 dark:border-blue-800'
           : isActive 
             ? 'bg-blue-600 dark:bg-blue-700 shadow-lg ring-2 ring-blue-400 dark:ring-blue-500' 
             : 'bg-white dark:bg-gray-800 shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-750'
@@ -197,14 +198,16 @@ export default function ConversationCard({
               onToggleSelect?.(e);
             }}
           >
-            <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all cursor-pointer ${
-              isSelected 
-                ? 'bg-blue-600 border-blue-600' 
-                : 'bg-white/90 dark:bg-gray-900/90 border-gray-300 dark:border-gray-600 hover:border-blue-500'
-            }`}>
+            <div className={`
+              w-5 h-5 rounded flex items-center justify-center transition-all cursor-pointer
+              ${isSelected 
+                ? 'bg-blue-600 dark:bg-blue-500 scale-100' 
+                : 'bg-white/95 dark:bg-gray-900/95 border-2 border-white dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-400 scale-95'
+              }
+            `}>
               {isSelected && (
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               )}
             </div>
@@ -409,7 +412,7 @@ export default function ConversationCard({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onSelectChild) {
-                    console.log('[ConversationCard] Selecting child:', child.id);
+                    logger.log('[ConversationCard] Selecting child:', child.id);
                     onSelectChild(child.id);
                   }
                 }}

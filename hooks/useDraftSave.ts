@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { trackDraftSaved, trackDraftRestored } from '@/lib/analytics';
+import { logger } from '@/lib/logger';
 
 interface DraftVersion {
   content: string;
@@ -50,7 +51,7 @@ export function useDraftSave(
           setLastSaved(Date.now());
           trackDraftSaved();
         } catch (error) {
-          console.error('Failed to save draft:', error);
+          logger.error('Failed to save draft:', error);
         }
       } else {
         localStorage.removeItem(draftKey);
@@ -96,7 +97,7 @@ function saveDraftVersion(conversationId: string, content: string): void {
     
     localStorage.setItem(versionsKey, JSON.stringify(versions));
   } catch (error) {
-    console.error('Failed to save draft version:', error);
+    logger.error('Failed to save draft version:', error);
   }
 }
 
@@ -124,7 +125,7 @@ export function loadDraftVersions(conversationId: string): DraftVersion[] {
     
     return versionsData ? JSON.parse(versionsData) : [];
   } catch (error) {
-    console.error('Failed to load draft versions:', error);
+    logger.error('Failed to load draft versions:', error);
     return [];
   }
 }
@@ -147,7 +148,7 @@ export function restoreDraftVersion(
     
     return null;
   } catch (error) {
-    console.error('Failed to restore draft version:', error);
+    logger.error('Failed to restore draft version:', error);
     return null;
   }
 }

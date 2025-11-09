@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FlowType } from '@/types';
 import { FLOW_TEMPLATES } from '@/lib/flow-templates';
 
@@ -11,6 +11,20 @@ interface FlowTypeSelectorProps {
 
 export default function FlowTypeSelector({ onSelect, onCancel }: FlowTypeSelectorProps) {
   const [hoveredId, setHoveredId] = useState<FlowType | null>(null);
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+    };
+    
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onCancel]);
 
   return (
     <div className="fixed inset-0 bg-black/20 dark:bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-[2px] animate-in fade-in duration-150">

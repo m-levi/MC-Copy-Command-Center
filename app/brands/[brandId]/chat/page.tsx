@@ -27,6 +27,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useDraftSave, loadDraft, clearDraft } from '@/hooks/useDraftSave';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { useConversationCleanup } from '@/hooks/useConversationCleanup';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { 
   getCachedMessages, 
   cacheMessages, 
@@ -45,11 +46,13 @@ import {
   loadCheckpoint, 
   clearCheckpoint 
 } from '@/lib/stream-recovery';
-import { ChatPageSkeleton } from '@/components/SkeletonLoader';
+import { ChatPageSkeleton, SidebarLoadingSkeleton, MessageSkeleton } from '@/components/SkeletonLoader';
 import DOMPurify from 'dompurify';
 import { detectFlowOutline, isOutlineApprovalMessage } from '@/lib/flow-outline-parser';
 import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
 import { extractCampaignIdea, stripCampaignTags } from '@/lib/campaign-parser';
+import { logger } from '@/lib/logger';
+import { ErrorBoundary, SectionErrorBoundary } from '@/components/ErrorBoundary';
 
 export const dynamic = 'force-dynamic';
 
@@ -201,6 +204,10 @@ function parseStreamedContent(fullContent: string): {
   // Remove email_strategy from content
   let remaining = cleaned.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '').trim();
   
+  logger.log('[Parser] Remaining content length after cleanup:', remaining.length);
+  logger.log('[Parser] Remaining content preview (first 300 chars):', remaining.substring(0, 300));
+  logger.log('[Parser] Remaining content preview (last 300 chars):', remaining.substring(Math.max(0, remaining.length - 300)));
+  
   // Extract email_copy tags (if present)
   const emailCopyMatch = remaining.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
   
@@ -215,6 +222,10 @@ function parseStreamedContent(fullContent: string): {
     const beforeTags = remaining.substring(0, emailCopyMatch.index || 0);
     const afterTags = remaining.substring((emailCopyMatch.index || 0) + emailCopyMatch[0].length);
     thoughtContent = (beforeTags + '\n\n' + afterTags).trim();
+    
+    logger.log('[Parser] ✅ Found email_copy tags');
+    logger.log('[Parser] Email copy length:', emailCopy.length);
+    logger.log('[Parser] Thought content length:', thoughtContent.length);
   } else {
     // No email_copy tags - FALLBACK: Look for email structure markers
     const emailMarkers = ['HERO SECTION:', 'EMAIL SUBJECT LINE:', 'SUBJECT LINE:', 'SUBJECT:'];
@@ -231,10 +242,12 @@ function parseStreamedContent(fullContent: string): {
       // Found email marker - split content
       thoughtContent = remaining.substring(0, firstMarkerIndex).trim();
       emailCopy = remaining.substring(firstMarkerIndex).trim();
+      logger.log('[Parser] ⚠️ No email_copy tags, used fallback with marker');
     } else {
       // No markers found - everything is email copy
       emailCopy = remaining;
       thoughtContent = '';
+      logger.log('[Parser] ⚠️ No email_copy tags or markers, using all content as email');
     }
   }
   
@@ -254,11 +267,15 @@ function parseStreamedContent(fullContent: string): {
     .replace(/\s*\[\s*$/g, '')
     .trim();
   
-  console.log('[Parser] Extracted:', {
+  logger.log('[Parser] Extracted:', {
     emailCopy: emailCopy.length,
     emailStrategy: emailStrategy.length,
     thoughtContent: thoughtContent.length
   });
+  
+  // Log first 200 chars of each for debugging
+  logger.log('[Parser] Email copy preview:', emailCopy.substring(0, 200));
+  logger.log('[Parser] Thought content preview:', thoughtContent.substring(0, 200));
   
   return { emailCopy, emailStrategy, thoughtContent };
 }
@@ -291,6 +308,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [showMemorySettings, setShowMemorySettings] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
+  const [pendingConversationSelection, setPendingConversationSelection] = useState<string | null>(null);
   
   // Flow-related state
   const [showFlowTypeSelector, setShowFlowTypeSelector] = useState(false);
@@ -304,6 +322,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   
   // Campaign detection state (for Planning mode)
   const [detectedCampaign, setDetectedCampaign] = useState<{ title: string; brief: string } | null>(null);
+  
+  // Starred emails cache - loaded once per brand to avoid N queries per message
+  const [starredEmailContents, setStarredEmailContents] = useState<Set<string>>(new Set());
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const brandSwitcherRef = useRef<HTMLDivElement>(null);
@@ -342,6 +363,101 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     isFlow: currentConversation?.is_flow || false,
     isChild: !!currentConversation?.parent_conversation_id,
     shouldAutoDelete: true
+  });
+
+  // Listen for conversation selection from command palette
+  useEffect(() => {
+    const handleSelectFromCommandPalette = (event: any) => {
+      const conversationId = event.detail?.conversationId;
+      if (conversationId) {
+        setPendingConversationSelection(conversationId);
+      }
+    };
+
+    const handleToggleSidebar = () => {
+      setIsMobileSidebarOpen(prev => !prev);
+    };
+
+    const handleShowStarredEmails = () => {
+      // TODO: Implement starred emails modal
+      toast('Starred emails feature coming soon!', { icon: '⭐' });
+    };
+
+    const handleShowKeyboardShortcuts = () => {
+      // Dispatch event that GlobalKeyboardShortcuts will handle
+      window.dispatchEvent(new CustomEvent('showKeyboardShortcuts'));
+    };
+
+    window.addEventListener('selectConversation', handleSelectFromCommandPalette);
+    window.addEventListener('toggleSidebar', handleToggleSidebar);
+    window.addEventListener('showStarredEmails', handleShowStarredEmails);
+    
+    return () => {
+      window.removeEventListener('selectConversation', handleSelectFromCommandPalette);
+      window.removeEventListener('toggleSidebar', handleToggleSidebar);
+      window.removeEventListener('showStarredEmails', handleShowStarredEmails);
+    };
+  }, []);
+
+  // Check for target conversation from command palette on mount
+  useEffect(() => {
+    const targetConversationId = localStorage.getItem('command-palette-target-conversation');
+    if (targetConversationId && conversations.length > 0) {
+      localStorage.removeItem('command-palette-target-conversation');
+      setPendingConversationSelection(targetConversationId);
+    }
+  }, [conversations.length]);
+
+  // Handle pending conversation selection
+  useEffect(() => {
+    if (pendingConversationSelection && conversations.length > 0) {
+      const conversation = conversations.find((c) => c.id === pendingConversationSelection);
+      if (conversation) {
+        handleSelectConversation(pendingConversationSelection);
+        setPendingConversationSelection(null);
+      }
+    }
+  }, [pendingConversationSelection, conversations]);
+
+  // Page-specific keyboard shortcuts (Command K is handled globally in layout)
+  useKeyboardShortcuts({
+    shortcuts: [
+      {
+        key: 'n',
+        meta: true,
+        ctrl: true,
+        shift: false,
+        description: 'New conversation',
+        action: () => {
+          if (!showFlowTypeSelector) {
+            handleNewConversation();
+          }
+        },
+      },
+      {
+        key: 'n',
+        meta: true,
+        ctrl: true,
+        shift: true,
+        description: 'New flow',
+        action: () => {
+          if (!showFlowTypeSelector) {
+            handleNewConversation();
+            setShowFlowTypeSelector(true);
+          }
+        },
+      },
+      {
+        key: 'b',
+        meta: true,
+        ctrl: true,
+        description: 'Toggle sidebar',
+        action: () => setIsMobileSidebarOpen(prev => !prev),
+      },
+      // Note: Escape is not handled here to avoid conflicts with browser navigation
+      // Modals handle their own Escape key internally
+    ],
+    enabled: true,
   });
 
   // Cleanup abort controller on unmount
@@ -383,7 +499,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           filter: `brand_id=eq.${brandId}`,
         },
         (payload) => {
-          console.log('New conversation created:', payload.new);
+          logger.log('New conversation created:', payload.new);
           const newConversation = payload.new as Conversation;
           
           setConversations((prev) => {
@@ -408,7 +524,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           filter: `brand_id=eq.${brandId}`,
         },
         (payload) => {
-          console.log('Conversation updated:', payload.new);
+          logger.log('Conversation updated:', payload.new);
           const updatedConversation = payload.new as Conversation;
           
           setConversations((prev) => {
@@ -437,7 +553,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           filter: `brand_id=eq.${brandId}`,
         },
         (payload) => {
-          console.log('Conversation deleted:', payload.old);
+          logger.log('Conversation deleted:', payload.old);
           const deletedId = (payload.old as any).id;
           
           setConversations((prev) => {
@@ -492,7 +608,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             filter: `conversation_id=eq.${currentConversation.id}`,
           },
           (payload) => {
-            console.log('New message received:', payload.new);
+            logger.log('New message received:', payload.new);
             const newMessage = payload.new as Message;
             
             // Only add if not already in state (avoid duplicates from own sends)
@@ -520,7 +636,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             filter: `conversation_id=eq.${currentConversation.id}`,
           },
           (payload) => {
-            console.log('Message updated:', payload.new);
+            logger.log('Message updated:', payload.new);
             const updatedMessage = payload.new as Message;
             
             setMessages((prev) =>
@@ -542,7 +658,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             filter: `conversation_id=eq.${currentConversation.id}`,
           },
           (payload) => {
-            console.log('Message deleted:', payload.old);
+            logger.log('Message deleted:', payload.old);
             const deletedId = (payload.old as any).id;
             
             setMessages((prev) => prev.filter((msg) => msg.id !== deletedId));
@@ -577,7 +693,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     // Try to detect and parse outline
     const outline = detectFlowOutline(lastMessage.content, currentConversation.flow_type);
     if (outline) {
-      console.log('Detected flow outline:', outline);
+      logger.log('Detected flow outline:', outline);
       setPendingOutlineApproval(outline);
     }
   }, [messages, currentConversation?.is_flow, currentConversation?.flow_type, flowOutline?.approved]);
@@ -647,22 +763,68 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       await loadBrand();
       await loadAllBrands();
       await loadConversations();
+      await loadStarredEmails();
     } catch (error) {
-      console.error('Error initializing page:', error);
-      toast.error('Failed to initialize page');
+      logger.error('Error initializing page:', error);
+      toast.error('Failed to load page. Please refresh and try again.', {
+        duration: 5000,
+      });
     }
   };
+  
+  // Load starred emails once per brand to avoid N queries per message
+  const loadStarredEmails = useCallback(async () => {
+    if (!brandId) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('brand_documents')
+        .select('content')
+        .eq('brand_id', brandId)
+        .eq('doc_type', 'example');
+      
+      if (error) throw error;
+      
+      // Create a Set of starred email contents for O(1) lookup
+      const starredSet = new Set<string>((data || []).map(doc => doc.content));
+      setStarredEmailContents(starredSet);
+    } catch (error) {
+      logger.error('Error loading starred emails:', error);
+      // Don't show toast - this is a background optimization
+    }
+  }, [brandId, supabase]);
+  
+  // Reload starred emails when brand changes
+  useEffect(() => {
+    loadStarredEmails();
+  }, [loadStarredEmails]);
 
   const applyConversationFilter = useCallback(() => {
-    if (currentFilter === 'all') {
-      setFilteredConversations(conversations);
-    } else if (currentFilter === 'mine') {
-      setFilteredConversations(conversations.filter(c => c.user_id === currentUserId));
-    } else if (currentFilter === 'person' && selectedPersonId) {
-      setFilteredConversations(conversations.filter(c => c.user_id === selectedPersonId));
-    } else {
-      setFilteredConversations(conversations);
+    let filtered = conversations;
+    
+    // Special case: Archived filter - ONLY show archived conversations
+    if (currentFilter === 'archived') {
+      setFilteredConversations(conversations.filter(c => c.is_archived));
+      return;
     }
+    
+    // For all other filters: EXCLUDE archived conversations by default
+    filtered = conversations.filter(c => !c.is_archived);
+    
+    // Apply additional filters
+    if (currentFilter === 'mine') {
+      filtered = filtered.filter(c => c.user_id === currentUserId);
+    } else if (currentFilter === 'person' && selectedPersonId) {
+      filtered = filtered.filter(c => c.user_id === selectedPersonId);
+    } else if (currentFilter === 'emails') {
+      filtered = filtered.filter(c => !c.is_flow && c.mode !== 'planning');
+    } else if (currentFilter === 'flows') {
+      filtered = filtered.filter(c => c.is_flow);
+    } else if (currentFilter === 'planning') {
+      filtered = filtered.filter(c => c.mode === 'planning');
+    }
+    
+    setFilteredConversations(filtered);
   }, [currentFilter, conversations, currentUserId, selectedPersonId]);
 
   const handleFilterChange = (filter: FilterType, personId?: string) => {
@@ -681,8 +843,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (error) throw error;
       setBrand(data);
     } catch (error) {
-      console.error('Error loading brand:', error);
-      toast.error('Failed to load brand');
+      logger.error('Error loading brand:', error);
+      toast.error('Failed to load brand. Redirecting to home...', {
+        duration: 3000,
+      });
       router.push('/');
     } finally {
       setLoading(false);
@@ -699,7 +863,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (error) throw error;
       setAllBrands(data || []);
     } catch (error) {
-      console.error('Error loading brands:', error);
+      logger.error('Error loading brands:', error);
     }
   };
 
@@ -726,8 +890,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       await fetchAndCacheConversations();
       trackPerformance('load_conversations', performance.now() - startTime, { source: 'database' });
     } catch (error) {
-      console.error('Error loading conversations:', error);
-      toast.error('Failed to load conversations');
+      logger.error('Error loading conversations:', error);
+      toast.error('Unable to load conversations. Check your connection and try again.', {
+        duration: 5000,
+      });
     }
   };
   
@@ -742,14 +908,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     if (error) throw error;
     
     if (data) {
-      console.log('[LoadConversations] Loaded conversations:', data.length);
-      console.log('[LoadConversations] Flow conversations:', data.filter(c => c.is_flow).map(c => ({
+      logger.log('[LoadConversations] Loaded conversations:', data.length);
+      logger.log('[LoadConversations] Flow conversations:', data.filter(c => c.is_flow).map(c => ({
         title: c.title,
         is_flow: c.is_flow,
         flow_type: c.flow_type,
         id: c.id
       })));
-      console.log('[LoadConversations] Child conversations:', data.filter(c => c.parent_conversation_id).length);
+      logger.log('[LoadConversations] Child conversations:', data.filter(c => c.parent_conversation_id).length);
       
       cacheConversations(brandId, data);
       setConversations(data);
@@ -821,7 +987,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         currentConversation.id
       );
     } catch (error) {
-      console.error('Error loading messages:', error);
+      logger.error('Error loading messages:', error);
       toast.error('Failed to load messages');
       setLoadingMessages(false);
     }
@@ -871,7 +1037,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       toast.success('New conversation created');
       trackEvent('conversation_created', { conversationId: data.id });
     } catch (error) {
-      console.error('Error creating conversation:', error);
+      logger.error('Error creating conversation:', error);
       toast.error('Failed to create conversation');
     }
   };
@@ -891,7 +1057,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setCurrentConversation({ ...currentConversation, mode: newMode });
       toast.success(`Switched to ${newMode === 'planning' ? 'Planning' : 'Writing'} mode`);
     } catch (error) {
-      console.error('Error updating mode:', error);
+      logger.error('Error updating mode:', error);
       toast.error('Failed to update mode');
     }
   };
@@ -941,7 +1107,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     if (currentConversation && 
         messages.length === 0 && 
         currentConversation.id !== conversationId) {
-      cleanupIfEmpty(currentConversation.id, 'empty_on_switch').catch(console.error);
+      cleanupIfEmpty(currentConversation.id, 'empty_on_switch').catch(logger.error);
     }
 
     // Use startTransition for non-urgent updates
@@ -982,7 +1148,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       await loadConversations();
       toast.success('Conversation deleted');
     } catch (error) {
-      console.error('Error deleting conversation:', error);
+      logger.error('Error deleting conversation:', error);
       toast.error('Failed to delete conversation');
     }
   };
@@ -1002,7 +1168,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       await loadConversations();
       
     } catch (error) {
-      console.error('Error executing bulk action:', error);
+      logger.error('Error executing bulk action:', error);
       toast.error('Failed to complete bulk action');
     }
   };
@@ -1032,7 +1198,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       await loadConversations();
       toast.success('Conversation renamed');
     } catch (error) {
-      console.error('Error renaming conversation:', error);
+      logger.error('Error renaming conversation:', error);
       toast.error('Failed to rename conversation');
     }
   };
@@ -1050,14 +1216,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   // Handle flow type selection
   const handleSelectFlowType = async (flowType: FlowType) => {
     try {
-      console.log('[Flow] Creating flow conversation for type:', flowType);
+      logger.log('[Flow] Creating flow conversation for type:', flowType);
       setShowFlowTypeSelector(false);
       setSelectedFlowType(flowType);
       
       // Create new flow conversation
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) {
-        console.error('[Flow] No user found');
+        logger.error('[Flow] No user found');
         return;
       }
 
@@ -1072,7 +1238,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         flow_type: flowType
       };
 
-      console.log('[Flow] Inserting conversation with data:', flowData);
+      logger.log('[Flow] Inserting conversation with data:', flowData);
 
       const { data: newConversation, error } = await supabase
         .from('conversations')
@@ -1081,13 +1247,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         .single();
 
       if (error) {
-        console.error('[Flow] Error creating conversation:', error);
+        logger.error('[Flow] Error creating conversation:', error);
         throw error;
       }
 
-      console.log('[Flow] Created conversation:', newConversation);
-      console.log('[Flow] is_flow value:', newConversation.is_flow);
-      console.log('[Flow] flow_type value:', newConversation.flow_type);
+      logger.log('[Flow] Created conversation:', newConversation);
+      logger.log('[Flow] is_flow value:', newConversation.is_flow);
+      logger.log('[Flow] flow_type value:', newConversation.flow_type);
 
       // Set emailType to flow
       setEmailType('flow');
@@ -1097,10 +1263,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setMessages([]);
       await loadConversations();
       
-      console.log('[Flow] Conversation loaded, check sidebar for is_flow:', newConversation.is_flow);
+      logger.log('[Flow] Conversation loaded, check sidebar for is_flow:', newConversation.is_flow);
       toast.success('Flow conversation created! Describe your automation needs.');
     } catch (error) {
-      console.error('Error creating flow:', error);
+      logger.error('Error creating flow:', error);
       toast.error('Failed to create flow');
       // Reset email type
       setEmailType('design');
@@ -1121,7 +1287,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         setFlowChildren(data.children);
       }
     } catch (error) {
-      console.error('Error loading flow data:', error);
+      logger.error('Error loading flow data:', error);
     }
   };
 
@@ -1139,7 +1305,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         await loadFlowData(parentId);
       }
     } catch (error) {
-      console.error('Error loading parent flow:', error);
+      logger.error('Error loading parent flow:', error);
     }
   };
 
@@ -1152,7 +1318,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setIsGeneratingFlow(true);
       setFlowGenerationProgress(0);
       
-      console.log('[Flow UI] Starting flow generation for', outline.emails.length, 'emails');
+      logger.log('[Flow UI] Starting flow generation for', outline.emails.length, 'emails');
       
       // Simulate progress for better UX (actual generation happens on server)
       // Each email takes approximately 10-15 seconds
@@ -1162,12 +1328,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           if (prev >= outline.emails.length - 1) {
             return prev;
           }
-          console.log('[Flow UI] Progress update:', prev + 1, '/', outline.emails.length);
+          logger.log('[Flow UI] Progress update:', prev + 1, '/', outline.emails.length);
           return prev + 1;
         });
       }, 12000); // Update every 12 seconds (more realistic timing)
       
-      console.log('[Flow UI] Calling generate-emails API...');
+      logger.log('[Flow UI] Calling generate-emails API...');
       const response = await fetch('/api/flows/generate-emails', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1181,13 +1347,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       });
 
       clearInterval(progressInterval);
-      console.log('[Flow UI] API call completed, response status:', response.status);
+      logger.log('[Flow UI] API call completed, response status:', response.status);
       
       // Set progress to completion
       setFlowGenerationProgress(outline.emails.length);
 
       const result = await response.json();
-      console.log('[Flow UI] Generation result:', result);
+      logger.log('[Flow UI] Generation result:', result);
       
       if (result.success) {
         toast.success(`Generated ${result.generated} emails successfully!`, {
@@ -1222,7 +1388,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           return prev;
         });
       } else {
-        console.warn('[Flow UI] Partial success:', result);
+        logger.warn('[Flow UI] Partial success:', result);
         toast.error(`Generated ${result.generated} emails, but ${result.failed} failed. Check console for details.`);
         
         // Still reload to show successful emails
@@ -1232,7 +1398,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         }
       }
     } catch (error) {
-      console.error('[Flow UI] Error approving outline:', error);
+      logger.error('[Flow UI] Error approving outline:', error);
       
       // Provide more detailed error message
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -1243,7 +1409,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         await loadFlowData(currentConversation.id);
         await loadConversations();
       } catch (reloadError) {
-        console.error('[Flow UI] Error reloading after failure:', reloadError);
+        logger.error('[Flow UI] Error reloading after failure:', reloadError);
       }
     } finally {
       setSending(false);
@@ -1257,7 +1423,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Get current user
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) {
-        console.error('[Campaign] No user found');
+        logger.error('[Campaign] No user found');
         toast.error('Failed to create campaign');
         return;
       }
@@ -1279,7 +1445,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         .single();
 
       if (error) {
-        console.error('[Campaign] Error creating conversation:', error);
+        logger.error('[Campaign] Error creating conversation:', error);
         throw error;
       }
 
@@ -1297,7 +1463,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       toast.success(`Campaign conversation created! Ready to write your email.`);
     } catch (error) {
-      console.error('Error creating campaign conversation:', error);
+      logger.error('Error creating campaign conversation:', error);
       toast.error('Failed to create campaign');
     }
   };
@@ -1318,7 +1484,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         return title;
       }
     } catch (error) {
-      console.error('Error auto-generating title:', error);
+      logger.error('Error auto-generating title:', error);
     }
 
     // Fallback: Simple title generation from first message
@@ -1382,7 +1548,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             errorMessage = `${errorMessage}: ${errorText}`;
           }
         }
-        console.error('API Error (regenerate):', { status: response.status, message: errorMessage });
+        logger.error('API Error (regenerate):', { status: response.status, message: errorMessage });
         throw new Error(errorMessage);
       }
 
@@ -1423,7 +1589,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       // IMPORTANT: Reset status to idle
-      console.log('[Regenerate] Completed, resetting status to idle');
+      logger.log('[Regenerate] Completed, resetting status to idle');
       setAiStatus('idle');
       setSending(false);
 
@@ -1437,15 +1603,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (error.name === 'AbortError') {
         toast.error('Generation stopped');
       } else {
-        console.error('Error regenerating message:', error);
+        logger.error('Error regenerating message:', error);
         toast.error('Failed to regenerate message');
       }
       // CRITICAL: Always reset status to idle
-      console.log('[Regenerate] Error occurred, resetting status to idle');
+      logger.log('[Regenerate] Error occurred, resetting status to idle');
       setAiStatus('idle');
     } finally {
       // CRITICAL: Always reset
-      console.log('[Regenerate] Finally block, ensuring all reset');
+      logger.log('[Regenerate] Finally block, ensuring all reset');
       setSending(false);
       setAiStatus('idle');
       setRegeneratingMessageId(null);
@@ -1497,7 +1663,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             errorMessage = `${errorMessage}: ${errorText}`;
           }
         }
-        console.error('API Error (regenerate section):', { status: response.status, message: errorMessage });
+        logger.error('API Error (regenerate section):', { status: response.status, message: errorMessage });
         throw new Error(errorMessage);
       }
 
@@ -1535,7 +1701,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       // IMPORTANT: Reset status to idle
-      console.log('[RegenerateSection] Completed, resetting status to idle');
+      logger.log('[RegenerateSection] Completed, resetting status to idle');
       setAiStatus('idle');
       setSending(false);
 
@@ -1550,15 +1716,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (error.name === 'AbortError') {
         toast.error('Generation stopped');
       } else {
-        console.error('Error regenerating section:', error);
+        logger.error('Error regenerating section:', error);
         toast.error('Failed to regenerate section');
       }
       // CRITICAL: Always reset status to idle
-      console.log('[RegenerateSection] Error occurred, resetting status to idle');
+      logger.log('[RegenerateSection] Error occurred, resetting status to idle');
       setAiStatus('idle');
     } finally {
       // CRITICAL: Always reset
-      console.log('[RegenerateSection] Finally block, ensuring all reset');
+      logger.log('[RegenerateSection] Finally block, ensuring all reset');
       setSending(false);
       setAiStatus('idle');
       setRegeneratingMessageId(null);
@@ -1603,7 +1769,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Trigger new AI response
       await handleSendMessage(newContent, true);
     } catch (error) {
-      console.error('Error editing message:', error);
+      logger.error('Error editing message:', error);
       toast.error('Failed to edit message');
     }
   };
@@ -1624,7 +1790,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       toast.success(reaction === 'thumbs_up' ? 'Thanks for the feedback!' : "We'll try to do better");
     } catch (error) {
-      console.error('Error saving reaction:', error);
+      logger.error('Error saving reaction:', error);
     }
   };
 
@@ -1667,6 +1833,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     setDraftContent('');
 
     let currentController: AbortController | null = null;
+    let aiMessageId: string | null = null; // Declare outside try block for catch block access
 
     try {
       let userMessage: Message | undefined;
@@ -1757,12 +1924,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             errorMessage = `${errorMessage}: ${errorText}`;
           }
         }
-        console.error('API Error:', { status: response.status, message: errorMessage });
+        logger.error('API Error:', { status: response.status, message: errorMessage });
         throw new Error(errorMessage);
       }
 
       // Create placeholder for AI message
-      const aiMessageId = crypto.randomUUID();
+      aiMessageId = crypto.randomUUID();
       const aiMessage: Message = {
         id: aiMessageId,
         conversation_id: currentConversation.id,
@@ -1780,7 +1947,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         });
       }, 100);
 
-      console.log('[Stream] Created AI placeholder:', aiMessageId);
+      logger.log('[Stream] Created AI placeholder:', aiMessageId);
 
       // Read streaming response with advanced parser and recovery
       const reader = response.body?.getReader();
@@ -1799,7 +1966,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       const UPDATE_THROTTLE = 16; // ~60fps (1000ms / 60 = 16.67ms)
       let pendingUpdate = false;
 
-      console.log('[Stream] Starting to read response...');
+      logger.log('[Stream] Starting to read response...');
       if (reader) {
         try {
           while (true) {
@@ -1810,7 +1977,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             rawStreamContent += chunk; // Accumulate for product extraction
             
             if (checkpointCounter === 0) {
-              console.log('[Stream] First chunk received:', chunk.substring(0, 100));
+              logger.log('[Stream] First chunk received:', chunk.substring(0, 100));
             }
             
             // Parse thinking markers - native AI thinking blocks (for status indication only)
@@ -1848,11 +2015,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                 if (toolParts) {
                   const [, toolName, action] = toolParts;
                   if (action === 'START') {
-                    console.log(`[Tool] ${toolName} started`);
+                    logger.log(`[Tool] ${toolName} started`);
                     setAiStatus('searching_web');
                     allStreamedContent += `\n\n[Using web search to find information...]\n\n`;
                   } else if (action === 'END') {
-                    console.log(`[Tool] ${toolName} completed`);
+                    logger.log(`[Tool] ${toolName} completed`);
                     allStreamedContent += `\n[Web search complete]\n\n`;
                   }
                 }
@@ -1905,7 +2072,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                     );
                     
                     if (checkpointCounter % 50 === 0) {
-                      console.log('[Stream] Updating thinking, length:', allStreamedContent.length);
+                      logger.log('[Stream] Updating thinking, length:', allStreamedContent.length);
                     }
                     
                     return updated;
@@ -1932,9 +2099,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           // POST-PROCESSING: Parse complete content after streaming finishes
           // ====================================================================
           
-          console.log('[PostProcess] Stream complete, parsing accumulated content...');
-          console.log('[PostProcess] Total accumulated:', allStreamedContent.length, 'chars');
-          console.log('[PostProcess] First 300 chars:', allStreamedContent.substring(0, 300));
+          logger.log('[PostProcess] Stream complete, parsing accumulated content...');
+          logger.log('[PostProcess] Total accumulated:', allStreamedContent.length, 'chars');
+          logger.log('[PostProcess] First 300 chars:', allStreamedContent.substring(0, 300));
           
           // Use the clean parser function - one pass, no booleans
           const parsed = parseStreamedContent(allStreamedContent);
@@ -1955,10 +2122,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           finalThinking = finalThinkingSections.join('\n\n');
           finalEmailCopy = parsed.emailCopy;
           
-          console.log('[PostProcess] Final separation:');
-          console.log('[PostProcess] - Email copy:', finalEmailCopy.length, 'chars');
-          console.log('[PostProcess] - Thinking:', finalThinking.length, 'chars');
-          console.log('[PostProcess] - Strategy:', parsed.emailStrategy.length, 'chars');
+          logger.log('[PostProcess] Final separation:');
+          logger.log('[PostProcess] - Email copy:', finalEmailCopy.length, 'chars');
+          logger.log('[PostProcess] - Thinking:', finalThinking.length, 'chars');
+          logger.log('[PostProcess] - Strategy:', parsed.emailStrategy.length, 'chars');
           
           // Final update with cleanly separated content
           setMessages((prev) =>
@@ -1970,15 +2137,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           );
           
           // Extract product links from complete stream (after all chunks received)
-          console.log('[ProductExtract] Checking for PRODUCTS marker in stream...');
-          console.log('[ProductExtract] Raw stream length:', rawStreamContent.length);
-          console.log('[ProductExtract] Raw stream last 500 chars:', rawStreamContent.slice(-500));
+          logger.log('[ProductExtract] Checking for PRODUCTS marker in stream...');
+          logger.log('[ProductExtract] Raw stream length:', rawStreamContent.length);
+          logger.log('[ProductExtract] Raw stream last 500 chars:', rawStreamContent.slice(-500));
           
           // Improved regex: Match [PRODUCTS:...] where ... is JSON that may contain brackets
           // Strategy: Find [PRODUCTS: then match balanced brackets to find the closing ]
           const productsMarkerIndex = rawStreamContent.indexOf('[PRODUCTS:');
           if (productsMarkerIndex !== -1) {
-            console.log('[ProductExtract] PRODUCTS marker found at index:', productsMarkerIndex);
+            logger.log('[ProductExtract] PRODUCTS marker found at index:', productsMarkerIndex);
             
             // Extract everything after [PRODUCTS:
             const afterMarker = rawStreamContent.substring(productsMarkerIndex + '[PRODUCTS:'.length);
@@ -2002,40 +2169,40 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             
             if (jsonEndIndex !== -1) {
               const jsonString = afterMarker.substring(0, jsonEndIndex).trim();
-              console.log('[ProductExtract] Extracted JSON string length:', jsonString.length);
-              console.log('[ProductExtract] JSON preview:', jsonString.substring(0, 200));
+              logger.log('[ProductExtract] Extracted JSON string length:', jsonString.length);
+              logger.log('[ProductExtract] JSON preview:', jsonString.substring(0, 200));
               
               try {
                 // Validate JSON before parsing
                 if (jsonString && jsonString.startsWith('[') && jsonString.endsWith(']')) {
                   productLinks = JSON.parse(jsonString);
-                  console.log('[ProductExtract] Parsed product links:', productLinks);
+                  logger.log('[ProductExtract] Parsed product links:', productLinks);
                   // Validate structure
                   if (!Array.isArray(productLinks)) {
-                    console.warn('Product links is not an array, resetting');
+                    logger.warn('Product links is not an array, resetting');
                     productLinks = [];
                   } else {
-                    console.log('[ProductExtract] Successfully parsed', productLinks.length, 'product links');
+                    logger.log('[ProductExtract] Successfully parsed', productLinks.length, 'product links');
                   }
                 } else {
-                  console.warn('Invalid product links format - JSON does not start/end with brackets:', jsonString.substring(0, 50));
+                  logger.warn('Invalid product links format - JSON does not start/end with brackets:', jsonString.substring(0, 50));
                   productLinks = [];
                 }
               } catch (e) {
-                console.error('Failed to parse product links JSON:', e);
-                console.error('JSON string:', jsonString.substring(0, 500));
+                logger.error('Failed to parse product links JSON:', e);
+                logger.error('JSON string:', jsonString.substring(0, 500));
                 // Silent fail - product links are optional
                 productLinks = [];
               }
             } else {
-              console.warn('[ProductExtract] Could not find closing bracket for PRODUCTS marker');
+              logger.warn('[ProductExtract] Could not find closing bracket for PRODUCTS marker');
             }
           } else {
-            console.log('[ProductExtract] No PRODUCTS marker found in stream');
+            logger.log('[ProductExtract] No PRODUCTS marker found in stream');
             // Debug: Check if there are any similar patterns
             const similarPatterns = rawStreamContent.match(/\[PRODUCT[^\]]*/g);
             if (similarPatterns) {
-              console.log('[ProductExtract] Found similar patterns:', similarPatterns);
+              logger.log('[ProductExtract] Found similar patterns:', similarPatterns);
             }
           }
           
@@ -2045,7 +2212,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           // Try to recover from last checkpoint
           const recovered = loadCheckpoint(aiMessageId);
           if (recovered) {
-            console.log('[Recovery] Recovered stream from checkpoint:', recovered.content.length, 'chars');
+            logger.log('[Recovery] Recovered stream from checkpoint:', recovered.content.length, 'chars');
             
             // Re-parse the recovered content to separate email/thinking/strategy
             allStreamedContent = recovered.content;
@@ -2062,9 +2229,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             }
             finalEmailCopy = parsed.emailCopy;
             
-            console.log('[Recovery] Parsed recovered content:');
-            console.log('[Recovery] - Email copy:', finalEmailCopy.length, 'chars');
-            console.log('[Recovery] - Thinking:', finalThinking.length, 'chars');
+            logger.log('[Recovery] Parsed recovered content:');
+            logger.log('[Recovery] - Email copy:', finalEmailCopy.length, 'chars');
+            logger.log('[Recovery] - Thinking:', finalThinking.length, 'chars');
             
             // Update UI with recovered content
             setMessages((prev) =>
@@ -2075,18 +2242,33 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               )
             );
             
-            console.log('[Recovery] UI updated with recovered content');
+            logger.log('[Recovery] Recovery successful - continuing to save recovered content to database');
+            // DON'T re-throw - let execution continue to save the recovered content
           } else {
-            console.log('[Recovery] No checkpoint found for recovery');
+            // No checkpoint found - recovery failed, re-throw the error
+            logger.log('[Recovery] No checkpoint found for recovery - re-throwing error');
+            throw streamError;
           }
-          throw streamError;
         }
+      } else {
+        // No readable stream available - this should never happen with proper API responses
+        logger.error('[Stream] No readable stream available from response');
+        throw new Error('No readable stream available from response. The API may not support streaming.');
+      }
+
+      // Validate that we have usable parsed content before proceeding
+      // Check the parsed outputs (finalEmailCopy or finalThinking), not raw stream data
+      // This allows legitimate partial responses (thinking without email, or email without thinking)
+      if (!finalEmailCopy && !finalThinking) {
+        logger.error('[Stream] No usable content after parsing. Raw stream length:', allStreamedContent.length);
+        logger.error('[Stream] First 200 chars of raw stream:', allStreamedContent.substring(0, 200));
+        throw new Error('No usable content could be extracted from the response. The AI may have returned an empty or malformed response.');
       }
 
       const fullContent = finalEmailCopy;
 
       // IMPORTANT: Reset AI status to idle IMMEDIATELY after stream completes
-      console.log('[Stream] Completed successfully, resetting status to idle');
+      logger.log('[Stream] Completed successfully, resetting status to idle');
       setAiStatus('idle');
       setSending(false);
       
@@ -2098,21 +2280,21 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       const sanitizedThinking = finalThinking ? sanitizeContent(finalThinking) : null;
 
       // Save complete AI message to database with product links and thinking
-      console.log('[Database] Saving message with product links:', productLinks.length, 'links');
+      logger.log('[Database] Saving message with product links:', productLinks.length, 'links');
       if (productLinks.length > 0) {
-        console.log('[Database] Product links to save:', productLinks);
+        logger.log('[Database] Product links to save:', productLinks);
       }
       
       // Verify user session before inserting (RLS requires it)
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.error('[Database] No authenticated user - cannot save message');
+        logger.error('[Database] No authenticated user - cannot save message');
         throw new Error('Not authenticated');
       }
       
-      console.log('[Database] User authenticated:', user.id);
-      console.log('[Database] Conversation ID:', currentConversation.id);
-      console.log('[Database] Brand ID:', brand.id);
+      logger.log('[Database] User authenticated:', user.id);
+      logger.log('[Database] Conversation ID:', currentConversation.id);
+      logger.log('[Database] Brand ID:', brand.id);
       
       const { data: savedAiMessage, error: aiError } = await supabase
         .from('messages')
@@ -2127,8 +2309,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         .single();
 
       if (aiError) {
-        console.error('[Database] Error saving message:', aiError);
-        console.error('[Database] Error details:', {
+        logger.error('[Database] Error saving message:', aiError);
+        logger.error('[Database] Error details:', {
           message: aiError.message,
           code: aiError.code,
           details: aiError.details,
@@ -2139,15 +2321,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       // Replace placeholder with saved message and remove any duplicates
       setMessages((prev) => {
-        console.log('[Messages] Replacing AI placeholder. Prev count:', prev.length);
-        console.log('[Messages] Placeholder ID:', aiMessageId, 'Saved ID:', savedAiMessage.id);
+        logger.log('[Messages] Replacing AI placeholder. Prev count:', prev.length);
+        logger.log('[Messages] Placeholder ID:', aiMessageId, 'Saved ID:', savedAiMessage.id);
         
         // First, filter out any existing instances of the saved message ID
         const withoutDuplicates = prev.filter(msg => msg.id !== savedAiMessage.id);
         // Then replace the placeholder with the saved message
         const updated = withoutDuplicates.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg));
         
-        console.log('[Messages] Final count:', updated.length);
+        logger.log('[Messages] Final count:', updated.length);
         return updated;
       });
       
@@ -2159,21 +2341,21 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       // Detect campaign ideas in planning mode
       if (conversationMode === 'planning') {
-        console.log('[Campaign] Checking for campaign idea in planning mode');
-        console.log('[Campaign] Full content length:', finalEmailCopy.length);
-        console.log('[Campaign] Content preview:', finalEmailCopy.substring(0, 200));
+        logger.log('[Campaign] Checking for campaign idea in planning mode');
+        logger.log('[Campaign] Full content length:', finalEmailCopy.length);
+        logger.log('[Campaign] Content preview:', finalEmailCopy.substring(0, 200));
         
         const campaignIdea = extractCampaignIdea(finalEmailCopy);
-        console.log('[Campaign] Extracted campaign idea:', campaignIdea);
+        logger.log('[Campaign] Extracted campaign idea:', campaignIdea);
         
         if (campaignIdea) {
-          console.log('[Campaign] Setting detected campaign:', campaignIdea.title);
+          logger.log('[Campaign] Setting detected campaign:', campaignIdea.title);
           setDetectedCampaign({
             title: campaignIdea.title,
             brief: campaignIdea.brief
           });
         } else {
-          console.log('[Campaign] No campaign idea detected');
+          logger.log('[Campaign] No campaign idea detected');
         }
       }
       
@@ -2193,12 +2375,18 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         responseLength: fullContent.length
       });
     } catch (error: any) {
+      // Remove the placeholder AI message on error (if it was created)
+      if (aiMessageId) {
+        setMessages((prev) => prev.filter((msg) => msg.id !== aiMessageId));
+        logger.log('[Error] Removed placeholder AI message:', aiMessageId);
+      }
+      
       if (error.name === 'AbortError') {
         toast.error('Generation stopped');
         sidebarState.updateConversationStatus(currentConversation.id, 'idle');
       } else {
         // Enhanced error logging for better debugging
-        console.error('Error sending message:', {
+        logger.error('Error sending message:', {
           message: error?.message || 'Unknown error',
           name: error?.name,
           stack: error?.stack,
@@ -2211,11 +2399,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         sidebarState.updateConversationStatus(currentConversation.id, 'error');
       }
       // CRITICAL: Always reset status to idle
-      console.log('[Stream] Error occurred, resetting status to idle');
+      logger.log('[Stream] Error occurred, resetting status to idle');
       setAiStatus('idle');
     } finally {
       // CRITICAL: Always reset sending to false
-      console.log('[Stream] Finally block, ensuring sending=false and status=idle');
+      logger.log('[Stream] Finally block, ensuring sending=false and status=idle');
       setSending(false);
       setAiStatus('idle');
       // Only clear if this is still the current controller
@@ -2240,7 +2428,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   useEffect(() => {
     const flowConvs = filteredConversationsWithStatus.filter(c => c.is_flow);
     if (flowConvs.length > 0) {
-      console.log('[Sidebar] Flow conversations to display:', flowConvs.map(c => ({
+      logger.log('[Sidebar] Flow conversations to display:', flowConvs.map(c => ({
         id: c.id,
         title: c.title,
         is_flow: c.is_flow,
@@ -2275,49 +2463,53 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       {/* Flow Type Selector Modal */}
       {showFlowTypeSelector && (
         <Suspense fallback={<div className="fixed inset-0 bg-black/50 z-50" />}>
-          <FlowTypeSelector
-            onSelect={handleSelectFlowType}
-            onCancel={() => {
-              setShowFlowTypeSelector(false);
-              setEmailType('design'); // Reset to design if cancelled
-            }}
-          />
+          <SectionErrorBoundary sectionName="flow type selector">
+            <FlowTypeSelector
+              onSelect={handleSelectFlowType}
+              onCancel={() => {
+                setShowFlowTypeSelector(false);
+                setEmailType('design'); // Reset to design if cancelled
+              }}
+            />
+          </SectionErrorBoundary>
         </Suspense>
       )}
 
       {/* Enhanced Sidebar - Fixed overlay on mobile, in-flow on desktop */}
       <div className="contents lg:flex lg:h-screen">
-        <ChatSidebarEnhanced
-          brandName={brand.name}
-          brandId={brandId}
-          conversations={filteredConversationsWithStatus}
-          currentConversationId={currentConversation?.id || null}
-          teamMembers={teamMembers}
-          currentFilter={currentFilter}
-          selectedPersonId={selectedPersonId}
-          pinnedConversationIds={sidebarState.pinnedConversationIds}
-          viewMode={sidebarState.viewMode}
-          isMobileOpen={isMobileSidebarOpen}
-          onMobileToggle={setIsMobileSidebarOpen}
-          onFilterChange={handleFilterChange}
-          onNewConversation={handleNewConversation}
-          onSelectConversation={handleSelectConversation}
-          onDeleteConversation={handleDeleteConversation}
-          onRenameConversation={handleRenameConversation}
-          onPrefetchConversation={handlePrefetchConversation}
-          onQuickAction={sidebarState.handleQuickAction}
-          onViewModeChange={sidebarState.setViewMode}
-          onSidebarWidthChange={sidebarState.setSidebarWidth}
-          onBulkAction={handleBulkAction}
-          initialWidth={sidebarState.sidebarWidth}
-          allBrands={allBrands}
-          onBrandSwitch={(newBrandId) => router.push(`/brands/${newBrandId}/chat`)}
-          onNavigateHome={() => router.push('/')}
-          onNewFlow={() => {
-            handleNewConversation();
-            setShowFlowTypeSelector(true);
-          }}
-        />
+        <SectionErrorBoundary sectionName="sidebar">
+          <ChatSidebarEnhanced
+            brandName={brand.name}
+            brandId={brandId}
+            conversations={filteredConversationsWithStatus}
+            currentConversationId={currentConversation?.id || null}
+            teamMembers={teamMembers}
+            currentFilter={currentFilter}
+            selectedPersonId={selectedPersonId}
+            pinnedConversationIds={sidebarState.pinnedConversationIds}
+            viewMode={sidebarState.viewMode}
+            isMobileOpen={isMobileSidebarOpen}
+            onMobileToggle={setIsMobileSidebarOpen}
+            onFilterChange={handleFilterChange}
+            onNewConversation={handleNewConversation}
+            onSelectConversation={handleSelectConversation}
+            onDeleteConversation={handleDeleteConversation}
+            onRenameConversation={handleRenameConversation}
+            onPrefetchConversation={handlePrefetchConversation}
+            onQuickAction={sidebarState.handleQuickAction}
+            onViewModeChange={sidebarState.setViewMode}
+            onSidebarWidthChange={sidebarState.setSidebarWidth}
+            onBulkAction={handleBulkAction}
+            initialWidth={sidebarState.sidebarWidth}
+            allBrands={allBrands}
+            onBrandSwitch={(newBrandId) => router.push(`/brands/${newBrandId}/chat`)}
+            onNavigateHome={() => router.push('/')}
+            onNewFlow={() => {
+              handleNewConversation();
+              setShowFlowTypeSelector(true);
+            }}
+          />
+        </SectionErrorBoundary>
 
         {/* Main chat area - Full width on mobile, flex-1 on desktop */}
         <div className="flex flex-col h-screen w-full lg:flex-1 lg:w-auto min-w-0">
@@ -2327,7 +2519,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           <div className="lg:hidden px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
             <button
               onClick={() => setIsMobileSidebarOpen(true)}
-              className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0"
+              className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
               aria-label="Open sidebar"
             >
               <svg className="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2415,24 +2607,31 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         >
           {!currentConversation ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <svg
-                  className="w-12 h-12 text-gray-400 dark:text-gray-600 mx-auto mb-3"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                  />
-                </svg>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">No conversation selected</p>
+              <div className="text-center max-w-md px-4">
+                <div className="mb-6">
+                  <svg
+                    className="w-16 h-16 text-gray-300 dark:text-gray-700 mx-auto mb-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                  No conversation selected
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                  Select a conversation from the sidebar or start a new one to begin creating email copy.
+                </p>
                 <button
                   onClick={handleNewConversation}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer shadow-sm hover:shadow-md"
                 >
                   Start New Conversation
                 </button>
@@ -2505,22 +2704,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             /* Loading skeleton */
             <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
               <div className="space-y-6">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="animate-pulse">
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 bg-gray-300 dark:bg-gray-700 rounded-full flex-shrink-0"></div>
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-1/4"></div>
-                        <div className="h-20 bg-gray-200 dark:bg-gray-800 rounded-lg"></div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                <MessageSkeleton isUser />
+                <MessageSkeleton />
+                <MessageSkeleton isUser />
+                <MessageSkeleton />
               </div>
             </div>
           ) : messages.length > 50 ? (
             /* Use virtualized list for long conversations (50+ messages) */
-            <>
+            <SectionErrorBoundary sectionName="message list">
               <VirtualizedMessageList
                 messages={messages}
                 brandId={brandId}
@@ -2532,6 +2724,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                 onEdit={handleEditMessage}
                 onReaction={handleMessageReaction}
                 aiStatus={aiStatus}
+                starredEmailContents={starredEmailContents}
               />
               
               <div ref={messagesEndRef} />
@@ -2549,28 +2742,30 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   </div>
                 </div>
               )}
-            </>
+            </SectionErrorBoundary>
           ) : (
             /* Regular rendering for shorter conversations */
-            <div className="max-w-5xl mx-auto">
-              {/* Flow Outline Display for parent flow conversations */}
-              {currentConversation?.is_flow && flowOutline && flowOutline.approved && (
-                <FlowOutlineDisplay
-                  outline={flowOutline.outline_data}
-                  children={flowChildren}
-                  onSelectChild={(childId) => handleSelectConversation(childId)}
-                  currentChildId={currentConversation.id}
-                />
-              )}
+            <SectionErrorBoundary sectionName="message list">
+              <div className="max-w-5xl mx-auto">
+                {/* Flow Outline Display for parent flow conversations */}
+                {currentConversation?.is_flow && flowOutline && flowOutline.approved && (
+                  <FlowOutlineDisplay
+                    outline={flowOutline.outline_data}
+                    children={flowChildren}
+                    onSelectChild={(childId) => handleSelectConversation(childId)}
+                    currentChildId={currentConversation.id}
+                  />
+                )}
 
-              
-              {/* Messages */}
-              {messages.map((message, index) => (
+                
+                {/* Messages */}
+                {messages.map((message, index) => (
                 <ChatMessage
-                  key={`${message.id}-${index}`}
+                  key={message.id}
                   message={message}
                   brandId={brandId}
                   mode={conversationMode}
+                  isStarred={message.role === 'assistant' ? starredEmailContents.has(message.content) : false}
                   onRegenerate={
                     message.role === 'assistant' && index === messages.length - 1 && !sending
                       ? () => handleRegenerateMessage(index)
@@ -2608,7 +2803,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   </div>
                 </div>
               )}
-            </div>
+              </div>
+            </SectionErrorBoundary>
           )}
         </div>
 
@@ -2683,6 +2879,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             emailType={emailType}
             onEmailTypeChange={handleEmailTypeChange}
             hasMessages={messages.length > 0}
+            brandId={brandId}
           />
         )}
 
@@ -2698,11 +2895,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
         {/* Memory Settings Modal */}
         {showMemorySettings && currentConversation && (
-          <MemorySettings
-            conversationId={currentConversation.id}
-            onClose={() => setShowMemorySettings(false)}
-          />
+          <SectionErrorBoundary sectionName="memory settings">
+            <MemorySettings
+              conversationId={currentConversation.id}
+              onClose={() => setShowMemorySettings(false)}
+            />
+          </SectionErrorBoundary>
         )}
+        
+        {/* Command Palette and Keyboard Shortcuts are now global - see layout.tsx */}
         </div>
       </div>
     </div>

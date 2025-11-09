@@ -18,16 +18,11 @@ export default function ConversationSearch({
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Handle keyboard shortcut (Cmd/Ctrl + K)
+  // Handle ESC to clear search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-      
-      // ESC to clear
-      if (e.key === 'Escape' && value) {
+      // ESC to clear search (only if this input is focused)
+      if (e.key === 'Escape' && value && document.activeElement === inputRef.current) {
         onClear();
         inputRef.current?.blur();
       }
@@ -117,11 +112,11 @@ export default function ConversationSearch({
           </button>
         )}
 
-        {/* Keyboard Shortcut Hint */}
-        {!value && !isFocused && (
-          <div className="mr-3 flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+        {/* ESC hint when there's a value */}
+        {value && (
+          <div className="mr-3 text-xs text-gray-400 dark:text-gray-500">
             <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-semibold">
-              ⌘K
+              ESC
             </kbd>
           </div>
         )}

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { BrandDocument } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
+import { logger } from '@/lib/logger';
 
 interface BrandDocumentManagerProps {
   brandId: string;
@@ -38,7 +39,7 @@ export default function BrandDocumentManager({ brandId, brandName }: BrandDocume
       if (error) throw error;
       setDocuments(data || []);
     } catch (error) {
-      console.error('Error loading documents:', error);
+      logger.error('Error loading documents:', error);
       toast.error('Failed to load documents');
     } finally {
       setLoading(false);
@@ -81,7 +82,7 @@ export default function BrandDocumentManager({ brandId, brandName }: BrandDocume
       setShowUploadForm(false);
       toast.success('Document uploaded successfully!');
     } catch (error) {
-      console.error('Error uploading document:', error);
+      logger.error('Error uploading document:', error);
       toast.error('Failed to upload document');
     } finally {
       setUploading(false);
@@ -104,7 +105,7 @@ export default function BrandDocumentManager({ brandId, brandName }: BrandDocume
       setDocuments(prev => prev.filter(d => d.id !== documentId));
       toast.success('Document deleted');
     } catch (error) {
-      console.error('Error deleting document:', error);
+      logger.error('Error deleting document:', error);
       toast.error('Failed to delete document');
     }
   };

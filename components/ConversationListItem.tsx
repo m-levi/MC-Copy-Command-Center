@@ -4,6 +4,7 @@ import { ConversationWithStatus, Conversation, ConversationQuickAction } from '@
 import { useState, useEffect, useCallback, memo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import ConversationContextMenu from './ConversationContextMenu';
+import { logger } from '@/lib/logger';
 
 interface ConversationListItemProps {
   conversation: ConversationWithStatus;
@@ -58,7 +59,7 @@ function ConversationListItem({
         setFlowChildrenCount(count);
       }
     } catch (error) {
-      console.error('Error loading flow children count:', error);
+      logger.error('Error loading flow children count:', error);
     }
   };
 
@@ -92,7 +93,7 @@ function ConversationListItem({
         setFlowChildren(data);
       }
     } catch (error) {
-      console.error('Error loading flow children:', error);
+      logger.error('Error loading flow children:', error);
     } finally {
       setLoadingChildren(false);
     }
@@ -159,7 +160,7 @@ function ConversationListItem({
         className={`
           group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all
           ${isSelected
-            ? 'bg-blue-100 dark:bg-blue-900/30 ring-2 ring-blue-500 dark:ring-blue-400'
+            ? 'bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800'
             : isActive 
               ? 'bg-blue-600 dark:bg-blue-700 text-white' 
               : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100'
@@ -175,14 +176,16 @@ function ConversationListItem({
               onToggleSelect?.(e);
             }}
           >
-            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all cursor-pointer ${
-              isSelected 
-                ? 'bg-blue-600 border-blue-600' 
-                : 'border-gray-300 dark:border-gray-600 hover:border-blue-500'
-            }`}>
+            <div className={`
+              w-4.5 h-4.5 rounded flex items-center justify-center transition-all cursor-pointer
+              ${isSelected 
+                ? 'bg-blue-600 dark:bg-blue-500 scale-100' 
+                : 'border-2 border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 scale-95'
+              }
+            `}>
               {isSelected && (
-                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               )}
             </div>

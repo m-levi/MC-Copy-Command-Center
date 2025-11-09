@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
 import { stripCampaignTags } from '@/lib/campaign-parser';
+import { logger } from '@/lib/logger';
 
 interface ChatMessageProps {
   message: Message;
@@ -21,6 +22,7 @@ interface ChatMessageProps {
   isRegenerating?: boolean;
   isStreaming?: boolean;
   aiStatus?: AIStatus;
+  isStarred?: boolean; // Passed from parent to avoid DB query per message
 }
 
 // Memoized component to prevent unnecessary re-renders
@@ -35,13 +37,19 @@ const ChatMessage = memo(function ChatMessage({
   isRegenerating = false,
   isStreaming = false,
   aiStatus = 'idle',
+  isStarred: isStarredProp = false, // Use prop instead of checking in component
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [reaction, setReaction] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
-  const [isStarred, setIsStarred] = useState(false);
+  const [isStarred, setIsStarred] = useState(isStarredProp);
   const [isStarring, setIsStarring] = useState(false);
   const supabase = createClient();
+  
+  // Update local state when prop changes
+  useEffect(() => {
+    setIsStarred(isStarredProp);
+  }, [isStarredProp]);
   
   // Determine mode for display logic
   const isEmailMode = mode === 'email_copy';
@@ -81,28 +89,7 @@ const ChatMessage = memo(function ChatMessage({
     }
   };
 
-  // Check if this email is starred on mount
-  useEffect(() => {
-    const checkIfStarred = async () => {
-      if (!brandId) return;
-      
-      try {
-        const { data } = await supabase
-          .from('brand_documents')
-          .select('id')
-          .eq('brand_id', brandId)
-          .eq('doc_type', 'example')
-          .eq('content', message.content)
-          .limit(1);
-
-        setIsStarred(!!(data && data.length > 0));
-      } catch (error) {
-        console.error('Error checking starred status:', error);
-      }
-    };
-
-    checkIfStarred();
-  }, [brandId, message.content, supabase]);
+  // Star status is now passed as prop from parent - no DB query needed here
 
   // Toggle star status
   const handleToggleStar = async () => {
@@ -179,7 +166,7 @@ const ChatMessage = memo(function ChatMessage({
         toast.success(`Email starred! (${count + 1}/10)`);
       }
     } catch (error) {
-      console.error('Error toggling star:', error);
+      logger.error('Error toggling star:', error);
       toast.error('Failed to update email');
     } finally {
       setIsStarring(false);
@@ -242,13 +229,22 @@ const ChatMessage = memo(function ChatMessage({
             {/* Message Content - Contextually Intelligent Display */}
             {isEmailMode ? (
               // EMAIL MODE: Show EmailPreview with starring capability and product links
-              <EmailPreview
-                content={message.content}
-                isStarred={isStarred}
-                onToggleStar={brandId ? handleToggleStar : undefined}
-                isStarring={isStarring}
-                productLinks={message.metadata?.productLinks}
-              />
+              // Hide during streaming until content is populated
+              message.content ? (
+                <EmailPreview
+                  content={message.content}
+                  isStarred={isStarred}
+                  onToggleStar={brandId ? handleToggleStar : undefined}
+                  isStarring={isStarring}
+                  productLinks={message.metadata?.productLinks}
+                />
+              ) : isStreaming ? (
+                // Subtle pulsing placeholder during streaming
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-6 py-8 animate-pulse">
+                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-3"></div>
+                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+                </div>
+              ) : null
             ) : isPlanningMode ? (
               // PLANNING MODE: Rich text formatting for strategic conversations
               // Strip campaign XML tags for clean display

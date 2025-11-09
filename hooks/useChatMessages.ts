@@ -11,6 +11,7 @@ import { RequestCoalescer } from '@/lib/performance-utils';
 import { trackPerformance } from '@/lib/analytics';
 import { loadDraft } from '@/hooks/useDraftSave';
 import toast from 'react-hot-toast';
+import { logger } from '@/lib/logger';
 
 /**
  * Hook for managing chat messages - loading, caching, and real-time updates
@@ -66,7 +67,7 @@ export function useChatMessages(conversationId: string | null) {
         conversationId
       );
     } catch (error) {
-      console.error('Error loading messages:', error);
+      logger.error('Error loading messages:', error);
       toast.error('Failed to load messages');
     } finally {
       setLoading(false);

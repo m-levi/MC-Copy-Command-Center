@@ -8,6 +8,7 @@ import BrandListItem from '@/components/BrandListItem';
 import { BrandGridSkeleton } from '@/components/SkeletonLoader';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
+import { logger } from '@/lib/logger';
 
 // Lazy load the modal since it's not needed on initial render
 const BrandModal = lazy(() => import('@/components/BrandModal'));
@@ -62,7 +63,7 @@ export default function HomePage() {
 
       setCurrentUserId(user.id);
 
-      console.log('Fetching org membership for user:', user.id);
+      logger.log('Fetching org membership for user:', user.id);
 
       // Get user's organization membership
       const { data: memberData, error: memberError } = await supabase
@@ -71,7 +72,7 @@ export default function HomePage() {
         .eq('user_id', user.id)
         .single();
 
-      console.log('Organization membership query result:', {
+      logger.log('Organization membership query result:', {
         data: memberData,
         error: memberError,
         hasData: !!memberData,
@@ -79,9 +80,9 @@ export default function HomePage() {
       });
 
       if (memberError || !memberData) {
-        console.error('Organization membership error:', memberError);
-        console.error('User ID being queried:', user.id);
-        console.error('Full error object:', JSON.stringify(memberError, null, 2));
+        logger.error('Organization membership error:', memberError);
+        logger.error('User ID being queried:', user.id);
+        logger.error('Full error object:', JSON.stringify(memberError, null, 2));
         toast.error('You are not part of any organization. Please contact an admin.');
         await supabase.auth.signOut();
         router.push('/login');
@@ -96,7 +97,7 @@ export default function HomePage() {
         .single();
 
       if (orgError || !orgData) {
-        console.error('Organization fetch error:', orgError);
+        logger.error('Organization fetch error:', orgError);
         toast.error('Failed to load organization details.');
         await supabase.auth.signOut();
         router.push('/login');
@@ -118,13 +119,13 @@ export default function HomePage() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Brands fetch error:', error);
+        logger.error('Brands fetch error:', error);
         throw error;
       }
 
       setBrands(data || []);
     } catch (error: any) {
-      console.error('Error loading brands:', error);
+      logger.error('Error loading brands:', error);
       toast.error(error.message || 'Failed to load brands');
     } finally {
       setLoading(false);
@@ -137,9 +138,9 @@ export default function HomePage() {
   }, []);
 
   const handleEditBrand = useCallback((brand: Brand) => {
-    setEditingBrand(brand);
-    setIsModalOpen(true);
-  }, []);
+    // Navigate to brand details page instead of opening modal
+    router.push(`/brands/${brand.id}`);
+  }, [router]);
 
   const handleSaveBrand = useCallback(async (brandData: Partial<Brand>) => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -176,7 +177,7 @@ export default function HomePage() {
       setIsModalOpen(false);
       await loadBrands();
     } catch (error: any) {
-      console.error('Error saving brand:', error);
+      logger.error('Error saving brand:', error);
       toast.error(error.message || 'Failed to save brand');
     }
   }, [editingBrand, organization, supabase]);
@@ -193,7 +194,7 @@ export default function HomePage() {
       toast.success('Brand deleted successfully');
       await loadBrands();
     } catch (error) {
-      console.error('Error deleting brand:', error);
+      logger.error('Error deleting brand:', error);
       toast.error('Failed to delete brand');
     }
   }, [supabase]);
@@ -505,9 +506,14 @@ export default function HomePage() {
                   </svg>
                 </div>
               </div>
+              <div className="mb-6">
+                <svg className="w-20 h-20 mx-auto text-gray-300 dark:text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+              </div>
               <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-50 mb-3">No brands yet</h3>
-              <p className="text-gray-600 dark:text-gray-300 mb-8 leading-relaxed">
-                Create your first brand to start generating amazing email copy with AI
+              <p className="text-gray-600 dark:text-gray-300 mb-8 leading-relaxed max-w-md mx-auto">
+                Create your first brand to start generating amazing email copy with AI. Each brand can have its own voice, style, and examples.
               </p>
               {canManageBrands && (
                 <button

@@ -8,6 +8,7 @@ import {
   buildMemoryContext, 
   formatMemoryForPrompt,
 } from '@/lib/conversation-memory-store';
+import { loadMemoryContext as loadClaudeMemoryContext } from '@/lib/claude-memory-tool';
 import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
 import { buildSystemPrompt } from '@/lib/chat-prompts';
 import { handleUnifiedStream } from '@/lib/unified-stream-handler';
@@ -44,7 +45,7 @@ export async function POST(req: Request) {
     const conversationContext = extractConversationContext(messages);
 
     // Parallel execution: RAG search and memory loading
-    const [ragContext, memories] = await Promise.all([
+    const [ragContext, memories, claudeMemoryContext] = await Promise.all([
       (async () => {
         if (!brandContext?.id || !process.env.OPENAI_API_KEY) {
           return '';
@@ -67,27 +68,45 @@ export async function POST(req: Request) {
           return ''; // Continue without RAG if it fails
         }
       })(),
+      // Legacy memory (still load for OpenAI models)
       (async () => {
         if (!conversationId) {
-          console.log('[Memory] No conversationId provided, skipping memory load');
+          console.log('[Memory] No conversationId provided, skipping legacy memory load');
           return [];
         }
         try {
-          console.log('[Memory] Loading memories for conversation:', conversationId);
+          console.log('[Memory] Loading legacy memories for conversation:', conversationId);
           const mems = await loadMemories(conversationId);
-          console.log('[Memory] Loaded', mems.length, 'memories');
+          console.log('[Memory] Loaded', mems.length, 'legacy memories');
           return mems;
         } catch (error) {
-          console.error('[Memory] Failed to load memories:', error);
-          // Don't fail the entire request if memory loading fails
+          console.error('[Memory] Failed to load legacy memories:', error);
           return [];
+        }
+      })(),
+      // Claude native memory (for Claude models)
+      (async () => {
+        if (!conversationId) {
+          console.log('[Claude Memory] No conversationId provided');
+          return '';
+        }
+        try {
+          console.log('[Claude Memory] Loading native memory context for conversation:', conversationId);
+          const context = await loadClaudeMemoryContext(conversationId);
+          console.log('[Claude Memory] Loaded native memory context');
+          return context;
+        } catch (error) {
+          console.error('[Claude Memory] Failed to load:', error);
+          return '';
         }
       })(),
     ]);
 
-    // Build memory context
-    const memoryContext = buildMemoryContext(memories);
-    const memoryPrompt = formatMemoryForPrompt(memoryContext);
+    // Build memory context (legacy for OpenAI, native for Claude)
+    const isClaudeModel = modelId.startsWith('claude');
+    const memoryPrompt = isClaudeModel 
+      ? claudeMemoryContext 
+      : formatMemoryForPrompt(buildMemoryContext(memories));
 
     // Build system prompt with brand context, RAG, and memory
     // Use flow outline prompt if in flow mode

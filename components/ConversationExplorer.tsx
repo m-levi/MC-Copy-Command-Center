@@ -1,7 +1,7 @@
 'use client';
 
 import { ConversationWithStatus, ConversationQuickAction, OrganizationMember } from '@/types';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import ConversationCard from './ConversationCard';
 import ConversationSearch from './ConversationSearch';
 import { FilterType } from './ConversationFilterDropdown';
@@ -69,19 +69,24 @@ export default function ConversationExplorer({
     };
   }, [isOpen]);
 
-  // Filter conversations based on search
-  const filteredConversations = conversations.filter(conv => {
-    const matchesSearch = !searchQuery || 
-      conv.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      conv.last_message_preview?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      conv.created_by_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    return matchesSearch;
-  });
+  // Memoize filtered conversations to avoid unnecessary re-filters
+  const filteredConversations = useMemo(() => {
+    return conversations.filter(conv => {
+      const matchesSearch = !searchQuery || 
+        conv.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        conv.last_message_preview?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        conv.created_by_name?.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      return matchesSearch;
+    });
+  }, [conversations, searchQuery]);
 
-  // Separate pinned and unpinned
-  const pinnedConversations = filteredConversations.filter(c => pinnedConversationIds.includes(c.id));
-  const unpinnedConversations = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
+  // Memoize pinned/unpinned separation
+  const { pinnedConversations, unpinnedConversations } = useMemo(() => {
+    const pinned = filteredConversations.filter(c => pinnedConversationIds.includes(c.id));
+    const unpinned = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
+    return { pinnedConversations: pinned, unpinnedConversations: unpinned };
+  }, [filteredConversations, pinnedConversationIds]);
 
   if (!isOpen) return null;
 

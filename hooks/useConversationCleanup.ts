@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { trackEvent } from '@/lib/analytics';
+import { logger } from '@/lib/logger';
 
 interface UseConversationCleanupOptions {
   conversationId: string | null;
@@ -41,7 +42,7 @@ export function useConversationCleanup({
     try {
       // NEVER auto-delete flow conversations or child conversations
       if (isFlow || isChild) {
-        console.log('[Cleanup] Skipping auto-delete for flow/child conversation:', targetConversationId);
+        logger.log('[Cleanup] Skipping auto-delete for flow/child conversation:', targetConversationId);
         return false;
       }
 
@@ -52,12 +53,12 @@ export function useConversationCleanup({
         .eq('conversation_id', targetConversationId);
       
       if (countError) {
-        console.error('[Cleanup] Error checking message count:', countError);
+        logger.error('[Cleanup] Error checking message count:', countError);
         return false;
       }
       
       if (count === 0) {
-        console.log('[Cleanup] Conversation is empty in database, auto-deleting:', targetConversationId);
+        logger.log('[Cleanup] Conversation is empty in database, auto-deleting:', targetConversationId);
         
         const { error: deleteError } = await supabase
           .from('conversations')
@@ -71,15 +72,15 @@ export function useConversationCleanup({
           });
           return true;
         } else {
-          console.error('[Cleanup] Error deleting conversation:', deleteError);
+          logger.error('[Cleanup] Error deleting conversation:', deleteError);
           return false;
         }
       } else {
-        console.log(`[Cleanup] Conversation has ${count} messages, NOT deleting`, targetConversationId);
+        logger.log(`[Cleanup] Conversation has ${count} messages, NOT deleting`, targetConversationId);
         return false;
       }
     } catch (error) {
-      console.error('[Cleanup] Error during conversation cleanup:', error);
+      logger.error('[Cleanup] Error during conversation cleanup:', error);
       return false;
     }
   };
@@ -137,7 +138,7 @@ export async function shouldDeleteEmptyConversation(
     .eq('conversation_id', conversationId);
   
   if (error) {
-    console.error('[Cleanup] Error checking message count:', error);
+    logger.error('[Cleanup] Error checking message count:', error);
     return false;
   }
 

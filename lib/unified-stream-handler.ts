@@ -52,9 +52,9 @@ async function getClient(provider: AIProvider) {
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     return new Anthropic({ 
       apiKey: process.env.ANTHROPIC_API_KEY!,
-      // Add beta headers for web search and memory tools
+      // Add beta headers for web search tool
       defaultHeaders: {
-        'anthropic-beta': 'web-search-2025-03-05,context-management-2025-06-27'
+        'anthropic-beta': 'web-search-2025-03-05'
       }
     });
   }
@@ -179,6 +179,15 @@ async function createStream(
     
     tools.push(searchTool);
     
+    // DISABLED: Native memory tool causes stream to stop without generating response
+    // TODO: Re-enable once Anthropic fixes the tool_use/tool_result handling
+    // const memoryTool: any = {
+    //   type: 'memory_20250818',
+    //   name: 'memory',
+    // };
+    // tools.push(memoryTool);
+    // console.log(`[${provider.toUpperCase()}] Native memory tool enabled`);
+    
     return await client.messages.create({
       model: providerModel,
       max_tokens: 4096,
@@ -204,6 +213,7 @@ function parseChunk(chunk: any, provider: AIProvider): {
   thinkingEnd?: boolean;
   isThinking?: boolean;
   toolUse?: string;
+  toolUseInput?: any;
   toolResult?: string;
   toolResultContent?: string;
 } {
@@ -236,9 +246,11 @@ function parseChunk(chunk: any, provider: AIProvider): {
       return { thinkingEnd: true };
     }
     
-    // Add server_tool_use detection
+    // Add server_tool_use detection (web search)
     if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'server_tool_use') {
-      return { toolUse: chunk.content_block.name };
+      const toolName = chunk.content_block.name;
+      const toolInput = chunk.content_block.input;
+      return { toolUse: toolName, toolUseInput: toolInput };
     }
     
     // Add web_search_tool_result detection - capture the full result
@@ -403,13 +415,25 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         let webSearchContent = ''; // Track content from web searches (if directly available)
         
         for await (const chunk of stream) {
+          // Log chunk type for debugging (Anthropic only)
+          if (provider === 'anthropic' && chunk.type) {
+            if (chunk.type !== 'content_block_delta' && chunk.type !== 'message_delta') {
+              console.log(`[${provider.toUpperCase()}] Chunk type: ${chunk.type}${chunk.content_block?.type ? ` | content_block.type: ${chunk.content_block.type}` : ''}`);
+            }
+          }
+          
           const parsed = parseChunk(chunk, provider);
           
           // Handle tool usage
           if (parsed.toolUse) {
             console.log(`[${provider.toUpperCase()}] Tool use started: ${parsed.toolUse}`);
+            
             controller.enqueue(encoder.encode(`[TOOL:${parsed.toolUse}:START]`));
-            controller.enqueue(encoder.encode('[STATUS:searching_web]'));
+            
+            // Only show "searching_web" status for web search
+            if (parsed.toolUse === 'web_search') {
+              controller.enqueue(encoder.encode('[STATUS:searching_web]'));
+            }
             continue;
           }
           
@@ -422,6 +446,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           
           if (parsed.toolResult) {
             console.log(`[${provider.toUpperCase()}] Tool result received: ${parsed.toolResult}`);
+            
             controller.enqueue(encoder.encode(`[TOOL:${parsed.toolResult}:END]`));
             controller.enqueue(encoder.encode('[STATUS:analyzing_brand]'));
             

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
+import { logger } from '@/lib/logger';
 import { 
   PlusIcon, 
   TrashIcon, 
@@ -59,6 +60,20 @@ export default function MemorySettings({ conversationId, onClose }: MemorySettin
     loadMemories();
   }, [conversationId]);
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
   const loadMemories = async () => {
     try {
       const { data, error } = await supabase
@@ -71,7 +86,7 @@ export default function MemorySettings({ conversationId, onClose }: MemorySettin
       if (error) throw error;
       setMemories(data || []);
     } catch (error) {
-      console.error('Error loading memories:', error);
+      logger.error('Error loading memories:', error);
       toast.error('Failed to load memories');
     } finally {
       setLoading(false);
@@ -121,7 +136,7 @@ export default function MemorySettings({ conversationId, onClose }: MemorySettin
       setEditCategory('fact');
       await loadMemories();
     } catch (error: any) {
-      console.error('Error saving memory:', error);
+      logger.error('Error saving memory:', error);
       if (error.code === '23505') {
         toast.error('A memory with this key already exists');
       } else {
@@ -143,7 +158,7 @@ export default function MemorySettings({ conversationId, onClose }: MemorySettin
       toast.success('Memory deleted');
       await loadMemories();
     } catch (error) {
-      console.error('Error deleting memory:', error);
+      logger.error('Error deleting memory:', error);
       toast.error('Failed to delete memory');
     }
   };

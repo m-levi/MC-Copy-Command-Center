@@ -15,11 +15,12 @@ interface VirtualizedMessageListProps {
   onEdit: (index: number, newContent: string) => void;
   onReaction: (messageId: string, reaction: 'thumbs_up' | 'thumbs_down') => void;
   aiStatus?: AIStatus;
+  starredEmailContents?: Set<string>; // Set of starred email content strings for O(1) lookup
 }
 
 const ESTIMATED_MESSAGE_HEIGHT = 400; // Estimated average message height in pixels
 const BUFFER_SIZE = 5; // Number of messages to render above/below viewport
-const VIRTUALIZATION_THRESHOLD = 50; // Only virtualize if more than this many messages
+const VIRTUALIZATION_THRESHOLD = 20; // Only virtualize if more than this many messages
 
 export default function VirtualizedMessageList({
   messages,
@@ -32,6 +33,7 @@ export default function VirtualizedMessageList({
   onEdit,
   onReaction,
   aiStatus = 'idle',
+  starredEmailContents = new Set(),
 }: VirtualizedMessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: messages.length });
@@ -102,28 +104,46 @@ export default function VirtualizedMessageList({
     };
   }, [calculateVisibleRange, shouldVirtualize]);
 
-  // Measure message heights
+  // Measure message heights with debouncing to prevent ResizeObserver loop limit errors
   useEffect(() => {
     if (!shouldVirtualize) return;
 
-    const observer = new ResizeObserver((entries) => {
-      const newHeights = new Map(messageHeights);
-      let changed = false;
+    let rafId: number | null = null;
+    let pendingUpdates = new Map<string, number>();
 
+    const observer = new ResizeObserver((entries) => {
+      // Batch updates using requestAnimationFrame to prevent loop limit errors
       entries.forEach((entry) => {
         const messageId = entry.target.getAttribute('data-message-id');
         if (messageId) {
-          const height = entry.contentRect.height;
-          if (newHeights.get(messageId) !== height) {
-            newHeights.set(messageId, height);
-            changed = true;
-          }
+          pendingUpdates.set(messageId, entry.contentRect.height);
         }
       });
 
-      if (changed) {
-        setMessageHeights(newHeights);
-        calculateVisibleRange();
+      // Debounce updates to max 30fps (every ~33ms)
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          const newHeights = new Map(messageHeights);
+          let changed = false;
+
+          pendingUpdates.forEach((height, messageId) => {
+            if (newHeights.get(messageId) !== height) {
+              newHeights.set(messageId, height);
+              changed = true;
+            }
+          });
+
+          if (changed) {
+            setMessageHeights(newHeights);
+            // Use setTimeout to defer calculateVisibleRange and prevent loop
+            setTimeout(() => {
+              calculateVisibleRange();
+            }, 0);
+          }
+
+          pendingUpdates.clear();
+          rafId = null;
+        });
       }
     });
 
@@ -133,6 +153,9 @@ export default function VirtualizedMessageList({
     });
 
     return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
       observer.disconnect();
     };
   }, [messages, shouldVirtualize, calculateVisibleRange, messageHeights]);
@@ -216,6 +239,7 @@ export default function VirtualizedMessageList({
                   message={message}
                   brandId={brandId}
                   mode={mode}
+                  isStarred={message.role === 'assistant' ? starredEmailContents.has(message.content) : false}
                   onRegenerate={
                     message.role === 'assistant' &&
                     actualIndex === messages.length - 1 &&

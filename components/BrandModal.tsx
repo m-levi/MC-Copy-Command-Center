@@ -2,6 +2,7 @@
 
 import { Brand } from '@/types';
 import { useState, useEffect, useRef } from 'react';
+import { logger } from '@/lib/logger';
 
 interface BrandModalProps {
   isOpen: boolean;
@@ -83,7 +84,7 @@ export default function BrandModal({ isOpen, onClose, onSave, brand }: BrandModa
           size: file.size,
         });
       } catch (error) {
-        console.error('Error reading file:', error);
+        logger.error('Error reading file:', error);
         setAiError(`Failed to read file ${file.name}`);
       }
     }
@@ -172,7 +173,7 @@ export default function BrandModal({ isOpen, onClose, onSave, brand }: BrandModa
       setFillMode('manual');
       setAiError('');
     } catch (error) {
-      console.error('AI extraction error:', error);
+      logger.error('AI extraction error:', error);
       setAiError(error instanceof Error ? error.message : 'Failed to extract brand information');
     } finally {
       setAiLoading(false);
