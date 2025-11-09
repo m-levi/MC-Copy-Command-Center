@@ -1,6 +1,6 @@
 'use client';
 
-import { Message, ConversationMode } from '@/types';
+import { Message, ConversationMode, AIStatus } from '@/types';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import ChatMessage from './ChatMessage';
 
@@ -14,7 +14,7 @@ interface VirtualizedMessageListProps {
   onRegenerateSection: (sectionType: string, sectionTitle: string) => void;
   onEdit: (index: number, newContent: string) => void;
   onReaction: (messageId: string, reaction: 'thumbs_up' | 'thumbs_down') => void;
-  aiStatus?: string;
+  aiStatus?: AIStatus;
 }
 
 const ESTIMATED_MESSAGE_HEIGHT = 400; // Estimated average message height in pixels

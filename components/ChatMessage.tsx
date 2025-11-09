@@ -1,6 +1,6 @@
 'use client';
 
-import { Message, ConversationMode } from '@/types';
+import { Message, ConversationMode, AIStatus } from '@/types';
 import { useState, useEffect, memo } from 'react';
 import MessageEditor from './MessageEditor';
 import EmailPreview from './EmailPreview';
@@ -20,7 +20,7 @@ interface ChatMessageProps {
   onReaction?: (reaction: 'thumbs_up' | 'thumbs_down') => void;
   isRegenerating?: boolean;
   isStreaming?: boolean;
-  aiStatus?: string;
+  aiStatus?: AIStatus;
 }
 
 // Memoized component to prevent unnecessary re-renders

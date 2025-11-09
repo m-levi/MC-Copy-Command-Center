@@ -2,11 +2,10 @@
 
 import { useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
-
-type AIStatus = 'idle' | 'thinking' | 'searching_web' | 'analyzing_brand' | 'crafting_subject' | 'writing_hero' | 'developing_body' | 'creating_cta' | 'finalizing';
+import { AIStatus } from '@/types';
 
 interface ThoughtProcessProps {
-  thinking: string;
+  thinking?: string;
   isStreaming?: boolean;
   aiStatus?: AIStatus;
 }
