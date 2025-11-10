@@ -35,7 +35,6 @@ CREATE POLICY "Members can view organization messages"
       INNER JOIN organization_members om ON om.organization_id = b.organization_id
       WHERE c.id = messages.conversation_id
         AND om.user_id = auth.uid()
-        AND om.status = 'active'
     )
   );
 
@@ -51,43 +50,36 @@ CREATE POLICY "Members can insert organization messages"
       INNER JOIN organization_members om ON om.organization_id = b.organization_id
       WHERE c.id = conversation_id
         AND om.user_id = auth.uid()
-        AND om.status = 'active'
     )
   );
 
--- UPDATE policy: Users can update their own messages
-CREATE POLICY "Users can update own messages"
+-- UPDATE policy: Organization members can update messages in their conversations
+CREATE POLICY "Members can update organization messages"
   ON messages
   FOR UPDATE
   USING (
-    user_id = auth.uid()
-    OR EXISTS (
+    EXISTS (
       SELECT 1 
       FROM conversations c
       INNER JOIN brands b ON b.id = c.brand_id
       INNER JOIN organization_members om ON om.organization_id = b.organization_id
       WHERE c.id = messages.conversation_id
         AND om.user_id = auth.uid()
-        AND om.role = 'admin'
-        AND om.status = 'active'
     )
   );
 
--- DELETE policy: Users can delete their own messages or admins can delete any
-CREATE POLICY "Users can delete own messages or admins can delete any"
+-- DELETE policy: Organization members can delete messages in their conversations
+CREATE POLICY "Members can delete organization messages"
   ON messages
   FOR DELETE
   USING (
-    user_id = auth.uid()
-    OR EXISTS (
+    EXISTS (
       SELECT 1 
       FROM conversations c
       INNER JOIN brands b ON b.id = c.brand_id
       INNER JOIN organization_members om ON om.organization_id = b.organization_id
       WHERE c.id = messages.conversation_id
         AND om.user_id = auth.uid()
-        AND om.role = 'admin'
-        AND om.status = 'active'
     )
   );
 
@@ -104,8 +96,8 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 -- Index to speed up conversation_id lookups in RLS policies
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
 
--- Index to speed up user_id lookups
-CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
+-- Index to speed up role lookups
+CREATE INDEX IF NOT EXISTS idx_messages_role ON messages(role);
 
 -- ============================================================================
 -- VERIFICATION QUERIES (run these separately to verify the fix)
@@ -120,10 +112,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
 -- Expected output:
 -- policyname                                    | cmd
 -- ---------------------------------------------+--------
--- Users can delete own messages or admins...   | DELETE
+-- Members can delete organization messages      | DELETE
 -- Members can insert organization messages      | INSERT
 -- Members can view organization messages        | SELECT
--- Users can update own messages                 | UPDATE
+-- Members can update organization messages      | UPDATE
 
 COMMIT;
 
