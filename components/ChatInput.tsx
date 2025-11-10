@@ -4,11 +4,6 @@ import { useState, useRef, KeyboardEvent, useEffect, useCallback } from 'react';
 import { PROMPT_TEMPLATES, QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
 import { ConversationMode, EmailType } from '@/types';
 import VoiceInput from './VoiceInput';
-import dynamic from 'next/dynamic';
-import type MarkdownIt from 'markdown-it';
-
-// Dynamically import the markdown editor to avoid SSR issues
-const MdEditor = dynamic(() => import('react-markdown-editor-lite'), { ssr: false });
 
 interface ChatInputProps {
   onSend: (message: string) => void;
