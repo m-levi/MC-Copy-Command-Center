@@ -134,24 +134,10 @@ export async function canManageBrands(userId: string): Promise<boolean> {
 export async function getOrganizationMembers(orgId: string) {
   const supabase = await createClient();
   
-  const { data, error } = await supabase
+  // Fetch members without nested profile select (to avoid foreign key issues)
+  const { data: members, error } = await supabase
     .from('organization_members')
-    .select(`
-      id,
-      organization_id,
-      user_id,
-      role,
-      invited_by,
-      joined_at,
-      created_at,
-      profile:profiles (
-        user_id,
-        email,
-        full_name,
-        avatar_url,
-        created_at
-      )
-    `)
+    .select('id, organization_id, user_id, role, invited_by, joined_at, created_at')
     .eq('organization_id', orgId)
     .order('joined_at', { ascending: false });
 
@@ -159,7 +145,27 @@ export async function getOrganizationMembers(orgId: string) {
     throw error;
   }
 
-  return data;
+  if (!members) {
+    return [];
+  }
+
+  // Fetch profiles separately for each member
+  const membersWithProfiles = await Promise.all(
+    members.map(async (member) => {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('user_id, email, full_name, avatar_url, created_at')
+        .eq('user_id', member.user_id)
+        .single();
+      
+      return {
+        ...member,
+        profile: profile || null
+      };
+    })
+  );
+
+  return membersWithProfiles;
 }
 
 /**

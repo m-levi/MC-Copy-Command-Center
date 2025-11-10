@@ -734,29 +734,31 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         .single();
 
       if (memberData) {
+        // Fetch members without nested profile select (to avoid foreign key issues)
         const { data: members } = await supabase
           .from('organization_members')
-          .select(`
-            id,
-            organization_id,
-            user_id,
-            role,
-            invited_by,
-            joined_at,
-            created_at,
-            profile:profiles (
-              user_id,
-              email,
-              full_name,
-              avatar_url,
-              created_at
-            )
-          `)
+          .select('id, organization_id, user_id, role, invited_by, joined_at, created_at')
           .eq('organization_id', memberData.organization_id)
           .order('joined_at', { ascending: false });
 
         if (members) {
-          setTeamMembers(members as unknown as OrganizationMember[]);
+          // Fetch profiles separately for each member
+          const membersWithProfiles = await Promise.all(
+            members.map(async (member) => {
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('user_id, email, full_name, avatar_url, created_at')
+                .eq('user_id', member.user_id)
+                .single();
+              
+              return {
+                ...member,
+                profile: profile || null
+              };
+            })
+          );
+
+          setTeamMembers(membersWithProfiles as unknown as OrganizationMember[]);
         }
       }
 
