@@ -4,7 +4,36 @@
  * For generating individual emails within a multi-email automation flow
  */
 
-export const FLOW_EMAIL_PROMPT_DESIGN = `You are writing Email {{EMAIL_SEQUENCE}} of {{TOTAL_EMAILS}} in a {{FLOW_NAME}} automation.
+export const FLOW_EMAIL_PROMPT_DESIGN = `⚠️ CRITICAL INSTRUCTION - READ FIRST ⚠️
+
+Your response has TWO COMPLETELY SEPARATE parts:
+
+1. **THINKING BLOCK (Extended Thinking)**: Do ALL strategic analysis, planning, research, and reasoning here
+   - Use your thinking block for complete strategic analysis
+   - This content is HIDDEN from the user
+
+2. **MAIN RESPONSE**: ONLY the final formatted email copy, wrapped in <email_copy> tags
+
+**FORMAT YOUR RESPONSE EXACTLY LIKE THIS:**
+
+<email_copy>
+HERO SECTION:
+Headline: [Your headline]
+...
+
+[Your complete email structure]
+</email_copy>
+
+**CRITICAL RULES:**
+- Everything inside <email_copy> tags = visible to user
+- Everything outside <email_copy> tags = hidden (thinking)
+- NEVER put strategy, analysis, or explanations inside <email_copy> tags
+- In follow-up messages, ALWAYS wrap your revised email in <email_copy> tags
+- If editing sections, wrap the ENTIRE email (not just the changed part) in <email_copy> tags
+
+---
+
+You are writing Email {{EMAIL_SEQUENCE}} of {{TOTAL_EMAILS}} in a {{FLOW_NAME}} automation.
 
 <brand_info>
 {{BRAND_INFO}}
@@ -96,7 +125,34 @@ CRITICAL: Follow this structure EXACTLY. Do not deviate from this format.
 
 Write the email now.`;
 
-export const FLOW_EMAIL_PROMPT_LETTER = `You are writing Email {{EMAIL_SEQUENCE}} of {{TOTAL_EMAILS}} in a {{FLOW_NAME}} automation.
+export const FLOW_EMAIL_PROMPT_LETTER = `⚠️ CRITICAL INSTRUCTION - READ FIRST ⚠️
+
+Your response has TWO COMPLETELY SEPARATE parts:
+
+1. **THINKING BLOCK (Extended Thinking)**: Do ALL strategic analysis, planning, research, and reasoning here
+   - Use your thinking block for complete strategic analysis
+   - This content is HIDDEN from the user
+
+2. **MAIN RESPONSE**: ONLY the final formatted email copy, wrapped in <email_copy> tags
+
+**FORMAT YOUR RESPONSE EXACTLY LIKE THIS:**
+
+<email_copy>
+EMAIL SUBJECT LINE: [Your subject]
+
+[Your letter-style email content]
+</email_copy>
+
+**CRITICAL RULES:**
+- Everything inside <email_copy> tags = visible to user
+- Everything outside <email_copy> tags = hidden (thinking)
+- NEVER put strategy, analysis, or explanations inside <email_copy> tags
+- In follow-up messages, ALWAYS wrap your revised email in <email_copy> tags
+- If editing, wrap the ENTIRE email (not just the changed part) in <email_copy> tags
+
+---
+
+You are writing Email {{EMAIL_SEQUENCE}} of {{TOTAL_EMAILS}} in a {{FLOW_NAME}} automation.
 
 <brand_info>
 {{BRAND_INFO}}
