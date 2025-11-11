@@ -137,7 +137,12 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         const brandInfo = buildBrandInfo(brandContext);
         const contextInfo = buildContextInfo(conversationContext);
         
-        const { systemPrompt: v2SystemPrompt, userPromptTemplate } = buildStandardEmailPromptV2({
+        const {
+          systemPrompt: v2SystemPrompt,
+          userPromptTemplate,
+          brandVoiceGuidelines,
+          additionalContext,
+        } = buildStandardEmailPromptV2({
           brandInfo,
           ragContext,
           contextInfo,
@@ -153,7 +158,34 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         console.log('[Chat API] Filling COPY_BRIEF with user message:', copyBrief.substring(0, 100) + '...');
         
         // Fill in the COPY_BRIEF placeholder with actual user message
-        const filledUserPrompt = userPromptTemplate.replace('{{COPY_BRIEF}}', copyBrief);
+        let filledUserPrompt = userPromptTemplate.replace(/{{COPY_BRIEF}}/g, copyBrief || 'No copy brief provided.');
+
+        // Safety: Ensure no placeholders remain
+        if (filledUserPrompt.includes('{{BRAND_VOICE_GUIDELINES}}')) {
+          filledUserPrompt = filledUserPrompt.replace(/{{BRAND_VOICE_GUIDELINES}}/g, brandVoiceGuidelines || 'No style guide provided.');
+        }
+
+        if (filledUserPrompt.includes('{{ADDITIONAL_CONTEXT}}')) {
+          filledUserPrompt = filledUserPrompt.replace(/{{ADDITIONAL_CONTEXT}}/g, additionalContext || '');
+        }
+
+        if (filledUserPrompt.includes('{{')) {
+          console.warn('[Chat API] ⚠️ Placeholder(s) still present after replacement. Applying fallbacks.', {
+            hasCopyBrief: !!copyBrief,
+            hasStyleGuide: !!brandVoiceGuidelines,
+            hasAdditionalContext: !!additionalContext,
+          });
+
+          filledUserPrompt = filledUserPrompt
+            .replace(/{{COPY_BRIEF}}/g, copyBrief || 'No copy brief provided.')
+            .replace(/{{BRAND_VOICE_GUIDELINES}}/g, brandVoiceGuidelines || 'No style guide provided.')
+            .replace(/{{ADDITIONAL_CONTEXT}}/g, additionalContext || '');
+        }
+
+        console.log('[Chat API] Filled prompt preview:', filledUserPrompt.substring(0, 200));
+        if (filledUserPrompt.includes('{{')) {
+          console.warn('[Chat API] ⚠️ WARNING: Placeholders still detected in filled prompt.');
+        }
         
         // Replace the first (only) user message with the filled prompt
         processedMessages = [{ ...userMessages[0], content: filledUserPrompt }];

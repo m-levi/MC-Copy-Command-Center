@@ -147,6 +147,8 @@ export function buildStandardEmailPrompt(context: PromptContext): string {
 export function buildStandardEmailPromptV2(context: PromptContext): {
   systemPrompt: string;
   userPromptTemplate: string;
+  brandVoiceGuidelines: string;
+  additionalContext: string;
 } {
   // Extract copywriting style guide for BRAND_VOICE_GUIDELINES
   // IMPORTANT: Only extract the style guide, not the website URL that comes after
@@ -194,6 +196,8 @@ ${context.memoryContext ? `<memory_context>\n${context.memoryContext}\n</memory_
   return {
     systemPrompt: STANDARD_EMAIL_SYSTEM_PROMPT,
     userPromptTemplate,
+    brandVoiceGuidelines,
+    additionalContext,
   };
 }
 
