@@ -109,10 +109,10 @@ function formatMessages(
 function getProviderModelName(modelId: string, provider: AIProvider): string {
   if (provider === 'anthropic') {
     const modelMap: Record<string, string> = {
-      'claude-4.5-sonnet': 'claude-sonnet-4-20250514',
+      'claude-4.5-sonnet': 'claude-sonnet-4-5-20250929', // Updated to new model for standard design emails
       'claude-opus-3.5': 'claude-opus-4-20250514',
     };
-    return modelMap[modelId] || 'claude-sonnet-4-20250514';
+    return modelMap[modelId] || 'claude-sonnet-4-5-20250929';
   }
   return modelId; // OpenAI uses direct model IDs
 }
@@ -190,13 +190,14 @@ async function createStream(
     
     return await client.messages.create({
       model: providerModel,
-      max_tokens: 4096,
+      max_tokens: 20000, // Increased for comprehensive email copy generation
+      temperature: 1, // Higher temperature for more creative, varied output
       system: systemPrompt || undefined,
       messages: formattedMessages,
       stream: true,
       thinking: {
         type: 'enabled',
-        budget_tokens: 2000,
+        budget_tokens: 10000, // Increased for deeper strategic analysis
       },
       tools,
     });
@@ -515,7 +516,15 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           }
         }
         
-        console.log(`[${provider.toUpperCase()}] Stream complete. Total: ${chunkCount} chunks, ${fullResponse.length} chars`);
+        console.log(`[${provider.toUpperCase()}] Stream complete. Total: ${chunkCount} chunks, ${fullResponse.length} chars, ${thinkingContent.length} thinking chars`);
+        
+        // Log final content lengths for debugging
+        console.log(`[${provider.toUpperCase()}] Final content breakdown:`, {
+          textContent: fullResponse.length,
+          thinkingContent: thinkingContent.length,
+          webSearchContent: webSearchContent.length,
+          totalChunks: chunkCount
+        });
         
         // Save memory instructions
         if (conversationId && fullResponse) {

@@ -10,7 +10,7 @@ import {
 } from '@/lib/conversation-memory-store';
 import { loadMemoryContext as loadClaudeMemoryContext } from '@/lib/claude-memory-tool';
 import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
-import { buildSystemPrompt } from '@/lib/chat-prompts';
+import { buildSystemPrompt, buildStandardEmailPromptV2, buildBrandInfo, buildContextInfo } from '@/lib/chat-prompts';
 import { handleUnifiedStream } from '@/lib/unified-stream-handler';
 
 // Temporarily disable edge runtime to debug memory loading issues
@@ -111,6 +111,8 @@ export async function POST(req: Request) {
     // Build system prompt with brand context, RAG, and memory
     // Use flow outline prompt if in flow mode
     let systemPrompt: string;
+    let processedMessages = messages;
+    
     if (isFlowMode && flowType) {
       // Build brand info string for flow mode
       const brandInfo = `
@@ -122,8 +124,60 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
       `.trim();
       
       systemPrompt = buildFlowOutlinePrompt(flowType as FlowType, brandInfo, ragContext);
+    } else if (emailType === 'design' && conversationMode === 'email_copy' && !regenerateSection) {
+      // NEW: Use V2 prompt builder for standard design emails
+      // IMPORTANT: Only use V2 for FIRST message, not follow-ups
+      const userMessages = messages.filter((m: Message) => m.role === 'user');
+      const isFirstMessage = userMessages.length === 1;
+      
+      if (isFirstMessage) {
+        // First message - use V2 prompt with full template
+        console.log('[Chat API] Using new V2 prompt system for standard design email (FIRST MESSAGE)');
+        
+        const brandInfo = buildBrandInfo(brandContext);
+        const contextInfo = buildContextInfo(conversationContext);
+        
+        const { systemPrompt: v2SystemPrompt, userPromptTemplate } = buildStandardEmailPromptV2({
+          brandInfo,
+          ragContext,
+          contextInfo,
+          memoryContext: memoryPrompt,
+          websiteUrl: brandContext?.website_url
+        });
+        
+        systemPrompt = v2SystemPrompt;
+        
+        // Get the first user message (the copy brief)
+        const copyBrief = userMessages[0]?.content || '';
+        
+        console.log('[Chat API] Filling COPY_BRIEF with user message:', copyBrief.substring(0, 100) + '...');
+        
+        // Fill in the COPY_BRIEF placeholder with actual user message
+        const filledUserPrompt = userPromptTemplate.replace('{{COPY_BRIEF}}', copyBrief);
+        
+        // Replace the first (only) user message with the filled prompt
+        processedMessages = [{ ...userMessages[0], content: filledUserPrompt }];
+        
+        console.log('[Chat API] Processed first message with filled user prompt');
+      } else {
+        // Follow-up message - use old system with full conversation context
+        console.log('[Chat API] Using standard prompt system for follow-up message (preserving conversation history)');
+        
+        systemPrompt = buildSystemPrompt(brandContext, ragContext, {
+          regenerateSection,
+          conversationContext,
+          conversationMode,
+          memoryContext: memoryPrompt,
+          emailType
+        });
+        
+        // Keep all messages as-is for follow-ups
+        processedMessages = messages;
+        
+        console.log('[Chat API] Sending', messages.length, 'messages for context');
+      }
     } else {
-      // Use new centralized prompt builder
+      // Use existing centralized prompt builder for other modes
       systemPrompt = buildSystemPrompt(brandContext, ragContext, {
         regenerateSection,
         conversationContext,
@@ -140,7 +194,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
     try {
       return await retryWithBackoff(
         () => handleUnifiedStream({
-          messages,
+          messages: processedMessages,
           modelId,
           systemPrompt,
           provider: model.provider,
@@ -158,7 +212,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         const fallbackModel = model.provider === 'openai' ? 'claude-4.5-sonnet' : 'gpt-5';
         
         return await handleUnifiedStream({
-          messages,
+          messages: processedMessages,
           modelId: fallbackModel,
           systemPrompt,
           provider: fallbackProvider,

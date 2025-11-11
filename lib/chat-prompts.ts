@@ -5,7 +5,11 @@
 
 import { PLANNING_MODE_PROMPT } from './prompts/planning-mode.prompt';
 import { LETTER_EMAIL_PROMPT } from './prompts/letter-email.prompt';
-import { STANDARD_EMAIL_PROMPT } from './prompts/standard-email.prompt';
+import { 
+  STANDARD_EMAIL_PROMPT, 
+  STANDARD_EMAIL_SYSTEM_PROMPT,
+  STANDARD_EMAIL_USER_PROMPT 
+} from './prompts/standard-email.prompt';
 import { SECTION_REGENERATION_PROMPTS } from './prompts/section-regeneration.prompt';
 
 export interface PromptContext {
@@ -117,6 +121,9 @@ export function buildLetterEmailPrompt(context: PromptContext): string {
 
 /**
  * Standard email copy prompt (design emails)
+ * 
+ * NEW: Returns an object with separate system and user prompts
+ * to support the new API-first prompt architecture
  */
 export function buildStandardEmailPrompt(context: PromptContext): string {
   const hostname = getHostnameFromUrl(context.websiteUrl);
@@ -131,6 +138,63 @@ export function buildStandardEmailPrompt(context: PromptContext): string {
     WEBSITE_URL: context.websiteUrl || 'the brand website',
     EMAIL_BRIEF: '{{EMAIL_BRIEF}}', // This will be filled in by the system when used
   });
+}
+
+/**
+ * NEW: Build standard email prompt with separate system and user prompts
+ * This is the new API-first approach that better aligns with Claude's API
+ */
+export function buildStandardEmailPromptV2(context: PromptContext): {
+  systemPrompt: string;
+  userPromptTemplate: string;
+} {
+  // Extract copywriting style guide for BRAND_VOICE_GUIDELINES
+  // IMPORTANT: Only extract the style guide, not the website URL that comes after
+  let brandVoiceGuidelines = 'No style guide provided.';
+  
+  if (context.brandInfo.includes('Copywriting Style Guide:')) {
+    const afterStyleGuide = context.brandInfo.split('Copywriting Style Guide:')[1];
+    
+    // Check if there's a "Brand Website:" section after the style guide
+    if (afterStyleGuide && afterStyleGuide.includes('Brand Website:')) {
+      // Extract only up to "Brand Website:"
+      brandVoiceGuidelines = afterStyleGuide.split('Brand Website:')[0].trim();
+    } else if (afterStyleGuide) {
+      // No website URL, take everything
+      brandVoiceGuidelines = afterStyleGuide.trim();
+    }
+    
+    // Fallback if extraction failed
+    if (!brandVoiceGuidelines) {
+      brandVoiceGuidelines = 'No style guide provided.';
+    }
+  }
+
+  // Build ADDITIONAL_CONTEXT from all available context
+  const additionalContext = `
+<brand_details>
+${context.brandInfo}
+</brand_details>
+
+${context.ragContext ? `<rag_context>\n${context.ragContext}\n</rag_context>` : ''}
+
+${context.contextInfo ? `<conversation_context>\n${context.contextInfo}\n</conversation_context>` : ''}
+
+${context.memoryContext ? `<memory_context>\n${context.memoryContext}\n</memory_context>` : ''}
+  `.trim();
+
+  // Build user prompt template with placeholders
+  // COPY_BRIEF will be filled in with the actual user message when sending to API
+  const userPromptTemplate = replacePlaceholders(STANDARD_EMAIL_USER_PROMPT, {
+    COPY_BRIEF: '{{COPY_BRIEF}}', // Placeholder for actual email brief from user
+    BRAND_VOICE_GUIDELINES: brandVoiceGuidelines,
+    ADDITIONAL_CONTEXT: additionalContext,
+  });
+
+  return {
+    systemPrompt: STANDARD_EMAIL_SYSTEM_PROMPT,
+    userPromptTemplate,
+  };
 }
 
 /**

@@ -91,9 +91,21 @@ const cleanEmailContentFinal = (content: string): string => {
   }
   
   // Approach 3: Extract only content starting with email structure markers
+  // IMPORTANT: Preserve leading markdown formatting (**, *, ##, etc.)
   const emailStartMatch = cleaned.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)[\s\S]*/i);
-  if (emailStartMatch) {
-    cleaned = emailStartMatch[0];
+  if (emailStartMatch && emailStartMatch.index !== undefined) {
+    let startPos = emailStartMatch.index;
+    
+    // Check for leading markdown before the marker
+    const beforeMarker = cleaned.substring(Math.max(0, startPos - 10), startPos);
+    const leadingMarkdownMatch = beforeMarker.match(/(\*\*|\*|##+)\s*$/);
+    
+    if (leadingMarkdownMatch) {
+      // Adjust start position to include leading markdown
+      startPos = startPos - leadingMarkdownMatch[0].length;
+    }
+    
+    cleaned = cleaned.substring(startPos);
   }
   
   // Approach 4: Remove ALL strategy headers (comprehensive list)
@@ -151,9 +163,21 @@ const cleanEmailContentFinal = (content: string): string => {
   cleaned = cleaned.replace(/\[STRATEGY:START\]/gi, '');
   
   // Approach 9: Remove any text before the first email marker as a final safety
+  // IMPORTANT: Preserve leading markdown formatting (**, *, ##, etc.)
   const finalMarkerMatch = cleaned.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)/i);
   if (finalMarkerMatch && finalMarkerMatch.index !== undefined && finalMarkerMatch.index > 0) {
-    cleaned = cleaned.substring(finalMarkerMatch.index);
+    let cutPosition = finalMarkerMatch.index;
+    
+    // Check for leading markdown before the marker
+    const beforeMarker = cleaned.substring(Math.max(0, cutPosition - 10), cutPosition);
+    const leadingMarkdownMatch = beforeMarker.match(/(\*\*|\*|##+)\s*$/);
+    
+    if (leadingMarkdownMatch) {
+      // Adjust cut position to include leading markdown
+      cutPosition = cutPosition - leadingMarkdownMatch[0].length;
+    }
+    
+    cleaned = cleaned.substring(cutPosition);
   }
   
   // Approach 10: Clean up multi-line strategy blocks that might have been missed
@@ -228,6 +252,8 @@ function parseStreamedContent(fullContent: string): {
     logger.log('[Parser] Thought content length:', thoughtContent.length);
   } else {
     // No email_copy tags - FALLBACK: Look for email structure markers
+    // This handles both old format (with <email_copy> tags) and new format (direct output with markdown)
+    // The new standard email prompt (v2) outputs directly without tags, relying on thinking blocks for analysis
     const emailMarkers = ['HERO SECTION:', 'EMAIL SUBJECT LINE:', 'SUBJECT LINE:', 'SUBJECT:'];
     let firstMarkerIndex = -1;
     
@@ -239,10 +265,24 @@ function parseStreamedContent(fullContent: string): {
     }
     
     if (firstMarkerIndex >= 0) {
-      // Found email marker - split content
-      thoughtContent = remaining.substring(0, firstMarkerIndex).trim();
-      emailCopy = remaining.substring(firstMarkerIndex).trim();
-      logger.log('[Parser] ⚠️ No email_copy tags, used fallback with marker');
+      // Found email marker - but check for leading markdown formatting (**, -, etc.)
+      // Look backwards from marker to capture any leading formatting
+      let startIndex = firstMarkerIndex;
+      
+      // Check if there are ** or other markdown markers immediately before
+      const beforeMarker = remaining.substring(Math.max(0, firstMarkerIndex - 10), firstMarkerIndex);
+      const leadingMarkdownMatch = beforeMarker.match(/(\*\*|\*|##+)\s*$/);
+      
+      if (leadingMarkdownMatch) {
+        // Found leading markdown, adjust start position to include it
+        startIndex = firstMarkerIndex - leadingMarkdownMatch[0].length;
+        logger.log('[Parser] Found leading markdown before marker, including it:', leadingMarkdownMatch[0]);
+      }
+      
+      // Split content at the adjusted position
+      thoughtContent = remaining.substring(0, startIndex).trim();
+      emailCopy = remaining.substring(startIndex).trim();
+      logger.log('[Parser] ⚠️ No email_copy tags, used fallback with marker (standard for new prompt system)');
     } else {
       // No markers found - everything is email copy
       emailCopy = remaining;
