@@ -23,6 +23,51 @@ function replacePlaceholders(
 }
 
 /**
+ * Extract copywriting style guide content from the brand info block
+ */
+function extractBrandVoiceGuidelines(brandInfo: string): string {
+  if (!brandInfo) {
+    return 'No style guide provided.';
+  }
+
+  const marker = 'Copywriting Style Guide:';
+  const markerIndex = brandInfo.indexOf(marker);
+
+  if (markerIndex === -1) {
+    return 'No style guide provided.';
+  }
+
+  let guidelines = brandInfo.slice(markerIndex + marker.length);
+
+  const websiteMarker = 'Brand Website:';
+  if (guidelines.includes(websiteMarker)) {
+    guidelines = guidelines.split(websiteMarker)[0];
+  }
+
+  guidelines = guidelines.trim();
+
+  return guidelines || 'No style guide provided.';
+}
+
+/**
+ * Build the additional context block for standard email prompts within flows
+ */
+function buildAdditionalContextForFlow(brandInfo: string, ragContext: string): string {
+  const sections = [
+    `<brand_details>
+${brandInfo}
+</brand_details>`,
+    ragContext
+      ? `<rag_context>
+${ragContext}
+</rag_context>`
+      : '',
+  ].filter(Boolean);
+
+  return sections.join('\n\n').trim();
+}
+
+/**
  * Build the system prompt for creating a flow outline
  * This guides the AI through a conversational process to build a comprehensive outline
  */
@@ -85,24 +130,29 @@ ${emailOutline.sequence === flowOutline.emails.length ? '- Final email - create 
   const websiteMatch = brandInfo.match(/Website:\s*(.+)/);
   const websiteUrl = websiteMatch ? websiteMatch[1].trim() : '';
   
+  const brandVoiceGuidelines = extractBrandVoiceGuidelines(brandInfo);
+  const additionalContext = buildAdditionalContextForFlow(brandInfo, ragContext || '');
+
+  if (emailType === 'design') {
+    return replacePlaceholders(STANDARD_EMAIL_PROMPT, {
+      BRAND_VOICE_GUIDELINES: brandVoiceGuidelines,
+      ADDITIONAL_CONTEXT: additionalContext,
+      COPY_BRIEF: emailBrief,
+    });
+  }
+
   // Generate website hint if we have a URL
   const websiteHint = websiteUrl 
     ? ` (especially the brand's website: ${websiteUrl})` 
     : '';
 
-  // Choose the appropriate template (design or letter)
-  const template = emailType === 'design' 
-    ? STANDARD_EMAIL_PROMPT 
-    : LETTER_EMAIL_PROMPT;
-
-  // Replace placeholders
-  return replacePlaceholders(template, {
+  return replacePlaceholders(LETTER_EMAIL_PROMPT, {
     BRAND_INFO: brandInfo,
     RAG_CONTEXT: ragContext || '',
     CONTEXT_INFO: '', // No additional context needed for flows
     MEMORY_CONTEXT: '', // Flows don't need memory context
-    WEBSITE_HINT: websiteHint,
-    WEBSITE_URL: websiteUrl,
     EMAIL_BRIEF: emailBrief,
+    WEBSITE_URL: websiteUrl,
+    WEBSITE_HINT: websiteHint,
   });
 }

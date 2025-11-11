@@ -2921,7 +2921,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             emailType={emailType}
             onEmailTypeChange={handleEmailTypeChange}
             hasMessages={messages.length > 0}
-            brandId={brandId}
           />
         )}
 

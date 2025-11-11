@@ -28,19 +28,26 @@ const cleanEmailContent = (content: string): string => {
   let cleaned = content.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
   
   // Find the start of the actual email (look for common email markers)
-  const emailStartMarkers = [
+  const emailStartPatterns: RegExp[] = [
     /HERO SECTION:/i,
+    /Section Title:/i,
     /EMAIL SUBJECT LINE:/i,
-    /SUBJECT LINE:/i,
+    /\*\*Headline:\*\*/i,
+    /\*\*Call to Action Button:\*\*/i,
   ];
-  
-  for (const marker of emailStartMarkers) {
-    const match = cleaned.match(marker);
-    if (match && match.index !== undefined && match.index > 0) {
-      // Remove everything before this marker (preamble)
-      cleaned = cleaned.substring(match.index);
-      break;
+
+  let startIndex = -1;
+  emailStartPatterns.forEach((pattern) => {
+    const match = cleaned.match(pattern);
+    if (match && match.index !== undefined) {
+      if (startIndex === -1 || match.index < startIndex) {
+        startIndex = match.index;
+      }
     }
+  });
+
+  if (startIndex > 0) {
+    cleaned = cleaned.substring(startIndex);
   }
   
   // Remove common meta-commentary patterns

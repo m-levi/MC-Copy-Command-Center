@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, KeyboardEvent, useEffect, useCallback } from 'react';
-import { PROMPT_TEMPLATES, QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
+import { QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
 import { ConversationMode, EmailType } from '@/types';
 import VoiceInput from './VoiceInput';
 
@@ -20,7 +20,6 @@ interface ChatInputProps {
   emailType?: EmailType;
   onEmailTypeChange?: (type: EmailType) => void;
   hasMessages?: boolean; // Track if conversation has any messages
-  brandId?: string; // Brand ID for generating contextual suggestions
 }
 
 export default function ChatInput({ 
@@ -37,11 +36,8 @@ export default function ChatInput({
   onModelChange,
   emailType = 'design',
   onEmailTypeChange,
-  hasMessages = false,
-  brandId
+  hasMessages = false
 }: ChatInputProps) {
-  // Feature flag: Set to true to re-enable suggested prompts
-  const ENABLE_SUGGESTED_PROMPTS = false;
   const [message, setMessage] = useState('');
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState<string[]>([]);
@@ -49,13 +45,6 @@ export default function ChatInput({
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showEmailTypePicker, setShowEmailTypePicker] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
-  const [dynamicSuggestions, setDynamicSuggestions] = useState<Array<{ text: string; icon: string }> | null>(null);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [suggestionsKey, setSuggestionsKey] = useState(0); // Key for animation transitions
-  const [isTransitioning, setIsTransitioning] = useState(false); // Track transition state
-  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
-  const [forceRefresh, setForceRefresh] = useState(0); // Trigger manual refresh
-  const [isFallback, setIsFallback] = useState(false); // Track if using fallback suggestions
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const emailTypePickerRef = useRef<HTMLDivElement>(null);
@@ -120,72 +109,6 @@ export default function ChatInput({
       textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
   }, [draftContent]);
-
-  // Fetch AI-generated suggestions when brand, mode, or emailType changes
-  useEffect(() => {
-    // Only fetch if we have a brand and no messages (for empty conversations)
-    if (!brandId || hasMessages) {
-      return;
-    }
-
-    const fetchSuggestions = async () => {
-      // Trigger fall-away animation for current suggestions
-      if (dynamicSuggestions) {
-        setIsTransitioning(true);
-        // Wait for fall-away animation to complete
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-
-      setSuggestionsLoading(true);
-      setSuggestionsError(null);
-      
-      try {
-        console.log('[Suggestions] Fetching AI suggestions...', { brandId, mode, emailType });
-        
-        const response = await fetch('/api/suggestions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            brandId,
-            mode,
-            emailType,
-          }),
-        });
-
-        const data = await response.json();
-        
-        if (response.ok) {
-          console.log('[Suggestions] Received:', data);
-          setDynamicSuggestions(data.suggestions);
-          setIsFallback(data.fallback || false);
-          setSuggestionsError(null);
-          // Increment key to trigger fall-in animation for new suggestions
-          setSuggestionsKey(prev => prev + 1);
-          setIsTransitioning(false);
-        } else {
-          console.error('[Suggestions] API error:', data);
-          setSuggestionsError(data.error || 'API error');
-          setIsTransitioning(false);
-        }
-      } catch (error) {
-        console.error('[Suggestions] Fetch error:', error);
-        setSuggestionsError('Network error');
-        setIsTransitioning(false);
-        // Will fall back to static suggestions
-      } finally {
-        setSuggestionsLoading(false);
-      }
-    };
-
-    fetchSuggestions();
-  }, [brandId, mode, emailType, hasMessages, forceRefresh]); // Re-fetch when these change
-
-  // Reset dynamic suggestions when conversation gets messages
-  useEffect(() => {
-    if (hasMessages) {
-      setDynamicSuggestions(null);
-    }
-  }, [hasMessages]);
 
   // Close model picker on outside click
   useEffect(() => {
@@ -428,39 +351,6 @@ export default function ChatInput({
 
   const charCount = message.length;
 
-  // Contextual suggestions based on mode and conversation state
-  const getContextualSuggestions = () => {
-    if (hasMessages) return []; // Only show for empty conversations
-
-    // Use dynamic AI-generated suggestions if available
-    if (dynamicSuggestions && dynamicSuggestions.length > 0) {
-      return dynamicSuggestions;
-    }
-
-    // Fall back to static suggestions if AI generation fails or is loading
-    if (mode === 'planning') {
-      return [
-        { text: 'What makes a good email subject line?', icon: '💡' },
-        { text: 'Help me understand our target audience', icon: '🎯' },
-        { text: 'How can I improve engagement rates?', icon: '📈' },
-      ];
-    } else if (emailType === 'flow') {
-      return [
-        { text: 'Create a welcome email sequence', icon: '👋' },
-        { text: 'Build a re-engagement campaign', icon: '🔄' },
-        { text: 'Design an abandoned cart flow', icon: '🛒' },
-      ];
-    } else {
-      return [
-        { text: 'Write a promotional email for a sale', icon: '🎉' },
-        { text: 'Create a product launch announcement', icon: '🚀' },
-        { text: 'Draft a newsletter update', icon: '📧' },
-      ];
-    }
-  };
-
-  const suggestions = getContextualSuggestions();
-
   const getPlaceholder = () => {
     if (mode === 'planning') {
       return "Ask a question, explore ideas, or plan a campaign...";
@@ -489,139 +379,6 @@ export default function ChatInput({
   return (
     <div className="bg-[#fcfcfc] dark:bg-gray-900 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
       <div className="max-w-5xl mx-auto">
-        {/* Contextual Suggestions - Only for empty conversations */}
-        {ENABLE_SUGGESTED_PROMPTS && !hasMessages && suggestions.length > 0 && !message && (
-          <div className="mb-4">
-            <div className="flex items-center gap-2 mb-2.5">
-              <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
-                {mode === 'planning' ? '💬 Quick Questions' : '✨ Suggested Prompts'}
-              </span>
-              
-              {/* Tiny refresh button */}
-              <button
-                onClick={() => {
-                  setForceRefresh(prev => prev + 1);
-                }}
-                disabled={suggestionsLoading}
-                className="group p-0.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Refresh suggestions"
-              >
-                <svg 
-                  className={`w-3 h-3 text-gray-400 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-all ${suggestionsLoading ? 'animate-spin' : 'group-hover:rotate-180 group-hover:scale-110'} duration-300`}
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-              
-              {isFallback && !suggestionsLoading && (
-                <span 
-                  className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1"
-                  title="Using basic suggestions. Set ANTHROPIC_API_KEY for AI-powered suggestions."
-                >
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
-                  Basic
-                </span>
-              )}
-              
-              {suggestionsError && !suggestionsLoading && (
-                <span 
-                  className="text-xs text-red-500 dark:text-red-400 flex items-center gap-1"
-                  title={suggestionsError}
-                >
-                  ⚠️ Error
-                </span>
-              )}
-              
-              {suggestionsLoading && (
-                <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                  <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <span>Researching...</span>
-                </div>
-              )}
-              {!suggestionsLoading && brandId && (
-                <button
-                  onClick={async () => {
-                    // Trigger refresh animation
-                    setIsTransitioning(true);
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                    
-                    setSuggestionsLoading(true);
-                    try {
-                      const response = await fetch('/api/suggestions', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          brandId,
-                          mode,
-                          emailType,
-                        }),
-                      });
-
-                      if (response.ok) {
-                        const data = await response.json();
-                        setDynamicSuggestions(data.suggestions);
-                        setIsFallback(data.fallback || false);
-                        setSuggestionsKey(prev => prev + 1);
-                        setIsTransitioning(false);
-                      }
-                    } catch (error) {
-                      console.error('Error refreshing suggestions:', error);
-                      setIsTransitioning(false);
-                    } finally {
-                      setSuggestionsLoading(false);
-                    }
-                  }}
-                  className="group p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors cursor-pointer"
-                  title="Refresh suggestions"
-                >
-                  <svg 
-                    className="w-3.5 h-3.5 text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors group-hover:rotate-180 transition-transform duration-500" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
-              )}
-            </div>
-            <div 
-              key={suggestionsKey} 
-              className={`flex flex-wrap gap-2 ${isTransitioning ? 'animate-fall-away' : 'animate-fall-in'}`}
-              style={{ perspective: '1000px' }}
-            >
-              {suggestions.map((suggestion, index) => (
-                <button
-                  key={`${suggestionsKey}-${index}`}
-                  onClick={() => {
-                    setMessage(suggestion.text);
-                    textareaRef.current?.focus();
-                  }}
-                  className="group px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-blue-950/30 border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md cursor-pointer"
-                  style={{ 
-                    animationDelay: `${index * 100}ms`,
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-base">{suggestion.icon}</span>
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">
-                      {suggestion.text}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Slash Command Suggestions */}
         {showSlashCommands && (
           <div className="mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden backdrop-blur-xl">

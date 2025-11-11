@@ -92,6 +92,61 @@ function replacePlaceholders(
 }
 
 /**
+ * Extract copywriting style guide content from the brand info block
+ */
+function extractBrandVoiceGuidelines(brandInfo: string): string {
+  if (!brandInfo) {
+    return 'No style guide provided.';
+  }
+
+  const marker = 'Copywriting Style Guide:';
+  const markerIndex = brandInfo.indexOf(marker);
+
+  if (markerIndex === -1) {
+    return 'No style guide provided.';
+  }
+
+  let guidelines = brandInfo.slice(markerIndex + marker.length);
+
+  const websiteMarker = 'Brand Website:';
+  if (guidelines.includes(websiteMarker)) {
+    guidelines = guidelines.split(websiteMarker)[0];
+  }
+
+  guidelines = guidelines.trim();
+
+  return guidelines || 'No style guide provided.';
+}
+
+/**
+ * Build the additional context block used by the standard email prompt
+ */
+function buildAdditionalContextBlock(context: PromptContext): string {
+  const sections = [
+    `<brand_details>
+${context.brandInfo}
+</brand_details>`,
+    context.ragContext
+      ? `<rag_context>
+${context.ragContext}
+</rag_context>`
+      : '',
+    context.contextInfo
+      ? `<conversation_context>
+${context.contextInfo}
+</conversation_context>`
+      : '',
+    context.memoryContext
+      ? `<memory_context>
+${context.memoryContext}
+</memory_context>`
+      : '',
+  ].filter(Boolean);
+
+  return sections.join('\n\n').trim();
+}
+
+/**
  * Planning mode prompt
  */
 export function buildPlanningPrompt(context: PromptContext): string {
@@ -126,17 +181,12 @@ export function buildLetterEmailPrompt(context: PromptContext): string {
  * to support the new API-first prompt architecture
  */
 export function buildStandardEmailPrompt(context: PromptContext): string {
-  const hostname = getHostnameFromUrl(context.websiteUrl);
-  const websiteHint = hostname ? ` (especially from ${hostname})` : '';
-  
+  const brandVoiceGuidelines = extractBrandVoiceGuidelines(context.brandInfo);
+  const additionalContext = buildAdditionalContextBlock(context);
+
   return replacePlaceholders(STANDARD_EMAIL_PROMPT, {
-    BRAND_INFO: context.brandInfo,
-    RAG_CONTEXT: context.ragContext,
-    CONTEXT_INFO: context.contextInfo,
-    MEMORY_CONTEXT: context.memoryContext || '',
-    WEBSITE_HINT: websiteHint,
-    WEBSITE_URL: context.websiteUrl || 'the brand website',
-    EMAIL_BRIEF: '{{EMAIL_BRIEF}}', // This will be filled in by the system when used
+    BRAND_VOICE_GUIDELINES: brandVoiceGuidelines,
+    ADDITIONAL_CONTEXT: additionalContext,
   });
 }
 
@@ -152,38 +202,10 @@ export function buildStandardEmailPromptV2(context: PromptContext): {
 } {
   // Extract copywriting style guide for BRAND_VOICE_GUIDELINES
   // IMPORTANT: Only extract the style guide, not the website URL that comes after
-  let brandVoiceGuidelines = 'No style guide provided.';
-  
-  if (context.brandInfo.includes('Copywriting Style Guide:')) {
-    const afterStyleGuide = context.brandInfo.split('Copywriting Style Guide:')[1];
-    
-    // Check if there's a "Brand Website:" section after the style guide
-    if (afterStyleGuide && afterStyleGuide.includes('Brand Website:')) {
-      // Extract only up to "Brand Website:"
-      brandVoiceGuidelines = afterStyleGuide.split('Brand Website:')[0].trim();
-    } else if (afterStyleGuide) {
-      // No website URL, take everything
-      brandVoiceGuidelines = afterStyleGuide.trim();
-    }
-    
-    // Fallback if extraction failed
-    if (!brandVoiceGuidelines) {
-      brandVoiceGuidelines = 'No style guide provided.';
-    }
-  }
+  const brandVoiceGuidelines = extractBrandVoiceGuidelines(context.brandInfo);
 
   // Build ADDITIONAL_CONTEXT from all available context
-  const additionalContext = `
-<brand_details>
-${context.brandInfo}
-</brand_details>
-
-${context.ragContext ? `<rag_context>\n${context.ragContext}\n</rag_context>` : ''}
-
-${context.contextInfo ? `<conversation_context>\n${context.contextInfo}\n</conversation_context>` : ''}
-
-${context.memoryContext ? `<memory_context>\n${context.memoryContext}\n</memory_context>` : ''}
-  `.trim();
+  const additionalContext = buildAdditionalContextBlock(context);
 
   // Build user prompt template with placeholders
   // COPY_BRIEF will be filled in with the actual user message when sending to API
