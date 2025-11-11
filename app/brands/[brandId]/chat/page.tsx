@@ -69,6 +69,21 @@ const sanitizeContent = (content: string): string => {
 const cleanEmailContentFinal = (content: string): string => {
   let cleaned = content;
   
+  const clarificationMatch = cleaned.match(/<clarification_request>([\s\S]*?)<\/clarification_request>/i);
+  if (clarificationMatch) {
+    return clarificationMatch[1].trim();
+  }
+
+  const nonCopyMatch = cleaned.match(/<non_copy_response>([\s\S]*?)<\/non_copy_response>/i);
+  if (nonCopyMatch) {
+    return nonCopyMatch[1].trim();
+  }
+
+  const emailCopyMatch = cleaned.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
+  if (emailCopyMatch) {
+    cleaned = emailCopyMatch[1].trim();
+  }
+  
   // CRITICAL: Try multiple approaches to ensure we get ONLY email copy
   
   // Approach 1: Extract everything after email_strategy closing tag

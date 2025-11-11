@@ -41,6 +41,142 @@ const STATUS_SEQUENCE = [
   { threshold: 90, status: 'finalizing', keywords: [] },
 ] as const;
 
+const EMAIL_START_PATTERNS = [
+  /\*\*HERO SECTION:\*\*/i,
+  /HERO SECTION:/i,
+  /\*\*Section Title:\*\*/i,
+  /Section Title:/i,
+  /\*\*FINAL CTA SECTION:\*\*/i,
+  /FINAL CTA SECTION:/i,
+  /\*\*EMAIL SUBJECT LINE:\*\*/i,
+  /EMAIL SUBJECT LINE:/i,
+  /\*\*Sub-headline:\*\*/i,
+  /\*\*Headline:\*\*/i,
+  /\*\*Call to Action Button:\*\*/i,
+  /<clarification_request>/i,
+  /<email_copy>/i,
+  /<non_copy_response>/i,
+] as const;
+
+const ANALYSIS_LEAK_PATTERNS = [
+  /\*\*A\./i,
+  /\*\*B\./i,
+  /\*\*C\./i,
+  /\*\*BRAND (?:VOICE|DEEP DIVE)/i,
+  /\bstrategic analysis\b/i,
+  /\bmy analysis\b/i,
+] as const;
+
+function findEmailStartIndex(text: string): number {
+  let earliest = -1;
+
+  for (const pattern of EMAIL_START_PATTERNS) {
+    const match = text.match(pattern);
+    if (match && match.index !== undefined) {
+      if (earliest === -1 || match.index < earliest) {
+        earliest = match.index;
+      }
+    }
+  }
+
+  if (earliest === -1) {
+    return -1;
+  }
+
+  let start = earliest;
+  const beforeSlice = text.substring(0, start);
+  const lastDoubleNewline = beforeSlice.lastIndexOf('\n\n');
+  if (lastDoubleNewline !== -1) {
+    start = lastDoubleNewline + 2;
+  } else {
+    const lastNewline = beforeSlice.lastIndexOf('\n');
+    if (lastNewline !== -1) {
+      start = lastNewline + 1;
+    }
+  }
+
+  return start;
+}
+
+function containsAnalysisLeak(text: string): boolean {
+  return ANALYSIS_LEAK_PATTERNS.some(pattern => pattern.test(text));
+}
+
+function containsClarificationRequest(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    normalized.includes('<clarification_request>') ||
+    normalized.includes('need more information') ||
+    normalized.includes('missing required') ||
+    normalized.includes('required information') ||
+    normalized.includes('please provide') ||
+    normalized.includes('can you clarify') ||
+    normalized.includes('what is this email') ||
+    /\?\s*$/.test(normalized.slice(-120)) || // question near end
+    (normalized.includes('campaign type') && normalized.includes('products')) ||
+    normalized.includes('primary goal') ||
+    normalized.includes('offer/urgency')
+  );
+}
+
+type ResponseWrapper = 'email_copy' | 'clarification_request' | 'non_copy_response';
+
+function hasWrapper(text: string, wrapper: ResponseWrapper): boolean {
+  const regex = new RegExp(`<${wrapper}[> ]`, 'i');
+  return regex.test(text);
+}
+
+function hasClosingWrapper(text: string, wrapper: ResponseWrapper): boolean {
+  const regex = new RegExp(`</${wrapper}>`, 'i');
+  return regex.test(text);
+}
+
+function sanitizeClarificationContent(content: string): string {
+  const withLineBreaks = content.replace(/<\/?clarification_request>/gi, '').trim();
+
+  const fieldChecks: Array<{ label: string; regexes: RegExp[] }> = [
+    {
+      label: 'Campaign type or goal',
+      regexes: [/campaign type/i, /goal/i, /purpose/i],
+    },
+    {
+      label: 'Product or category to feature',
+      regexes: [/product/i, /collection/i, /category/i],
+    },
+    {
+      label: 'Offer or promotion',
+      regexes: [/offer/i, /promotion/i, /discount/i, /free shipping/i],
+    },
+    {
+      label: 'Audience segment',
+      regexes: [/audience/i, /segment/i, /customers/i, /subscribers/i],
+    },
+    {
+      label: 'Timing or urgency',
+      regexes: [/timing/i, /urgency/i, /deadline/i, /season/i],
+    },
+  ];
+
+  const detected: string[] = [];
+
+  for (const field of fieldChecks) {
+    const found = field.regexes.some((regex) => regex.test(withLineBreaks));
+    if (found) {
+      detected.push(field.label);
+    }
+  }
+
+  const requiredFields =
+    detected.length > 0 ? detected : fieldChecks.map((field) => field.label);
+
+  const opener = 'Need a quick clarification before I write the email:';
+  const bullets = requiredFields
+    .map((field) => `• ${field}`)
+    .join('\n');
+
+  return `${opener}\n\n${bullets}`;
+}
+
 /**
  * Create AI client based on provider (with dynamic imports)
  */
@@ -414,6 +550,34 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         let isInThinkingBlock = false;
         let currentStatusIndex = 0;
         let webSearchContent = ''; // Track content from web searches (if directly available)
+        let emailContentStarted = false;
+        let preEmailBuffer = '';
+        let trimmedAnalysisChars = 0;
+        let activeWrapper: ResponseWrapper | null = null;
+        let wrapperOpenedManually = false;
+        let stopContentStreaming = false;
+
+        const openWrapper = (type: ResponseWrapper) => {
+          if (!activeWrapper) {
+            activeWrapper = type;
+            wrapperOpenedManually = true;
+            const tag = `<${type}>`;
+            controller.enqueue(encoder.encode(tag));
+            fullResponse += tag;
+            emailContentStarted = true;
+            console.log(`[${provider.toUpperCase()}] Opened wrapper: ${type}`);
+          }
+        };
+
+        const ensureWrapperClosed = () => {
+          if (activeWrapper && !hasClosingWrapper(fullResponse, activeWrapper)) {
+            const closingTag = `</${activeWrapper}>`;
+            controller.enqueue(encoder.encode(closingTag));
+            fullResponse += closingTag;
+            console.log(`[${provider.toUpperCase()}] Closed wrapper: ${activeWrapper}`);
+          }
+          activeWrapper = null;
+        };
         
         for await (const chunk of stream) {
           // Log chunk type for debugging (Anthropic only)
@@ -424,6 +588,14 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           }
           
           const parsed = parseChunk(chunk, provider);
+
+          if (stopContentStreaming) {
+            if (parsed.thinkingEnd) {
+              // still forward status transitions to close thinking blocks
+              controller.enqueue(encoder.encode('[THINKING:END]'));
+            }
+            continue;
+          }
           
           // Handle tool usage
           if (parsed.toolUse) {
@@ -484,7 +656,87 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           
           // Handle regular content
           if (parsed.content) {
-            fullResponse += parsed.content;
+            let chunkText = parsed.content;
+
+            if (!emailContentStarted) {
+              preEmailBuffer += chunkText;
+
+              // Prevent unbounded growth—keep most recent portion
+              if (preEmailBuffer.length > 12000) {
+                preEmailBuffer = preEmailBuffer.slice(preEmailBuffer.length - 12000);
+              }
+
+              if (containsClarificationRequest(preEmailBuffer)) {
+                const bufferLength = preEmailBuffer.length;
+                const tagIndex = preEmailBuffer.search(/<clarification_request>/i);
+
+                if (tagIndex >= 0) {
+                  trimmedAnalysisChars += tagIndex;
+                  const stripped = preEmailBuffer
+                    .substring(tagIndex)
+                    .replace(/<\/?clarification_request>/gi, '');
+                  chunkText = sanitizeClarificationContent(stripped);
+                  preEmailBuffer = '';
+                  if (!hasWrapper(chunkText, 'clarification_request')) {
+                    openWrapper('clarification_request');
+                  } else {
+                    activeWrapper = 'clarification_request';
+                  }
+                } else {
+                  const trimmed = preEmailBuffer.trimStart();
+                  trimmedAnalysisChars += bufferLength - trimmed.length;
+                  openWrapper('clarification_request');
+                  chunkText = sanitizeClarificationContent(trimmed);
+                  preEmailBuffer = '';
+                }
+
+                emailContentStarted = true;
+                console.log(`[${provider.toUpperCase()}] Detected clarification request – streaming without trimming`);
+
+                if (chunkText) {
+                  controller.enqueue(encoder.encode(chunkText));
+                  fullResponse += chunkText;
+                }
+
+                ensureWrapperClosed();
+                stopContentStreaming = true;
+                continue;
+              } else {
+                const startIndex = findEmailStartIndex(preEmailBuffer);
+                if (startIndex === -1) {
+                  continue; // Still capturing analysis/preamble
+                }
+
+                emailContentStarted = true;
+                const tagIndex = preEmailBuffer.search(/<email_copy>/i);
+
+                if (tagIndex >= 0 && tagIndex <= startIndex) {
+                  trimmedAnalysisChars += tagIndex;
+                  chunkText = preEmailBuffer.substring(tagIndex).trimStart();
+                  preEmailBuffer = '';
+                  activeWrapper = 'email_copy';
+                } else {
+                  trimmedAnalysisChars += startIndex;
+                  chunkText = preEmailBuffer.substring(startIndex).trimStart();
+                  preEmailBuffer = '';
+                  if (!hasWrapper(chunkText, 'email_copy')) {
+                    openWrapper('email_copy');
+                  } else {
+                    activeWrapper = 'email_copy';
+                  }
+                }
+
+                if (trimmedAnalysisChars > 0) {
+                  console.log(`[${provider.toUpperCase()}] Trimmed ${trimmedAnalysisChars} chars of analysis before email content`);
+                }
+              }
+            }
+
+            if (!emailContentStarted) {
+              continue;
+            }
+
+            fullResponse += chunkText;
             
             // Smart status detection based on content keywords
             if (currentStatusIndex < STATUS_SEQUENCE.length) {
@@ -507,7 +759,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
               }
             }
             
-            controller.enqueue(encoder.encode(parsed.content));
+            controller.enqueue(encoder.encode(chunkText));
             chunkCount++;
             
             if (chunkCount % 10 === 0) {
@@ -517,6 +769,43 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         }
         
         console.log(`[${provider.toUpperCase()}] Stream complete. Total: ${chunkCount} chunks, ${fullResponse.length} chars, ${thinkingContent.length} thinking chars`);
+
+        if (!emailContentStarted) {
+          console.warn(`[${provider.toUpperCase()}] WARNING: Email markers not detected in streamed content. Applying fallback clean.`);
+          if (preEmailBuffer) {
+            let fallbackContent = cleanWithLogging(preEmailBuffer).trim();
+            if (fallbackContent) {
+              const wrapperType: ResponseWrapper = containsClarificationRequest(fallbackContent)
+                ? 'clarification_request'
+                : 'non_copy_response';
+
+              if (!hasWrapper(fallbackContent, wrapperType)) {
+                openWrapper(wrapperType);
+                const body =
+                  wrapperType === 'clarification_request'
+                    ? sanitizeClarificationContent(fallbackContent)
+                    : fallbackContent;
+                controller.enqueue(encoder.encode(body));
+                fullResponse += body;
+              } else {
+                activeWrapper = wrapperType;
+                const body =
+                  wrapperType === 'clarification_request'
+                    ? sanitizeClarificationContent(fallbackContent.replace(/<\/?clarification_request>/gi, ''))
+                    : fallbackContent;
+                controller.enqueue(encoder.encode(body));
+                fullResponse += body;
+              }
+
+              emailContentStarted = true;
+              console.log(`[${provider.toUpperCase()}] Fallback content delivered (${fallbackContent.length} chars)`);
+            }
+          }
+        } else if (containsAnalysisLeak(fullResponse.slice(0, 400))) {
+          console.warn(`[${provider.toUpperCase()}] WARNING: Potential analysis leakage detected in final output (conversation ${conversationId || 'N/A'})`);
+        }
+
+        ensureWrapperClosed();
         
         // Log final content lengths for debugging
         console.log(`[${provider.toUpperCase()}] Final content breakdown:`, {
