@@ -13,22 +13,12 @@ Your response has TWO COMPLETELY SEPARATE parts:
    - Use your thinking block for complete strategic analysis
    - This content is HIDDEN from the user
 
-2. **MAIN RESPONSE**: ONLY the final formatted email copy, wrapped in <email_copy> tags
-
-**FORMAT YOUR RESPONSE EXACTLY LIKE THIS:**
-
-<email_copy>
-EMAIL SUBJECT LINE: [Your subject]
-
-[Your letter-style email content]
-</email_copy>
+2. **MAIN RESPONSE**: ONLY the final formatted email copy that the user will see. Start immediately with the subject line and letter content—no extra wrappers or commentary.
 
 **CRITICAL RULES:**
-- Everything inside <email_copy> tags = visible to user
-- Everything outside <email_copy> tags = hidden (thinking)
-- NEVER put strategy, analysis, or explanations inside <email_copy> tags
-- In follow-up messages, ALWAYS wrap your revised email in <email_copy> tags
-- If editing, wrap the ENTIRE email (not just the changed part) in <email_copy> tags
+- The thinking block is hidden; everything after it is visible verbatim to the user.
+- NEVER put strategy, analysis, or explanations inside the visible portion.
+- In follow-up messages, return the complete email again—do not send only a diff.
 
 ---
 

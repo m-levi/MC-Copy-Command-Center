@@ -6,14 +6,10 @@
  */
 
 export const SECTION_REGENERATION_PROMPTS = {
-  subject: `⚠️ CRITICAL: Wrap your COMPLETE revised email in <email_copy> tags. Return the ENTIRE email structure with just the subject line regenerated.
+  subject: `⚠️ CRITICAL: Return the ENTIRE email structure with just the subject line regenerated. Start immediately with the visible email content—no wrappers or extra commentary.
 
-<email_copy>
 EMAIL SUBJECT LINE: [Your new subject]
 PREVIEW TEXT: [Your preview]
-
-[Rest of the email unchanged]
-</email_copy>
 
 Regenerate ONLY the email subject line and preview text. Keep everything else the same. Focus on:
 - Creating urgency or curiosity
@@ -29,14 +25,10 @@ Regenerate ONLY the email subject line and preview text. Keep everything else th
 
 {{CONTEXT_INFO}}`,
 
-  hero: `⚠️ CRITICAL: Wrap your COMPLETE revised email in <email_copy> tags. Return the ENTIRE email structure with just the hero section regenerated.
+  hero: `⚠️ CRITICAL: Return the ENTIRE email structure with just the hero section regenerated. Start immediately with the visible email content—no wrappers or extra commentary.
 
-<email_copy>
 HERO SECTION:
 [Your new hero content]
-
-[Rest of the email unchanged]
-</email_copy>
 
 Regenerate ONLY the hero section. Keep everything else the same. Focus on:
 - Compelling, benefit-driven headline (4-8 words)
@@ -52,16 +44,14 @@ Regenerate ONLY the hero section. Keep everything else the same. Focus on:
 
 {{CONTEXT_INFO}}`,
 
-  body: `⚠️ CRITICAL: Wrap your COMPLETE revised email in <email_copy> tags. Return the ENTIRE email structure with just the "{{SECTION_TITLE}}" section regenerated.
+  body: `⚠️ CRITICAL: Return the ENTIRE email structure with just the "{{SECTION_TITLE}}" section regenerated. Start immediately with the visible email content—no wrappers or extra commentary.
 
-<email_copy>
 [Email sections before {{SECTION_TITLE}} unchanged]
 
 SECTION: {{SECTION_TITLE}}
 [Your new section content]
 
 [Email sections after {{SECTION_TITLE}} unchanged]
-</email_copy>
 
 Regenerate ONLY the body section "{{SECTION_TITLE}}". Keep everything else the same. Focus on:
 - Clear, scannable content
@@ -77,14 +67,12 @@ Regenerate ONLY the body section "{{SECTION_TITLE}}". Keep everything else the s
 
 {{CONTEXT_INFO}}`,
 
-  cta: `⚠️ CRITICAL: Wrap your COMPLETE revised email in <email_copy> tags. Return the ENTIRE email structure with just the CTA section regenerated.
+  cta: `⚠️ CRITICAL: Return the ENTIRE email structure with just the CTA section regenerated. Start immediately with the visible email content—no wrappers or extra commentary.
 
-<email_copy>
 [Email sections before CTA unchanged]
 
 CALL-TO-ACTION SECTION:
 [Your new CTA content]
-</email_copy>
 
 Regenerate ONLY the call-to-action section. Keep everything else the same. Focus on:
 - Summarizing the key benefit

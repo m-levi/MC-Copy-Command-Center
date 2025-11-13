@@ -50,10 +50,10 @@ export default function FlowOutlineDisplay({
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-800 rounded-xl shadow-sm overflow-hidden mb-4">
+    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm overflow-hidden mb-4">
       {/* Header */}
       <div 
-        className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/50 dark:to-purple-950/50 px-6 py-4 border-b border-blue-200 dark:border-blue-800 cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-900/30 transition-colors"
+        className="bg-gray-50 dark:bg-gray-900/40 px-6 py-4 border-b border-gray-200 dark:border-gray-800 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900/60 transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center justify-between">
@@ -133,11 +133,11 @@ export default function FlowOutlineDisplay({
                   onClick={() => child && onSelectChild(child.id)}
                   disabled={!child}
                   className={`
-                    w-full text-left p-4 rounded-lg border-2 transition-all
+                    w-full text-left p-4 rounded-lg border transition-all
                     ${isSelected 
                       ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-950/30' 
                       : child
-                        ? 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer'
+                        ? 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer'
                         : 'border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 opacity-60 cursor-not-allowed'
                     }
                   `}
@@ -166,6 +166,13 @@ export default function FlowOutlineDisplay({
                           </svg>
                           {email.timing}
                         </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
+                          email.emailType === 'design'
+                            ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                            : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                        }`}>
+                          {email.emailType}
+                        </span>
                         <div className="flex items-center gap-1">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />

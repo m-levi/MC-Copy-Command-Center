@@ -23,6 +23,7 @@ export interface Brand {
 export type ConversationType = 'email' | 'automation';
 export type ConversationMode = 'planning' | 'email_copy' | 'flow';
 export type EmailType = 'design' | 'letter' | 'flow';
+export type EmailStyle = Extract<EmailType, 'design' | 'letter'>;
 
 // Flow Types
 export type FlowType = 
@@ -49,6 +50,7 @@ export interface FlowOutlineEmail {
   timing: string;
   keyPoints: string[];
   cta: string;
+  emailType: EmailStyle; // 'design' or 'letter' - AI decides per email
 }
 
 export interface FlowOutlineData {
@@ -57,6 +59,7 @@ export interface FlowOutlineData {
   goal: string;
   targetAudience: string;
   emails: FlowOutlineEmail[];
+  emailStyle?: EmailStyle;
 }
 
 export interface FlowOutline {
@@ -143,6 +146,8 @@ export interface MessageMetadata {
   context?: ConversationContext;
   editedFrom?: string; // Original message ID if this was edited
   productLinks?: ProductLink[]; // Products mentioned in the message
+  responseType?: 'email_copy' | 'clarification' | 'other';
+  clarification?: string;
 }
 
 export interface Message {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { FlowOutlineData, EmailType, AIModel } from '@/types';
+import { FlowOutlineData, AIModel, FlowOutlineEmail } from '@/types';
 import { buildFlowEmailPrompt } from '@/lib/flow-prompts';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -31,12 +31,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { conversationId, flowType, outline, model, emailType } = body as {
+    const { conversationId, flowType, outline, model } = body as {
       conversationId: string;
       flowType: string;
       outline: FlowOutlineData;
       model: AIModel;
-      emailType: EmailType;
     };
 
     // Validate conversation exists and user has access
@@ -85,16 +84,14 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
     
     console.log(`[Flow Generator] Starting generation of ${outline.emails.length} emails for flow: ${outline.flowName}`);
     
-    for (let i = 0; i < outline.emails.length; i++) {
-      const emailOutline = outline.emails[i];
+    const generateEmail = async (emailOutline: FlowOutlineEmail) => {
       const emailStartTime = Date.now();
-      
+
       try {
         console.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} START =====`);
         console.log(`[Flow Generator] Title: ${emailOutline.title}`);
         console.log(`[Flow Generator] Purpose: ${emailOutline.purpose}`);
-        
-        // Create child conversation
+
         console.log(`[Flow Generator] Creating child conversation...`);
         const { data: childConversation, error: childError } = await supabase
           .from('conversations')
@@ -117,32 +114,31 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           console.error(`[Flow Generator] Database error creating conversation:`, childError);
           throw new Error(`Failed to create child conversation: ${childError.message}`);
         }
-        
+
         if (!childConversation) {
           throw new Error(`Failed to create child conversation: No data returned`);
         }
 
         console.log(`[Flow Generator] Child conversation created: ${childConversation.id}`);
-        console.log(`[Flow Generator] Generating email content using ${emailType} format...`);
-        
-        // Generate email content using STANDARD email format
-        // buildFlowEmailPrompt uses STANDARD_EMAIL_PROMPT for 'design' type
-        // and LETTER_EMAIL_PROMPT for 'letter' type (see lib/flow-prompts.ts line 94-96)
+        console.log(`[Flow Generator] Generating email content using ${emailOutline.emailType} format...`);
+
         const prompt = buildFlowEmailPrompt(
           emailOutline,
           outline,
           brandInfo,
           '', // RAG context - can be added later
-          emailType
+          emailOutline.emailType
         );
-        
-        console.log(`[Flow Generator] Using standard email prompt: ${emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT'}`);
+
+        console.log(
+          `[Flow Generator] Using ${
+            emailOutline.emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT'
+          } for Email ${emailOutline.sequence}`
+        );
 
         console.log(`[Flow Generator] Calling Claude API...`);
         let emailContent = '';
 
-        // Always use Claude Sonnet 4.5 for writing emails in flows
-        // (Planning can use GPT-5, but writing should be Claude-only)
         const response = await anthropic.messages.create({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 4000,
@@ -159,7 +155,6 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         console.log(`[Flow Generator] Claude API response received`);
         console.log(`[Flow Generator] Response contains ${response.content.length} blocks`);
 
-        // Extract content from response
         for (const block of response.content) {
           if (block.type === 'text') {
             emailContent += block.text;
@@ -167,12 +162,11 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         }
 
         console.log(`[Flow Generator] Extracted ${emailContent.length} characters of content`);
-        
+
         if (!emailContent || emailContent.length === 0) {
           throw new Error(`No content generated for email ${emailOutline.sequence}`);
         }
 
-        // Save email as first message in child conversation
         console.log(`[Flow Generator] Saving message to database...`);
         const { error: messageError } = await supabase
           .from('messages')
@@ -190,24 +184,31 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         const emailDuration = Date.now() - emailStartTime;
         console.log(`[Flow Generator] ✅ Email ${emailOutline.sequence} completed in ${emailDuration}ms`);
         console.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} END =====\n`);
-        
-        results.push({
-          success: true,
+
+        return {
+          success: true as const,
           conversationId: childConversation.id,
           sequence: emailOutline.sequence
-        });
+        };
       } catch (error) {
         const emailDuration = Date.now() - emailStartTime;
         console.error(`[Flow Generator] ❌ Email ${emailOutline.sequence} FAILED after ${emailDuration}ms`);
         console.error(`[Flow Generator] Error details:`, error);
         console.error(`[Flow Generator] Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
-        
-        results.push({
-          success: false,
+
+        return {
+          success: false as const,
           sequence: emailOutline.sequence,
           error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        };
       }
+    };
+
+    const concurrencyLimit = 2;
+    for (let i = 0; i < outline.emails.length; i += concurrencyLimit) {
+      const batch = outline.emails.slice(i, i + concurrencyLimit);
+      const batchResults = await Promise.all(batch.map(generateEmail));
+      results.push(...batchResults);
     }
     
     const totalDuration = Date.now() - startTime;

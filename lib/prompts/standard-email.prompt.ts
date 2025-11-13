@@ -1,7 +1,7 @@
 /**
  * STANDARD EMAIL PROMPT (Design Emails)
  * 
- * NEW IMPLEMENTATION - Updated with API-first approach
+ * Based on the official Anthropic SDK example
  * System Prompt + User Prompt + Web Search Tool
  * 
  * This prompt is designed to work with:
@@ -9,7 +9,7 @@
  * - max_tokens: 20000
  * - temperature: 1
  * - thinking: { type: 'enabled', budget_tokens: 10000 }
- * - tools: [{ type: 'web_search', name: 'web_search' }]
+ * - tools: [{ type: 'web_search_20250305', name: 'web_search' }]
  */
 
 /**
@@ -69,24 +69,23 @@ When to search: If you're uncertain about specific product details, competitive 
 <output_requirements>
 Your final output must ONLY contain:
 1. Structured email copy with clear section labels
+2. **CRITICAL:** Wrap your entire email copy output in a markdown code block (triple backticks at start and end)
 
-**MANDATORY WRAPPING:**
-- If you are delivering the final email copy, wrap the ENTIRE visible response (all sections) inside "<email_copy>" ... "</email_copy>" tags.
-- If you must ask the user for clarification or cannot write the email yet, wrap your entire visible response inside "<clarification_request>" ... "</clarification_request>" tags.
-- For any other non-email response, wrap the message inside "<non_copy_response>" ... "</non_copy_response>" tags.
-- Start the response immediately inside the tag—do not mention these instructions or the tag itself.
-- When using "<clarification_request>", keep it laser-focused: one brief opener plus a concise list of the exact details you need. No restating the entire problem, no strategy notes, no duplicated explanations.
-- Do NOT place any visible text outside of these tags.
+Example format (replace backtick-code-block with actual triple backticks):
+backtick-code-block
+**HERO SECTION:**
+[Your email copy here...]
+backtick-code-block
 
 Do NOT include:
 - Your strategic analysis or thinking
 - Meta-commentary about the copy
 - Explanations of your choices
-- Anything other than the polished, final copy
+- Anything other than the polished, final copy wrapped in a code block
 </output_requirements>`;
 
 /**
- * User Prompt - The actual task with input placeholders
+ * User Prompt - The main task instructions with all guidelines
  */
 export const STANDARD_EMAIL_USER_PROMPT = `<task>
 Create high-converting email copy for the campaign described in the brief below. The copy must authentically embody the brand voice, be optimized for scanning, vary content formats for visual rhythm, and be designer-ready with clear section structure.
@@ -433,115 +432,123 @@ Only 29% read fully. 71% scan. Every section must work for scanners.
 
 **Example 1: E-Commerce Product Launch (Eco-Friendly Water Bottles)**
 
+\`\`\`
 **HERO SECTION:**
-**Headline:** Your Planet-Friendly Water Bottle Is Here
-**Sub-headline:** Made from plants, not plastic—keeps drinks cold for 24 hours.
-**Call to Action Button:** Pre-Order & Save 20%
+- **Headline:** Your Planet-Friendly Water Bottle Is Here
+- **Sub-headline:** Made from plants, not plastic—keeps drinks cold for 24 hours.
+- **Call to Action Button:** Pre-Order & Save 20%
 
 **Section Title:** What Makes It Different
-**Headline:** Goodbye Plastic, Hello Plants
-**Content:** 
+- **Headline:** Goodbye Plastic, Hello Plants
+- **Content:** 
   • 100% plant-based materials (no petroleum)
   • Stays cold 24 hours, hot 12 hours
   • Dishwasher safe and lifetime guarantee
 
 **Section Title:** The Impact You'll Make
-**Headline:** Every Bottle Saves 156 Plastic Bottles
+- **Headline:** Every Bottle Saves 156 Plastic Bottles
 That's how many single-use bottles the average person uses yearly. With yours, that number drops to zero. Plus, we plant one tree for every bottle sold.
 
 **Section Title:** Limited Time Offer
-**Headline:** Pre-Order Price Ends Friday
+- **Headline:** Pre-Order Price Ends Friday
 
 **FINAL CTA SECTION:**
-**Headline:** Lock In Your Discount Now
-**Sub-headline:** Price increases to $39 after launch—save 20% by ordering today.
-**Call to Action Button:** Pre-Order Now
+- **Headline:** Lock In Your Discount Now
+- **Sub-headline:** Price increases to $39 after launch—save 20% by ordering today.
+- **Call to Action Button:** Pre-Order Now
+\`\`\`
 
 ---
 
 **Example 2: B2B SaaS Free Trial (Project Management Tool)**
 
+\`\`\`
 **HERO SECTION:**
-**Headline:** Manage Projects Without the Spreadsheet Chaos
-**Sub-headline:** One tool for tasks, time tracking, and team communication.
-**Call to Action Button:** Start Free Trial
+- **Headline:** Manage Projects Without the Spreadsheet Chaos
+- **Sub-headline:** One tool for tasks, time tracking, and team communication.
+- **Call to Action Button:** Start Free Trial
 
 **Section Title:** Your Current Reality
-**Headline:** Spreadsheets Weren't Built for This
+- **Headline:** Spreadsheets Weren't Built for This
 You're juggling five different tools. Updates get lost. Deadlines slip. Your team wastes an hour daily just finding information.
 
 **Section Title:** The Simpler Way
-**Headline:** Everything Your Team Needs, One Place
+- **Headline:** Everything Your Team Needs, One Place
   • Assign tasks and track progress in real-time
   • Built-in time tracking (no more guessing)
   • Team chat and file sharing included
 
 **Section Title:** Proof It Works
-**Headline:** Teams Save 15 Hours Per Week
-**Sub-headline:** That's based on data from 10,000+ businesses using our platform.
-**Content:**
+- **Headline:** Teams Save 15 Hours Per Week
+- **Sub-headline:** That's based on data from 10,000+ businesses using our platform.
+- **Content:**
   94% stick with us after trial
   Average project completion 23% faster
   Zero learning curve
 
 **FINAL CTA SECTION:**
-**Headline:** Try It Free for 30 Days
-**Sub-headline:** No credit card required, cancel anytime, keep your data.
-**Call to Action Button:** Start Your Free Trial
+- **Headline:** Try It Free for 30 Days
+- **Sub-headline:** No credit card required, cancel anytime, keep your data.
+- **Call to Action Button:** Start Your Free Trial
+\`\`\`
 
 ---
 
 **Example 3: Educational Webinar Registration**
 
+\`\`\`
 **HERO SECTION:**
-**Headline:** Master AI Marketing in 60 Minutes
-**Sub-headline:** Free live training: Turn AI from buzzword into your biggest advantage.
-**Call to Action Button:** Save My Spot
+- **Headline:** Master AI Marketing in 60 Minutes
+- **Sub-headline:** Free live training: Turn AI from buzzword into your biggest advantage.
+- **Call to Action Button:** Save My Spot
 
 **Section Title:** What You'll Learn
-**Headline:** The Skills Separating Good Marketers From Great Ones
- • Build campaigns with AI (without losing the human touch)
- • 5 prompts that generate ready-to-use content
- • Measure AI's actual impact on your ROI
+- **Headline:** The Skills Separating Good Marketers From Great Ones
+  • Build campaigns with AI (without losing the human touch)
+  • 5 prompts that generate ready-to-use content
+  • Measure AI's actual impact on your ROI
 
 **Section Title:** Your Instructor
-**Headline:** Learn From Someone Who's Been There
+- **Headline:** Learn From Someone Who's Been There
 Sarah Chen built AI strategies for brands spending $50M+ yearly on marketing. Now she's sharing what actually works.
 
 **Section Title:** Webinar Details
-**Headline:** Thursday, November 14 at 2pm ET
- • 60 minutes live (recording sent after)
- • Q&A session included
- • Workbook and templates provided
+- **Headline:** Thursday, November 14 at 2pm ET
+  • 60 minutes live (recording sent after)
+  • Q&A session included
+  • Workbook and templates provided
 
 **FINAL CTA SECTION:**
-**Headline:** Only 500 Spots Available
-**Sub-headline:** Register now—last month's webinar filled in 3 days.
-**Call to Action Button:** Register Free
+- **Headline:** Only 500 Spots Available
+- **Sub-headline:** Register now—last month's webinar filled in 3 days.
+- **Call to Action Button:** Register Free
+\`\`\`
 
 **Example 4: E-Commerce Product Collection (Whisky)**
 
+\`\`\`
 **HERO SECTION:**
-**Headline:** Discover Your Next Favorite Dram
-**Sub-headline:** Limited editions and collector's expressions, shipped with care.
-**Call to Action Button:** Browse Collection
+- **Headline:** Discover Your Next Favorite Dram
+- **Sub-headline:** Limited editions and collector's expressions, shipped with care.
+- **Call to Action Button:** Browse Collection
 
 **Section Title:** New Arrivals This Month
-**Headline:** Just In: Three Exceptional Expressions
+- **Headline:** Just In: Three Exceptional Expressions
   • A Night On Earth: The Journey – Celebrates reunion, limited 2024 release
   • Harmony Collection: Rich Cacao – Chocolate notes, perfectly balanced
   • Classic Cut 2024 – Higher proof, bold character
 
 **Section Title:** Why Collectors Choose Us
-**Headline:** More Than Just Bottles
+- **Headline:** More Than Just Bottles
   • Every shipment fully insured
   • Expert packaging, arrives perfect
   • Authenticity guaranteed
 
 **FINAL CTA SECTION:**
-**Headline:** Your Collection Awaits
-**Sub-headline:** Ships worldwide with full insurance and expert packaging.
-**Call to Action Button:** Start Browsing
+- **Headline:** Your Collection Awaits
+- **Sub-headline:** Ships worldwide with full insurance and expert packaging.
+- **Call to Action Button:** Start Browsing
+\`\`\`
 
 **Designer Notes:**
 "New Arrivals": Use Klaviyo product block with images, prices, and CTAs for each item. Premium aesthetic throughout.
@@ -590,9 +597,6 @@ Before finishing, verify:
 ✅ Are sections clearly labeled with "Section Title:" format?
 ✅ Does it drive toward the specific campaign goal?
 
-✅ Is the entire visible response wrapped in the correct tags ("<email_copy>", "<clarification_request>", or "<non_copy_response>")?
-✅ If I used "<clarification_request>", did I keep it tight—one short intro plus the specific details needed, with zero extra analysis?
-
 
 **CRITICAL CHECKS:**
 - Zero meta-commentary in output ✅
@@ -605,11 +609,21 @@ Before finishing, verify:
 </final_checklist>`;
 
 /**
- * Legacy export for backward compatibility
- * This combines system and user prompt for contexts that expect a single string
+ * Build the complete prompt with variable substitution
  */
-export const STANDARD_EMAIL_PROMPT = `${STANDARD_EMAIL_SYSTEM_PROMPT}
+export function buildStandardEmailPrompt(params: {
+  copyBrief: string;
+  brandVoiceGuidelines: string;
+  additionalContext?: string;
+}): string {
+  return STANDARD_EMAIL_USER_PROMPT
+    .replace('{{COPY_BRIEF}}', params.copyBrief)
+    .replace('{{BRAND_VOICE_GUIDELINES}}', params.brandVoiceGuidelines)
+    .replace('{{ADDITIONAL_CONTEXT}}', params.additionalContext || 'No additional context provided.');
+}
 
----
-
-${STANDARD_EMAIL_USER_PROMPT}`;
+/**
+ * LEGACY: Combined prompt for backward compatibility with flows
+ * This is the user prompt template that flows can use with placeholder substitution
+ */
+export const STANDARD_EMAIL_PROMPT = STANDARD_EMAIL_USER_PROMPT;

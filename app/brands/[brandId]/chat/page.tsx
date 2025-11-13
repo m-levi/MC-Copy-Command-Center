@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useRef, use, useMemo, useCallback, lazy, Suspense, startTransition } from 'react';
+import { useEffect, useState, useRef, use, useMemo, useCallback, lazy, Suspense, startTransition, createContext, useContext } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType, FlowType, FlowOutline, FlowConversation, FlowOutlineData, BulkActionType } from '@/types';
+import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType, FlowType, FlowOutline, FlowConversation, FlowOutlineData, BulkActionType, ProductLink } from '@/types';
 import { AI_MODELS } from '@/lib/ai-models';
 import ChatSidebarEnhanced from '@/components/ChatSidebarEnhanced';
 import { useSidebarState } from '@/hooks/useSidebarState';
@@ -11,11 +11,15 @@ import ChatInput from '@/components/ChatInput';
 import AIStatusIndicator from '@/components/AIStatusIndicator';
 import ThemeToggle from '@/components/ThemeToggle';
 import { executeBulkAction } from '@/lib/conversation-actions';
+import InlineActionBanner from '@/components/InlineActionBanner';
+import FlowGuidanceCard from '@/components/FlowGuidanceCard';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import type { ImperativePanelHandle } from 'react-resizable-panels';
 
 // Lazy load heavy/optional components
 const VirtualizedMessageList = lazy(() => import('@/components/VirtualizedMessageList'));
 const MemorySettings = lazy(() => import('@/components/MemorySettings'));
-const FlowTypeSelector = lazy(() => import('@/components/FlowTypeSelector'));
+const FlowCreationPanel = lazy(() => import('@/components/FlowCreationPanel'));
 const FlowOutlineDisplay = lazy(() => import('@/components/FlowOutlineDisplay'));
 const FlowNavigation = lazy(() => import('@/components/FlowNavigation'));
 const ApproveOutlineButton = lazy(() => import('@/components/ApproveOutlineButton'));
@@ -38,6 +42,7 @@ import {
   prefetchMessages 
 } from '@/lib/cache-manager';
 import { generateCacheKey, getCachedResponse, cacheResponse } from '@/lib/response-cache';
+import { parseAIResponse } from '@/lib/streaming/ai-response-parser';
 import { RequestCoalescer } from '@/lib/performance-utils';
 import { trackEvent, trackPerformance } from '@/lib/analytics';
 import { createStreamState, processStreamChunk, finalizeStream } from '@/lib/stream-parser';
@@ -56,166 +61,35 @@ import { ErrorBoundary, SectionErrorBoundary } from '@/components/ErrorBoundary'
 
 export const dynamic = 'force-dynamic';
 
+type EmailStyleOption = Extract<EmailType, 'design' | 'letter'>;
+
 // Sanitize AI-generated content before saving to database
 const sanitizeContent = (content: string): string => {
-  return DOMPurify.sanitize(content, {
+  const withoutMarkers = stripControlMarkers(content);
+
+  return DOMPurify.sanitize(withoutMarkers, {
     ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote'],
     ALLOWED_ATTR: ['href', 'title', 'target'],
     ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   });
 };
 
+const stripControlMarkers = (value: string | undefined): string => {
+  if (!value) return '';
+  return value
+    .replace(/\[STATUS:\w+\]/g, '')
+    .replace(/\[TOOL:\w+:(?:START|END)\]/g, '')
+    .replace(/\[THINKING:(?:START|END)\]/g, '')
+    .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
+    .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
+    .replace(/\[REMEMBER:[^\]]+\]/g, '');
+};
+
 // Comprehensive email content cleaning with multiple fallback strategies
 const cleanEmailContentFinal = (content: string): string => {
-  let cleaned = content;
-  
-  const clarificationMatch = cleaned.match(/<clarification_request>([\s\S]*?)<\/clarification_request>/i);
-  if (clarificationMatch) {
-    return clarificationMatch[1].trim();
-  }
-
-  const nonCopyMatch = cleaned.match(/<non_copy_response>([\s\S]*?)<\/non_copy_response>/i);
-  if (nonCopyMatch) {
-    return nonCopyMatch[1].trim();
-  }
-
-  const emailCopyMatch = cleaned.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
-  if (emailCopyMatch) {
-    cleaned = emailCopyMatch[1].trim();
-  }
-  
-  // CRITICAL: Try multiple approaches to ensure we get ONLY email copy
-  
-  // Approach 1: Extract everything after email_strategy closing tag
-  const afterStrategyMatch = cleaned.match(/<\/email_strategy>\s*([\s\S]*)/i);
-  if (afterStrategyMatch && afterStrategyMatch[1].trim()) {
-    cleaned = afterStrategyMatch[1].trim();
-  }
-  
-  // Approach 2: Remove email_strategy blocks (in case tags weren't closed properly)
-  cleaned = cleaned.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
-  // Handle unclosed tags - remove from opening tag to first email marker
-  if (cleaned.includes('<email_strategy>')) {
-    const parts = cleaned.split(/<email_strategy>/i);
-    if (parts.length > 1) {
-      // Take everything before the tag and everything after we find an email marker
-      const afterTag = parts.slice(1).join('');
-      const emailMatch = afterTag.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)[\s\S]*/i);
-      cleaned = parts[0] + (emailMatch ? emailMatch[0] : afterTag);
-    }
-  }
-  
-  // Approach 3: Extract only content starting with email structure markers
-  // IMPORTANT: Preserve leading markdown formatting (**, *, ##, etc.)
-  const emailStartMatch = cleaned.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)[\s\S]*/i);
-  if (emailStartMatch && emailStartMatch.index !== undefined) {
-    let startPos = emailStartMatch.index;
-    
-    // Check for leading markdown before the marker
-    const beforeMarker = cleaned.substring(Math.max(0, startPos - 10), startPos);
-    const leadingMarkdownMatch = beforeMarker.match(/(\*\*|\*|##+)\s*$/);
-    
-    if (leadingMarkdownMatch) {
-      // Adjust start position to include leading markdown
-      startPos = startPos - leadingMarkdownMatch[0].length;
-    }
-    
-    cleaned = cleaned.substring(startPos);
-  }
-  
-  // Approach 4: Remove ALL strategy headers (comprehensive list)
-  const allStrategyPatterns = [
-    /\*\*Context Analysis:\*\*[^\n]*/gi,
-    /\*\*Brief Analysis:\*\*[^\n]*/gi,
-    /\*\*Brand Analysis:\*\*[^\n]*/gi,
-    /\*\*Audience Psychology:\*\*[^\n]*/gi,
-    /\*\*Product Listing:\*\*[^\n]*/gi,
-    /\*\*Hero Strategy:\*\*[^\n]*/gi,
-    /\*\*Structure Planning:\*\*[^\n]*/gi,
-    /\*\*CTA Strategy:\*\*[^\n]*/gi,
-    /\*\*Objection Handling:\*\*[^\n]*/gi,
-    /\*\*Product Integration:\*\*[^\n]*/gi,
-  ];
-  
-  allStrategyPatterns.forEach(pattern => {
-    cleaned = cleaned.replace(pattern, '');
-  });
-  
-  // Approach 5: Remove bullet lists that describe strategy
-  // Example: "- Section 3: Service benefits (warranty, delivery, expert support)"
-  cleaned = cleaned.replace(/^-\s+Section \d+:[^\n]*(?:\([^)]*\))?[^\n]*$/gim, '');
-  cleaned = cleaned.replace(/^-\s+Final CTA:[^\n]*$/gim, '');
-  cleaned = cleaned.replace(/^-\s+Hero CTA:[^\n]*$/gim, '');
-  cleaned = cleaned.replace(/^-\s+Section \d+ CTA:[^\n]*$/gim, '');
-  
-  // Remove entire paragraphs that list CTAs or sections
-  cleaned = cleaned.replace(/^\*\*CTA Strategy:\*\*[\s\S]*?(?=\n\n\*\*|HERO SECTION|$)/gim, '');
-  cleaned = cleaned.replace(/^\*\*Structure Planning:\*\*[\s\S]*?(?=\n\n\*\*|HERO SECTION|$)/gim, '');
-  
-  // Approach 6: Remove numbered strategy lists (1., 2., 3., etc.)
-  // Example: "1. Authenticity concerns - addressed through authentication..."
-  cleaned = cleaned.replace(/^\d+\.\s+\*\*[^:]+:\*\*[\s\S]*?(?=\n\n---|\n\nHERO|$)/gim, '');
-  cleaned = cleaned.replace(/^\d+\.\s+[A-Z][^-]*?\s*-\s*addressed[\s\S]*?(?=\n\n|HERO SECTION|$)/gim, '');
-  cleaned = cleaned.replace(/^\d+\.\s+[A-Za-z\s]+ concerns[\s\S]*?(?=\n\n|HERO SECTION|$)/gim, '');
-  
-  // Approach 7: Remove meta-commentary patterns
-  const metaPatterns = [
-    /^I (need to|will|should|must|can)[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
-    /^Let me[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
-    /^Based on[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
-    /^First[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
-    /^Here's[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
-    /^Now[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
-    /^Since[\s\S]*?(?=HERO SECTION|EMAIL SUBJECT|SUBJECT LINE)/i,
-  ];
-  
-  metaPatterns.forEach(pattern => {
-    cleaned = cleaned.replace(pattern, '');
-  });
-  
-  // Approach 8: Remove any remaining [STRATEGY:END] or similar markers
-  cleaned = cleaned.replace(/\[STRATEGY:END\]/gi, '');
-  cleaned = cleaned.replace(/\[STRATEGY:START\]/gi, '');
-  
-  // Approach 9: Remove any text before the first email marker as a final safety
-  // IMPORTANT: Preserve leading markdown formatting (**, *, ##, etc.)
-  const finalMarkerMatch = cleaned.match(/(HERO SECTION:|EMAIL SUBJECT LINE:|SUBJECT LINE:)/i);
-  if (finalMarkerMatch && finalMarkerMatch.index !== undefined && finalMarkerMatch.index > 0) {
-    let cutPosition = finalMarkerMatch.index;
-    
-    // Check for leading markdown before the marker
-    const beforeMarker = cleaned.substring(Math.max(0, cutPosition - 10), cutPosition);
-    const leadingMarkdownMatch = beforeMarker.match(/(\*\*|\*|##+)\s*$/);
-    
-    if (leadingMarkdownMatch) {
-      // Adjust cut position to include leading markdown
-      cutPosition = cutPosition - leadingMarkdownMatch[0].length;
-    }
-    
-    cleaned = cleaned.substring(cutPosition);
-  }
-  
-  // Approach 10: Clean up multi-line strategy blocks that might have been missed
-  // Remove any paragraph that contains multiple strategy keywords
-  const lines = cleaned.split('\n');
-  cleaned = lines.filter(line => {
-    const strategyKeywordCount = [
-      'CTA Strategy', 'Objection Handling', 'Structure Planning',
-      'Product Integration', 'Hero Strategy', 'addressed through'
-    ].filter(keyword => line.includes(keyword)).length;
-    
-    // Keep line if it's part of email structure or has < 2 strategy keywords
-    return strategyKeywordCount < 2 || 
-           line.match(/^(HERO SECTION|SECTION \d+|CALL-TO-ACTION|Headline:|Accent:|Subhead:|CTA:|Content:|---)/);
-  }).join('\n');
-  
-  // Final cleanup: Remove excessive whitespace
-  cleaned = cleaned
-    .replace(/\n{3,}/g, '\n\n') // Max 2 newlines
-    .replace(/^\s+$/gm, '') // Remove lines with only whitespace
+  return stripControlMarkers(content)
+    .replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '')
     .trim();
-  
-  return cleaned;
 };
 
 /**
@@ -224,115 +98,113 @@ const cleanEmailContentFinal = (content: string): string => {
  */
 function parseStreamedContent(fullContent: string): {
   emailCopy: string;
-  emailStrategy: string;
+  clarification: string;
+  otherContent: string;
   thoughtContent: string;
+  responseType: 'email_copy' | 'clarification' | 'other';
+  productLinks: ProductLink[];
 } {
-  // Clean any stray markers that might have leaked through
-  let cleaned = fullContent
-    .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')  // Remove product markers
-    .replace(/\[REMEMBER:[^\]]+\]/g, '')     // Remove memory markers
-    .replace(/\[STATUS:\w+\]/g, '')          // Remove status markers
-    .replace(/\[TOOL:\w+:(START|END)\]/g, '') // Remove tool markers
-    .replace(/\s*\]\s*$/g, '')               // Remove stray closing brackets at end
-    .trim();
-  
-  // Extract email_strategy tags (if present)
-  const strategyMatches = [...cleaned.matchAll(/<email_strategy>([\s\S]*?)<\/email_strategy>/gi)];
-  let emailStrategy = strategyMatches.map(m => m[1].trim()).join('\n\n');
-  
-  // Remove email_strategy from content
-  let remaining = cleaned.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '').trim();
-  
-  logger.log('[Parser] Remaining content length after cleanup:', remaining.length);
-  logger.log('[Parser] Remaining content preview (first 300 chars):', remaining.substring(0, 300));
-  logger.log('[Parser] Remaining content preview (last 300 chars):', remaining.substring(Math.max(0, remaining.length - 300)));
-  
-  // Extract email_copy tags (if present)
-  const emailCopyMatch = remaining.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
-  
-  let emailCopy = '';
-  let thoughtContent = '';
-  
-  if (emailCopyMatch) {
-    // Found email_copy tags - extract content
-    emailCopy = emailCopyMatch[1].trim();
-    
-    // Everything outside email_copy tags is thought
-    const beforeTags = remaining.substring(0, emailCopyMatch.index || 0);
-    const afterTags = remaining.substring((emailCopyMatch.index || 0) + emailCopyMatch[0].length);
-    thoughtContent = (beforeTags + '\n\n' + afterTags).trim();
-    
-    logger.log('[Parser] ✅ Found email_copy tags');
-    logger.log('[Parser] Email copy length:', emailCopy.length);
-    logger.log('[Parser] Thought content length:', thoughtContent.length);
-  } else {
-    // No email_copy tags - FALLBACK: Look for email structure markers
-    // This handles both old format (with <email_copy> tags) and new format (direct output with markdown)
-    // The new standard email prompt (v2) outputs directly without tags, relying on thinking blocks for analysis
-    const emailMarkers = ['HERO SECTION:', 'EMAIL SUBJECT LINE:', 'SUBJECT LINE:', 'SUBJECT:'];
-    let firstMarkerIndex = -1;
-    
-    for (const marker of emailMarkers) {
-      const idx = remaining.indexOf(marker);
-      if (idx >= 0 && (firstMarkerIndex === -1 || idx < firstMarkerIndex)) {
-        firstMarkerIndex = idx;
-      }
+  const parsed = parseAIResponse(fullContent);
+
+  const emailCopy = parsed.emailCopy || '';
+  const clarification = parsed.clarification || '';
+  const otherContent = parsed.other || '';
+  const thoughtContent = parsed.thinking || '';
+  const responseType = parsed.responseType;
+  const productLinks = parsed.productLinks || [];
+
+      logger.log('[Parser] Parsed response summary:', {
+        responseType,
+        emailLength: emailCopy.length,
+        clarificationLength: clarification.length,
+        otherLength: otherContent.length,
+        thinkingLength: thoughtContent.length,
+        productLinks: productLinks.length,
+        emailPreview: emailCopy?.substring(0, 100),
+        clarificationPreview: clarification?.substring(0, 100),
+        otherPreview: otherContent?.substring(0, 100),
+      });
+
+  return {
+    emailCopy,
+    clarification,
+    otherContent,
+    thoughtContent,
+    responseType,
+    productLinks,
+  };
+}
+
+// Context for sidebar panel control
+import { SidebarPanelContext } from '@/contexts/SidebarPanelContext';
+
+// Wrapper component to handle sidebar panel resizing with native collapse support
+function SidebarPanelWrapper({ 
+  children, 
+  defaultSize, 
+  minSize, 
+  maxSize, 
+  collapsedSize = 5,
+  className 
+}: { 
+  children: React.ReactNode;
+  defaultSize: number;
+  minSize: number;
+  maxSize: number;
+  collapsedSize?: number;
+  className?: string;
+}) {
+  const panelRef = useRef<ImperativePanelHandle>(null);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('sidebarCollapsed') === 'true';
     }
-    
-    if (firstMarkerIndex >= 0) {
-      // Found email marker - but check for leading markdown formatting (**, -, etc.)
-      // Look backwards from marker to capture any leading formatting
-      let startIndex = firstMarkerIndex;
-      
-      // Check if there are ** or other markdown markers immediately before
-      const beforeMarker = remaining.substring(Math.max(0, firstMarkerIndex - 10), firstMarkerIndex);
-      const leadingMarkdownMatch = beforeMarker.match(/(\*\*|\*|##+)\s*$/);
-      
-      if (leadingMarkdownMatch) {
-        // Found leading markdown, adjust start position to include it
-        startIndex = firstMarkerIndex - leadingMarkdownMatch[0].length;
-        logger.log('[Parser] Found leading markdown before marker, including it:', leadingMarkdownMatch[0]);
-      }
-      
-      // Split content at the adjusted position
-      thoughtContent = remaining.substring(0, startIndex).trim();
-      emailCopy = remaining.substring(startIndex).trim();
-      logger.log('[Parser] ⚠️ No email_copy tags, used fallback with marker (standard for new prompt system)');
-    } else {
-      // No markers found - everything is email copy
-      emailCopy = remaining;
-      thoughtContent = '';
-      logger.log('[Parser] ⚠️ No email_copy tags or markers, using all content as email');
-    }
-  }
-  
-  // Final cleanup: Remove any stray markers or brackets that leaked through
-  emailCopy = emailCopy
-    .replace(/\s*\]\s*$/g, '')  // Remove trailing brackets
-    .replace(/\s*\[\s*$/g, '')  // Remove trailing opening brackets
-    .trim();
-  
-  emailStrategy = emailStrategy
-    .replace(/\s*\]\s*$/g, '')
-    .replace(/\s*\[\s*$/g, '')
-    .trim();
-  
-  thoughtContent = thoughtContent
-    .replace(/\s*\]\s*$/g, '')
-    .replace(/\s*\[\s*$/g, '')
-    .trim();
-  
-  logger.log('[Parser] Extracted:', {
-    emailCopy: emailCopy.length,
-    emailStrategy: emailStrategy.length,
-    thoughtContent: thoughtContent.length
+    return false;
   });
-  
-  // Log first 200 chars of each for debugging
-  logger.log('[Parser] Email copy preview:', emailCopy.substring(0, 200));
-  logger.log('[Parser] Thought content preview:', thoughtContent.substring(0, 200));
-  
-  return { emailCopy, emailStrategy, thoughtContent };
+
+  // Sync collapsed state with localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sidebarCollapsed', String(isCollapsed));
+    }
+  }, [isCollapsed]);
+
+  const toggleCollapse = useCallback(() => {
+    if (!panelRef.current) return;
+    
+    if (isCollapsed) {
+      panelRef.current.expand();
+    } else {
+      panelRef.current.collapse();
+    }
+  }, [isCollapsed]);
+
+  const handleCollapse = useCallback(() => {
+    setIsCollapsed(true);
+  }, []);
+
+  const handleExpand = useCallback(() => {
+    setIsCollapsed(false);
+  }, []);
+
+  return (
+    <SidebarPanelContext.Provider value={{ isCollapsed, toggleCollapse }}>
+      <ResizablePanel 
+        ref={panelRef}
+        id="sidebar-panel"
+        defaultSize={isCollapsed ? collapsedSize : defaultSize}
+        minSize={minSize} 
+        maxSize={maxSize}
+        collapsible={true}
+        collapsedSize={collapsedSize}
+        onCollapse={handleCollapse}
+        onExpand={handleExpand}
+        className={className}
+      >
+        {children}
+      </ResizablePanel>
+    </SidebarPanelContext.Provider>
+  );
 }
 
 export default function ChatPage({ params }: { params: Promise<{ brandId: string }> }) {
@@ -364,9 +236,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
   const [pendingConversationSelection, setPendingConversationSelection] = useState<string | null>(null);
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   
   // Flow-related state
   const [showFlowTypeSelector, setShowFlowTypeSelector] = useState(false);
+  const [isCreatingFlowConversation, setIsCreatingFlowConversation] = useState(false);
   const [selectedFlowType, setSelectedFlowType] = useState<FlowType | null>(null);
   const [flowOutline, setFlowOutline] = useState<FlowOutline | null>(null);
   const [flowChildren, setFlowChildren] = useState<Conversation[]>([]);
@@ -1052,6 +926,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
   const handleNewConversation = async () => {
     try {
+      setIsCreatingConversation(true);
+      
       // Abort any ongoing AI generation before switching
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -1066,7 +942,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setIsCreatingConversation(false);
+        return;
+      }
 
       const { data, error } = await supabase
         .from('conversations')
@@ -1096,6 +975,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     } catch (error) {
       logger.error('Error creating conversation:', error);
       toast.error('Failed to create conversation');
+    } finally {
+      setIsCreatingConversation(false);
     }
   };
 
@@ -1263,17 +1144,26 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   // Handle email type change with Flow type selector
   const handleEmailTypeChange = (type: EmailType) => {
     if (type === 'flow') {
-      // Show flow type selector modal
+      if (!currentConversation?.is_flow) {
       setShowFlowTypeSelector(true);
+      }
+      setEmailType('flow');
     } else {
+      setShowFlowTypeSelector(false);
       setEmailType(type);
     }
+  };
+
+  const handleFlowPromptSelect = (prompt: string) => {
+    setDraftContent(prompt);
+    scrollToBottom();
   };
 
   // Handle flow type selection
   const handleSelectFlowType = async (flowType: FlowType) => {
     try {
       logger.log('[Flow] Creating flow conversation for type:', flowType);
+      setIsCreatingFlowConversation(true);
       setShowFlowTypeSelector(false);
       setSelectedFlowType(flowType);
       
@@ -1327,6 +1217,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       toast.error('Failed to create flow');
       // Reset email type
       setEmailType('design');
+    } finally {
+      setIsCreatingFlowConversation(false);
     }
   };
 
@@ -1369,6 +1261,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   // Handle outline approval
   const handleApproveOutline = async (outline: FlowOutlineData) => {
     if (!currentConversation) return;
+
+    let flowProgressChannel: ReturnType<typeof supabase.channel> | null = null;
+    const observedChildIds = new Set<string>();
     
     try {
       setSending(true);
@@ -1377,18 +1272,27 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       logger.log('[Flow UI] Starting flow generation for', outline.emails.length, 'emails');
       
-      // Simulate progress for better UX (actual generation happens on server)
-      // Each email takes approximately 10-15 seconds
-      const progressInterval = setInterval(() => {
-        setFlowGenerationProgress(prev => {
-          // Don't go past the total - 1 (let the API completion set it to total)
-          if (prev >= outline.emails.length - 1) {
-            return prev;
+      // Subscribe to child conversation inserts for real-time progress updates
+      flowProgressChannel = supabase
+        .channel(`flow-generation:${currentConversation.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'conversations',
+            filter: `parent_conversation_id=eq.${currentConversation.id}`,
+          },
+          (payload) => {
+            const inserted = payload.new as { id?: string } | null;
+            if (inserted?.id) {
+              observedChildIds.add(inserted.id);
+              const progressCount = Math.min(outline.emails.length, observedChildIds.size);
+              setFlowGenerationProgress(progressCount);
+            }
           }
-          logger.log('[Flow UI] Progress update:', prev + 1, '/', outline.emails.length);
-          return prev + 1;
-        });
-      }, 12000); // Update every 12 seconds (more realistic timing)
+        )
+        .subscribe();
       
       logger.log('[Flow UI] Calling generate-emails API...');
       const response = await fetch('/api/flows/generate-emails', {
@@ -1397,20 +1301,18 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         body: JSON.stringify({
           conversationId: currentConversation.id,
           flowType: currentConversation.flow_type,
-          outline,
-          model: selectedModel,
-          emailType: 'design' // Default to design emails for flows
+          outline: outline,
+          model: selectedModel
         })
       });
 
-      clearInterval(progressInterval);
       logger.log('[Flow UI] API call completed, response status:', response.status);
-      
-      // Set progress to completion
-      setFlowGenerationProgress(outline.emails.length);
 
       const result = await response.json();
       logger.log('[Flow UI] Generation result:', result);
+      if (typeof result.generated === 'number') {
+        setFlowGenerationProgress(result.generated);
+      }
       
       if (result.success) {
         toast.success(`Generated ${result.generated} emails successfully!`, {
@@ -1469,6 +1371,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         logger.error('[Flow UI] Error reloading after failure:', reloadError);
       }
     } finally {
+      if (flowProgressChannel) {
+        flowProgressChannel.unsubscribe();
+      }
       setSending(false);
       setIsGeneratingFlow(false);
       setFlowGenerationProgress(0);
@@ -1612,7 +1517,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Read streaming response
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let fullContent = '';
+      let rawStreamContent = '';
+      let streamingContent = '';
+      let finalEmailCopy = '';
+      let finalClarification = '';
+      let finalThinking = '';
+      let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'other';
+      let finalContent = '';
+      let productLinks: ProductLink[] = [];
 
       if (reader) {
         while (true) {
@@ -1620,6 +1532,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
+          rawStreamContent += chunk;
           
           // Parse status markers
           const statusMatch = chunk.match(/\[STATUS:(\w+)\]/g);
@@ -1628,22 +1541,76 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               const status = match.replace('[STATUS:', '').replace(']', '') as AIStatus;
               setAiStatus(status);
             });
-            const cleanChunk = chunk.replace(/\[STATUS:\w+\]/g, '');
-            fullContent += cleanChunk;
-          } else {
-            fullContent += chunk;
           }
+
+          // Clean control markers for streaming display
+          let cleanChunk = chunk
+            .replace(/\[STATUS:\w+\]/g, '')
+            .replace(/\[TOOL:\w+:(START|END)\]/g, '')
+            .replace(/\[THINKING:START\]/g, '')
+            .replace(/\[THINKING:END\]/g, '')
+            .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
+            .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
+            .replace(/\[REMEMBER:[^\]]+\]/g, '');
+
+          if (cleanChunk) {
+            streamingContent += cleanChunk;
 
           // Update message in real-time
           setMessages((prev) =>
             prev.map((msg, idx) =>
               idx === messageIndex
-                ? { ...msg, content: fullContent }
+                  ? { ...msg, content: streamingContent }
                 : msg
             )
           );
+          }
         }
       }
+
+      const parsed = parseStreamedContent(rawStreamContent);
+      finalEmailCopy = parsed.emailCopy;
+      finalClarification = parsed.clarification;
+      const finalOtherContent = parsed.otherContent;
+      finalThinking = parsed.thoughtContent;
+      finalResponseType = parsed.responseType;
+      productLinks = parsed.productLinks;
+
+      finalContent =
+        finalResponseType === 'clarification'
+          ? finalClarification
+          : finalResponseType === 'other'
+            ? finalOtherContent
+            : finalEmailCopy || parsed.clarification || streamingContent.trim();
+      finalContent = stripControlMarkers(finalContent);
+
+      const metadataPayload: Record<string, any> = {
+        responseType: finalResponseType,
+      };
+      if (productLinks.length > 0) {
+        metadataPayload.productLinks = productLinks;
+      }
+      if (finalResponseType === 'clarification' && finalClarification) {
+        metadataPayload.clarification = finalClarification;
+      }
+      const metadataToSave = Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
+
+      // Final update with parsed content and metadata
+      setMessages((prev) =>
+        prev.map((msg, idx) =>
+          idx === messageIndex
+            ? {
+                ...msg,
+                content: finalContent,
+                thinking: finalThinking,
+                metadata: {
+                  ...msg.metadata,
+                  ...metadataPayload,
+                },
+              }
+            : msg
+        )
+      );
 
       // IMPORTANT: Reset status to idle
       logger.log('[Regenerate] Completed, resetting status to idle');
@@ -1653,7 +1620,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Update message in database
       await supabase
         .from('messages')
-        .update({ content: fullContent })
+        .update({
+          content: sanitizeContent(finalContent),
+          thinking: finalThinking ? sanitizeContent(finalThinking) : null,
+          metadata: metadataToSave,
+        })
         .eq('id', messages[messageIndex].id);
 
     } catch (error: any) {
@@ -1726,7 +1697,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let fullContent = '';
+      let rawStreamContent = '';
+      let streamingContent = '';
+      let finalEmailCopy = '';
+      let finalClarification = '';
+      let finalThinking = '';
+      let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'other';
+      let finalContent = '';
+      let productLinks: ProductLink[] = [];
 
       if (reader) {
         while (true) {
@@ -1734,6 +1712,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
+          rawStreamContent += chunk;
           
           const statusMatch = chunk.match(/\[STATUS:(\w+)\]/g);
           if (statusMatch) {
@@ -1741,21 +1720,73 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               const status = match.replace('[STATUS:', '').replace(']', '') as AIStatus;
               setAiStatus(status);
             });
-            const cleanChunk = chunk.replace(/\[STATUS:\w+\]/g, '');
-            fullContent += cleanChunk;
-          } else {
-            fullContent += chunk;
           }
+
+          let cleanChunk = chunk
+            .replace(/\[STATUS:\w+\]/g, '')
+            .replace(/\[TOOL:\w+:(START|END)\]/g, '')
+            .replace(/\[THINKING:START\]/g, '')
+            .replace(/\[THINKING:END\]/g, '')
+            .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
+            .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
+            .replace(/\[REMEMBER:[^\]]+\]/g, '');
+
+          if (cleanChunk) {
+            streamingContent += cleanChunk;
 
           setMessages((prev) =>
             prev.map((msg, idx) =>
               idx === lastAIMessageIndex
-                ? { ...msg, content: fullContent }
+                  ? { ...msg, content: streamingContent }
                 : msg
             )
           );
+          }
         }
       }
+
+      const parsed = parseStreamedContent(rawStreamContent);
+      finalEmailCopy = parsed.emailCopy;
+      finalClarification = parsed.clarification;
+      const finalOtherContent = parsed.otherContent;
+      finalThinking = parsed.thoughtContent;
+      finalResponseType = parsed.responseType;
+      productLinks = parsed.productLinks;
+
+      finalContent =
+        finalResponseType === 'clarification'
+          ? finalClarification
+          : finalResponseType === 'other'
+            ? finalOtherContent
+            : finalEmailCopy || parsed.clarification || streamingContent.trim();
+      finalContent = stripControlMarkers(finalContent);
+
+      const metadataPayload: Record<string, any> = {
+        responseType: finalResponseType,
+      };
+      if (productLinks.length > 0) {
+        metadataPayload.productLinks = productLinks;
+      }
+      if (finalResponseType === 'clarification' && finalClarification) {
+        metadataPayload.clarification = finalClarification;
+      }
+      const metadataToSave = Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
+
+      setMessages((prev) =>
+        prev.map((msg, idx) =>
+          idx === lastAIMessageIndex
+            ? {
+                ...msg,
+                content: finalContent,
+                thinking: finalThinking,
+                metadata: {
+                  ...msg.metadata,
+                  ...metadataPayload,
+                },
+              }
+            : msg
+        )
+      );
 
       // IMPORTANT: Reset status to idle
       logger.log('[RegenerateSection] Completed, resetting status to idle');
@@ -1765,7 +1796,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Update message in database
       await supabase
         .from('messages')
-        .update({ content: fullContent })
+        .update({
+          content: sanitizeContent(finalContent),
+          thinking: finalThinking ? sanitizeContent(finalThinking) : null,
+          metadata: metadataToSave,
+        })
         .eq('id', messages[lastAIMessageIndex].id);
 
       toast.success('Section regenerated!');
@@ -2010,12 +2045,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let streamState = createStreamState();
-      let productLinks: any[] = [];
+      let productLinks: ProductLink[] = [];
       let checkpointCounter = 0;
-      let rawStreamContent = ''; // Accumulate full raw content
-      let allStreamedContent = ''; // Accumulate ALL content (thinking + main response)
+      let rawStreamContent = ''; // Accumulate full raw content for debugging
+      let allStreamedContent = ''; // Accumulate text content (email copy)
+      let allThinkingContent = ''; // Accumulate thinking content separately
       let finalEmailCopy = ''; // Final parsed email copy
+      let finalClarification = ''; // Final parsed clarification copy
       let finalThinking = ''; // Final parsed thinking content
+      let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'other';
+      let finalContent = ''; // Final response content (email or clarification)
       const CHECKPOINT_INTERVAL = 100; // Create checkpoint every 100 chunks
       
       // Throttle UI updates to 60fps max for smoother performance
@@ -2024,128 +2063,164 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       let pendingUpdate = false;
 
       logger.log('[Stream] Starting to read response...');
+      logger.log('═'.repeat(70));
+      logger.log('🔍 DEBUG MODE: RAW API RESPONSE LOGGING ENABLED');
+      logger.log('═'.repeat(70));
+      
       if (reader) {
         try {
+          let buffer = ''; // Buffer for incomplete JSON messages
+          
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+              logger.log('═'.repeat(70));
+              logger.log('📊 STREAM COMPLETE - FULL RAW CONTENT:');
+              logger.log('═'.repeat(70));
+              logger.log(rawStreamContent);
+              logger.log('═'.repeat(70));
+              logger.log('📏 Total Length:', rawStreamContent.length, 'characters');
+              logger.log('═'.repeat(70));
+              break;
+            }
 
             const chunk = decoder.decode(value, { stream: true });
-            rawStreamContent += chunk; // Accumulate for product extraction
+            buffer += chunk;
             
-            if (checkpointCounter === 0) {
-              logger.log('[Stream] First chunk received:', chunk.substring(0, 100));
-            }
+            rawStreamContent += chunk; // Accumulate for debugging
             
-            // Parse thinking markers - native AI thinking blocks (for status indication only)
-            if (chunk.includes('[THINKING:START]')) {
-              setAiStatus('thinking');
-              continue;
-            }
-            if (chunk.includes('[THINKING:END]')) {
-              setAiStatus('analyzing_brand');
-              continue;
-            }
+            // Parse JSON messages (one per line)
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
             
-            // Parse thinking chunk content - accumulate to allStreamedContent
-            const thinkingChunkMatch = chunk.match(/\[THINKING:CHUNK\]([\s\S]*?)(?=\[|$)/);
-            if (thinkingChunkMatch) {
-              const thinkingText = thinkingChunkMatch[1];
-              allStreamedContent += thinkingText;
+            for (const line of lines) {
+              if (!line.trim()) continue;
               
-              // Update message - show everything in thinking during stream
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === aiMessageId
-                    ? { ...msg, thinking: allStreamedContent, content: '' }
-                    : msg
-                )
-              );
-              continue;
-            }
-            
-            // Parse tool markers - add to accumulated content
-            const toolMatch = chunk.match(/\[TOOL:(\w+):(START|END)\]/g);
-            if (toolMatch) {
-              toolMatch.forEach((match) => {
-                const toolParts = match.match(/\[TOOL:(\w+):(START|END)\]/);
-                if (toolParts) {
-                  const [, toolName, action] = toolParts;
-                  if (action === 'START') {
-                    logger.log(`[Tool] ${toolName} started`);
-                    setAiStatus('searching_web');
-                    allStreamedContent += `\n\n[Using web search to find information...]\n\n`;
-                  } else if (action === 'END') {
-                    logger.log(`[Tool] ${toolName} completed`);
-                    allStreamedContent += `\n[Web search complete]\n\n`;
-                  }
-                }
-              });
-            }
-            
-            // Parse status markers
-            const statusMatch = chunk.match(/\[STATUS:(\w+)\]/g);
-            if (statusMatch) {
-              statusMatch.forEach((match) => {
-                const status = match.replace('[STATUS:', '').replace(']', '') as AIStatus;
-                setAiStatus(status);
+              try {
+                const message = JSON.parse(line);
+                logger.log('📨 Parsed message:', message.type, message);
                 
-                // Update sidebar status for thinking or web search
-                if (status === 'thinking') {
-                  sidebarState.updateConversationStatus(currentConversation.id, 'ai_responding', 5);
-                } else if (status === 'searching_web') {
-                  sidebarState.updateConversationStatus(currentConversation.id, 'ai_responding', 8);
-                }
-              });
-            }
-            
-            // Clean control markers from chunk
-            let cleanChunk = chunk
-              .replace(/\[STATUS:\w+\]/g, '')
-              .replace(/\[TOOL:\w+:(START|END)\]/g, '')
-              .replace(/\[THINKING:START\]/g, '')
-              .replace(/\[THINKING:END\]/g, '')
-              .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
-              .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
-              .replace(/\[REMEMBER:[^\]]+\]/g, '');
-            
-            // Accumulate ALL content (including tags) to allStreamedContent
-            if (cleanChunk) {
-              allStreamedContent += cleanChunk;
-              
-              // Throttle UI updates to prevent choppy scrolling
-              const now = Date.now();
-              if (now - lastUpdateTime >= UPDATE_THROTTLE || !pendingUpdate) {
-                lastUpdateTime = now;
-                pendingUpdate = true;
-                
-                // Use requestAnimationFrame for smoother updates
-                requestAnimationFrame(() => {
-                  setMessages((prev) => {
-                    const updated = prev.map((msg) =>
-                      msg.id === aiMessageId
-                        ? { ...msg, thinking: allStreamedContent, content: '' }
-                        : msg
-                    );
-                    
-                    if (checkpointCounter % 50 === 0) {
-                      logger.log('[Stream] Updating thinking, length:', allStreamedContent.length);
+                switch (message.type) {
+                  case 'status':
+                    setAiStatus(message.status as AIStatus);
+                    // Update sidebar status for thinking or web search
+                    if (message.status === 'thinking') {
+                      sidebarState.updateConversationStatus(currentConversation.id, 'ai_responding', 5);
+                    } else if (message.status === 'searching_web') {
+                      sidebarState.updateConversationStatus(currentConversation.id, 'ai_responding', 8);
                     }
+                    break;
                     
-                    return updated;
-                  });
-                  pendingUpdate = false;
-                });
+                  case 'thinking_start':
+                    setAiStatus('thinking');
+                    break;
+                    
+                  case 'thinking':
+                    // Accumulate thinking content
+                    allThinkingContent += message.content;
+                    // Update message to show thinking in real-time
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === aiMessageId
+                          ? { ...msg, thinking: allThinkingContent, content: '' }
+                          : msg
+                      )
+                    );
+                    break;
+                    
+                  case 'thinking_end':
+                    setAiStatus('analyzing_brand');
+                    break;
+                    
+                  case 'tool_use':
+                    if (message.status === 'start') {
+                      logger.log(`[Tool] ${message.tool} started`);
+                      setAiStatus('searching_web');
+                      
+                      // Add web search indicator to thinking content for UI display
+                      if (message.tool === 'web_search') {
+                        allThinkingContent += `\n\n[Using web search to find information...]\n\n`;
+                        // Update message to show the indicator immediately
+                        setMessages((prev) =>
+                          prev.map((msg) =>
+                            msg.id === aiMessageId
+                              ? { ...msg, thinking: allThinkingContent, content: allStreamedContent }
+                              : msg
+                          )
+                        );
+                      }
+                    } else if (message.status === 'end') {
+                      logger.log(`[Tool] ${message.tool} completed`);
+                      
+                      // Add web search complete indicator
+                      if (message.tool === 'web_search') {
+                        allThinkingContent += `[Web search complete]\n\n`;
+                        // Update message to show completion
+                        setMessages((prev) =>
+                          prev.map((msg) =>
+                            msg.id === aiMessageId
+                              ? { ...msg, thinking: allThinkingContent, content: allStreamedContent }
+                              : msg
+                          )
+                        );
+                      }
+                    }
+                    break;
+                    
+                  case 'text':
+                    // Clean text content (the actual email copy)
+                    {
+                      const cleanChunk = message.content;
+                      allStreamedContent += cleanChunk;
+              
+                      // Throttle UI updates to prevent choppy scrolling
+                      const now = Date.now();
+                      if (now - lastUpdateTime >= UPDATE_THROTTLE || !pendingUpdate) {
+                        lastUpdateTime = now;
+                        pendingUpdate = true;
+                        
+                        // Use requestAnimationFrame for smoother updates
+                        requestAnimationFrame(() => {
+                          setMessages((prev) => {
+                            const updated = prev.map((msg) =>
+                              msg.id === aiMessageId
+                                ? { ...msg, content: allStreamedContent, thinking: allThinkingContent }
+                                : msg
+                            );
+                            
+                            if (checkpointCounter % 50 === 0) {
+                              logger.log('[Stream] Updating content, length:', allStreamedContent.length);
+                            }
+                            
+                            return updated;
+                          });
+                          pendingUpdate = false;
+                        });
+                      }
+                      
+                      checkpointCounter++;
+                    }
+                    break;
+                    
+                  case 'products':
+                    productLinks = message.products || [];
+                    logger.log('[Stream] Received product links:', productLinks.length);
+                    break;
+                    
+                  default:
+                    logger.warn('[Stream] Unknown message type:', message.type);
+                }
+              } catch (error) {
+                logger.error('[Stream] Error parsing JSON message:', error, 'Line:', line);
               }
             }
             
             // Create checkpoint periodically for recovery
-            checkpointCounter++;
             if (checkpointCounter % CHECKPOINT_INTERVAL === 0) {
               saveCheckpoint({
                 conversationId: currentConversation.id,
                 messageId: aiMessageId,
-                content: allStreamedContent,
+                content: rawStreamContent,
                 timestamp: Date.now(),
                 isComplete: false,
               });
@@ -2153,115 +2228,74 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           }
           
           // ====================================================================
-          // POST-PROCESSING: Parse complete content after streaming finishes
+          // POST-PROCESSING: Content is already clean!
           // ====================================================================
           
-          logger.log('[PostProcess] Stream complete, parsing accumulated content...');
-          logger.log('[PostProcess] Total accumulated:', allStreamedContent.length, 'chars');
-          logger.log('[PostProcess] First 300 chars:', allStreamedContent.substring(0, 300));
+          logger.log('[PostProcess] Stream complete!');
+          logger.log('[PostProcess] Total content:', allStreamedContent.length, 'chars');
+          logger.log('[PostProcess] Total thinking:', allThinkingContent.length, 'chars');
+          logger.log('[PostProcess] Product links:', productLinks.length);
           
-          // Use the clean parser function - one pass, no booleans
-          const parsed = parseStreamedContent(allStreamedContent);
+          logger.log('═'.repeat(70));
+          logger.log('✅ FINAL CLEAN CONTENT:');
+          logger.log('═'.repeat(70));
+          logger.log('Content preview:', allStreamedContent.substring(0, 300));
+          logger.log('Thinking preview:', allThinkingContent.substring(0, 300));
+          logger.log('═'.repeat(70));
           
-          // Build final thinking content with sections
-          const finalThinkingSections = [];
+          // Content is already clean from the structured messages!
+          finalThinking = allThinkingContent;
+          finalEmailCopy = allStreamedContent;
+          finalClarification = '';
+          const finalOtherContent = '';
+          finalResponseType = 'email_copy';
+          // productLinks already set from messages
+
+          // Ensure finalContent is always a valid string
+          finalContent =
+            finalResponseType === 'clarification'
+              ? (finalClarification || '')
+              : finalResponseType === 'other'
+                ? (finalOtherContent || '')
+                : (finalEmailCopy || finalClarification || finalOtherContent || '');
           
-          // Add thought content (if any)
-          if (parsed.thoughtContent) {
-            finalThinkingSections.push(parsed.thoughtContent);
-          }
+          finalContent = stripControlMarkers(finalContent);
           
-          // Add email strategy with marker for ThoughtProcess component to parse
-          if (parsed.emailStrategy) {
-            finalThinkingSections.push('<email_strategy>\n' + parsed.emailStrategy + '\n</email_strategy>');
-          }
-          
-          finalThinking = finalThinkingSections.join('\n\n');
-          finalEmailCopy = parsed.emailCopy;
-          
-          logger.log('[PostProcess] Final separation:');
-          logger.log('[PostProcess] - Email copy:', finalEmailCopy.length, 'chars');
-          logger.log('[PostProcess] - Thinking:', finalThinking.length, 'chars');
-          logger.log('[PostProcess] - Strategy:', parsed.emailStrategy.length, 'chars');
-          
-          // Final update with cleanly separated content
+          logger.log('═'.repeat(70));
+          logger.log('✅ FINAL CONTENT TO DISPLAY:');
+          logger.log('═'.repeat(70));
+          logger.log(finalContent);
+          logger.log('═'.repeat(70));
+
+          logger.log('[PostProcess] Final separation:', {
+            responseType: finalResponseType,
+            emailCopyLength: finalEmailCopy.length,
+            clarificationLength: finalClarification.length,
+            thinkingLength: finalThinking.length,
+            productLinks: productLinks.length,
+          });
+
+          const existingMessage = messages.find((msg) => msg.id === aiMessageId);
+          const baseMetadata = existingMessage?.metadata || {};
+
+          // Final update with cleanly separated content and metadata
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === aiMessageId
-                ? { ...msg, content: finalEmailCopy, thinking: finalThinking }
+                ? {
+                    ...msg,
+                    content: finalContent,
+                    thinking: finalThinking,
+                    metadata: {
+                      ...baseMetadata,
+                      productLinks,
+                      responseType: finalResponseType,
+                      clarification: finalClarification || undefined,
+                    },
+                  }
                 : msg
             )
           );
-          
-          // Extract product links from complete stream (after all chunks received)
-          logger.log('[ProductExtract] Checking for PRODUCTS marker in stream...');
-          logger.log('[ProductExtract] Raw stream length:', rawStreamContent.length);
-          logger.log('[ProductExtract] Raw stream last 500 chars:', rawStreamContent.slice(-500));
-          
-          // Improved regex: Match [PRODUCTS:...] where ... is JSON that may contain brackets
-          // Strategy: Find [PRODUCTS: then match balanced brackets to find the closing ]
-          const productsMarkerIndex = rawStreamContent.indexOf('[PRODUCTS:');
-          if (productsMarkerIndex !== -1) {
-            logger.log('[ProductExtract] PRODUCTS marker found at index:', productsMarkerIndex);
-            
-            // Extract everything after [PRODUCTS:
-            const afterMarker = rawStreamContent.substring(productsMarkerIndex + '[PRODUCTS:'.length);
-            
-            // Find the closing ] by counting brackets (handles nested JSON arrays/objects)
-            let bracketCount = 0;
-            let jsonEndIndex = -1;
-            
-            for (let i = 0; i < afterMarker.length; i++) {
-              const char = afterMarker[i];
-              if (char === '[') bracketCount++;
-              if (char === ']') {
-                if (bracketCount === 0) {
-                  // Found the closing ] of [PRODUCTS:...]
-                  jsonEndIndex = i;
-                  break;
-                }
-                bracketCount--;
-              }
-            }
-            
-            if (jsonEndIndex !== -1) {
-              const jsonString = afterMarker.substring(0, jsonEndIndex).trim();
-              logger.log('[ProductExtract] Extracted JSON string length:', jsonString.length);
-              logger.log('[ProductExtract] JSON preview:', jsonString.substring(0, 200));
-              
-              try {
-                // Validate JSON before parsing
-                if (jsonString && jsonString.startsWith('[') && jsonString.endsWith(']')) {
-                  productLinks = JSON.parse(jsonString);
-                  logger.log('[ProductExtract] Parsed product links:', productLinks);
-                  // Validate structure
-                  if (!Array.isArray(productLinks)) {
-                    logger.warn('Product links is not an array, resetting');
-                    productLinks = [];
-                  } else {
-                    logger.log('[ProductExtract] Successfully parsed', productLinks.length, 'product links');
-                  }
-                } else {
-                  logger.warn('Invalid product links format - JSON does not start/end with brackets:', jsonString.substring(0, 50));
-                  productLinks = [];
-                }
-              } catch (e) {
-                logger.error('Failed to parse product links JSON:', e);
-                logger.error('JSON string:', jsonString.substring(0, 500));
-                // Silent fail - product links are optional
-                productLinks = [];
-              }
-            } else {
-              logger.warn('[ProductExtract] Could not find closing bracket for PRODUCTS marker');
-            }
-          } else {
-            logger.log('[ProductExtract] No PRODUCTS marker found in stream');
-            // Debug: Check if there are any similar patterns
-            const similarPatterns = rawStreamContent.match(/\[PRODUCT[^\]]*/g);
-            if (similarPatterns) {
-              logger.log('[ProductExtract] Found similar patterns:', similarPatterns);
-            }
-          }
           
           // Clear checkpoint after successful completion
           clearCheckpoint(aiMessageId);
@@ -2271,30 +2305,48 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           if (recovered) {
             logger.log('[Recovery] Recovered stream from checkpoint:', recovered.content.length, 'chars');
             
-            // Re-parse the recovered content to separate email/thinking/strategy
-            allStreamedContent = recovered.content;
-            const parsed = parseStreamedContent(allStreamedContent);
-            
-            finalThinking = '';
-            if (parsed.thoughtContent) {
+            // Re-parse the recovered content to separate fields
+            rawStreamContent = recovered.content;
+            const parsed = parseStreamedContent(rawStreamContent);
+
               finalThinking = parsed.thoughtContent;
-            }
-            if (parsed.emailStrategy) {
-              finalThinking = finalThinking 
-                ? finalThinking + '\n\n<email_strategy>\n' + parsed.emailStrategy + '\n</email_strategy>'
-                : '<email_strategy>\n' + parsed.emailStrategy + '\n</email_strategy>';
-            }
             finalEmailCopy = parsed.emailCopy;
-            
-            logger.log('[Recovery] Parsed recovered content:');
-            logger.log('[Recovery] - Email copy:', finalEmailCopy.length, 'chars');
-            logger.log('[Recovery] - Thinking:', finalThinking.length, 'chars');
+            finalClarification = parsed.clarification;
+            finalResponseType = parsed.responseType;
+            productLinks = parsed.productLinks;
+
+            // Ensure finalContent is always a valid string (recovery path)
+            finalContent =
+              finalResponseType === 'clarification'
+                ? (finalClarification || '')
+                : (finalEmailCopy || parsed.clarification || '');
+            finalContent = stripControlMarkers(finalContent);
+
+            logger.log('[Recovery] Parsed recovered content:', {
+              responseType: finalResponseType,
+              emailCopyLength: finalEmailCopy.length,
+              clarificationLength: finalClarification.length,
+              thinkingLength: finalThinking.length,
+            });
+
+            const existingMessage = messages.find((msg) => msg.id === aiMessageId);
+            const baseMetadata = existingMessage?.metadata || {};
             
             // Update UI with recovered content
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === aiMessageId
-                  ? { ...msg, content: finalEmailCopy, thinking: finalThinking }
+                  ? {
+                      ...msg,
+                      content: finalContent,
+                      thinking: finalThinking,
+                      metadata: {
+                        ...baseMetadata,
+                        productLinks,
+                        responseType: finalResponseType,
+                        clarification: finalClarification || undefined,
+                      },
+                    }
                   : msg
               )
             );
@@ -2314,15 +2366,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       // Validate that we have usable parsed content before proceeding
-      // Check the parsed outputs (finalEmailCopy or finalThinking), not raw stream data
-      // This allows legitimate partial responses (thinking without email, or email without thinking)
-      if (!finalEmailCopy && !finalThinking) {
+      // Check the parsed outputs (finalContent or finalThinking), not raw stream data
+      // This allows legitimate partial responses (thinking without copy, or clarification requests)
+      if (!finalContent && !finalThinking) {
         logger.error('[Stream] No usable content after parsing. Raw stream length:', allStreamedContent.length);
         logger.error('[Stream] First 200 chars of raw stream:', allStreamedContent.substring(0, 200));
         throw new Error('No usable content could be extracted from the response. The AI may have returned an empty or malformed response.');
       }
 
-      const fullContent = finalEmailCopy;
+      const fullContent = finalContent;
 
       // IMPORTANT: Reset AI status to idle IMMEDIATELY after stream completes
       logger.log('[Stream] Completed successfully, resetting status to idle');
@@ -2332,9 +2384,53 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Update sidebar status - completion
       sidebarState.updateConversationStatus(currentConversation.id, 'idle');
 
+      // CRITICAL: Validate content before saving
+      const trimmedContent = finalContent?.trim() || '';
+      const hasThinking = finalThinking && finalThinking.trim().length > 0;
+      const hasValidContent = trimmedContent.length > 0 && trimmedContent !== ']';
+      
+      // Allow messages with only thinking content (for debugging/analysis purposes)
+      // But reject completely empty messages
+      if (!hasValidContent && !hasThinking) {
+        logger.error('[Validation] Invalid final content detected:', {
+          finalContentType: typeof finalContent,
+          finalContentLength: finalContent?.length || 0,
+          finalContentPreview: finalContent?.substring(0, 200) || 'undefined',
+          responseType: finalResponseType,
+          emailCopyLength: finalEmailCopy?.length || 0,
+          emailCopyPreview: finalEmailCopy?.substring(0, 200) || 'empty',
+          clarificationLength: finalClarification?.length || 0,
+          clarificationPreview: finalClarification?.substring(0, 200) || 'empty',
+          rawStreamLength: rawStreamContent?.length || 0,
+          rawStreamPreview: rawStreamContent?.substring(0, 1000) || 'empty',
+          hasThinking,
+          thinkingLength: finalThinking?.length || 0
+        });
+        throw new Error('No valid content generated - refusing to save empty message. The AI response may have been malformed or contained only control markers.');
+      }
+      
+      // Warn if content looks suspicious but allow it
+      if (hasValidContent && trimmedContent.length < 10) {
+        logger.warn('[Validation] Suspiciously short content detected:', {
+          content: trimmedContent,
+          length: trimmedContent.length,
+          responseType: finalResponseType
+        });
+      }
+
       // Sanitize content before saving to database (XSS protection)
-      const sanitizedContent = sanitizeContent(finalEmailCopy);
+      const sanitizedContent = sanitizeContent(finalContent);
       const sanitizedThinking = finalThinking ? sanitizeContent(finalThinking) : null;
+      const metadataPayload: Record<string, any> = {
+        responseType: finalResponseType,
+      };
+      if (productLinks.length > 0) {
+        metadataPayload.productLinks = productLinks;
+      }
+      if (finalResponseType === 'clarification' && finalClarification) {
+        metadataPayload.clarification = finalClarification;
+      }
+      const metadataToSave = Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
 
       // Save complete AI message to database with product links and thinking
       logger.log('[Database] Saving message with product links:', productLinks.length, 'links');
@@ -2360,7 +2456,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           role: 'assistant',
           content: sanitizedContent,
           thinking: sanitizedThinking,
-          metadata: productLinks.length > 0 ? { productLinks } : null,
+          metadata: metadataToSave,
         })
         .select()
         .single();
@@ -2397,7 +2493,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
       
       // Detect campaign ideas in planning mode
-      if (conversationMode === 'planning') {
+      if (conversationMode === 'planning' && finalResponseType === 'email_copy' && finalEmailCopy) {
         logger.log('[Campaign] Checking for campaign idea in planning mode');
         logger.log('[Campaign] Full content length:', finalEmailCopy.length);
         logger.log('[Campaign] Content preview:', finalEmailCopy.substring(0, 200));
@@ -2414,6 +2510,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         } else {
           logger.log('[Campaign] No campaign idea detected');
         }
+      } else if (conversationMode === 'planning') {
+        logger.log('[Campaign] Skipping campaign detection (response is not email copy)');
       }
       
       // Cache the response for potential regenerations
@@ -2502,6 +2600,35 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     return null;
   }
 
+  const flowCreationPanel = showFlowTypeSelector && !currentConversation?.is_flow ? (
+    <Suspense
+      fallback={
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl h-60 animate-pulse" />
+      }
+    >
+      <SectionErrorBoundary sectionName="flow creation panel">
+        <FlowCreationPanel
+          onCreate={(flowType) => handleSelectFlowType(flowType)}
+          onCancel={() => {
+            setShowFlowTypeSelector(false);
+            setEmailType('design');
+          }}
+        />
+      </SectionErrorBoundary>
+    </Suspense>
+  ) : null;
+
+  const flowGuidanceCard = currentConversation?.is_flow &&
+    messages.length === 0 &&
+    !pendingOutlineApproval
+      ? (
+        <FlowGuidanceCard
+          flowType={(currentConversation.flow_type ?? selectedFlowType) || null}
+          onPromptSelect={handleFlowPromptSelect}
+        />
+      )
+      : null;
+
   return (
     <div className="relative h-screen bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
       <Toaster position="top-right" />
@@ -2517,23 +2644,54 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         </Suspense>
       )}
       
-      {/* Flow Type Selector Modal */}
-      {showFlowTypeSelector && (
-        <Suspense fallback={<div className="fixed inset-0 bg-black/50 z-50" />}>
-          <SectionErrorBoundary sectionName="flow type selector">
-            <FlowTypeSelector
-              onSelect={handleSelectFlowType}
-              onCancel={() => {
-                setShowFlowTypeSelector(false);
-                setEmailType('design'); // Reset to design if cancelled
+      {/* Enhanced Sidebar and Main Content with Resizable Panels */}
+      <ResizablePanelGroup direction="horizontal" className="h-screen">
+        {/* Sidebar Panel - Desktop only, mobile uses overlay */}
+        <SidebarPanelWrapper
+          defaultSize={25}
+          minSize={5}
+          maxSize={40}
+          collapsedSize={5}
+          className="hidden lg:block"
+        >
+          <SectionErrorBoundary sectionName="sidebar">
+            <ChatSidebarEnhanced
+              brandName={brand.name}
+              brandId={brandId}
+              conversations={filteredConversationsWithStatus}
+              currentConversationId={currentConversation?.id || null}
+              teamMembers={teamMembers}
+              currentFilter={currentFilter}
+              selectedPersonId={selectedPersonId}
+              pinnedConversationIds={sidebarState.pinnedConversationIds}
+              viewMode={sidebarState.viewMode}
+              isMobileOpen={isMobileSidebarOpen}
+              onMobileToggle={setIsMobileSidebarOpen}
+              onFilterChange={handleFilterChange}
+              onNewConversation={handleNewConversation}
+              onSelectConversation={handleSelectConversation}
+              onDeleteConversation={handleDeleteConversation}
+              onRenameConversation={handleRenameConversation}
+              onPrefetchConversation={handlePrefetchConversation}
+              onQuickAction={sidebarState.handleQuickAction}
+              onViewModeChange={sidebarState.setViewMode}
+              onSidebarWidthChange={sidebarState.setSidebarWidth}
+              onBulkAction={handleBulkAction}
+              initialWidth={sidebarState.sidebarWidth}
+              allBrands={allBrands}
+              onBrandSwitch={(newBrandId) => router.push(`/brands/${newBrandId}/chat`)}
+              onNavigateHome={() => router.push('/')}
+              onNewFlow={() => {
+                handleNewConversation();
+                setShowFlowTypeSelector(true);
               }}
+              isCreatingConversation={isCreatingConversation}
             />
           </SectionErrorBoundary>
-        </Suspense>
-      )}
+        </SidebarPanelWrapper>
 
-      {/* Enhanced Sidebar - Fixed overlay on mobile, in-flow on desktop */}
-      <div className="contents lg:flex lg:h-screen">
+        {/* Mobile Sidebar Overlay */}
+        <div className="lg:hidden">
         <SectionErrorBoundary sectionName="sidebar">
           <ChatSidebarEnhanced
             brandName={brand.name}
@@ -2567,9 +2725,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             }}
           />
         </SectionErrorBoundary>
+        </div>
 
-        {/* Main chat area - Full width on mobile, flex-1 on desktop */}
-        <div className="flex flex-col h-screen w-full lg:flex-1 lg:w-auto min-w-0">
+        {/* Resizable Handle - Desktop only */}
+        <ResizableHandle withHandle className="hidden lg:flex" />
+
+        {/* Main chat area */}
+        <ResizablePanel defaultSize={75} minSize={50} className="min-w-0">
+          <div className="flex flex-col h-screen w-full min-w-0">
         {/* Enhanced Navigation Header - Cleaner without breadcrumb */}
         <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
           {/* Mobile hamburger menu - only visible on mobile */}
@@ -2695,6 +2858,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               </div>
             </div>
           ) : messages.length === 0 ? (
+            flowCreationPanel ? (
+              <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="space-y-6">{flowCreationPanel}</div>
+              </div>
+            ) : flowGuidanceCard ? (
+              <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="space-y-6">{flowGuidanceCard}</div>
+              </div>
+            ) : (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-2xl px-4 sm:px-6">
                 <div className="mb-6 flex justify-center">
@@ -2757,10 +2929,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                 </div>
               </div>
             </div>
+            )
           ) : loadingMessages ? (
             /* Loading skeleton */
             <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
               <div className="space-y-6">
+                {flowCreationPanel}
+                {flowGuidanceCard}
                 <MessageSkeleton isUser />
                 <MessageSkeleton />
                 <MessageSkeleton isUser />
@@ -2770,6 +2945,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           ) : messages.length > 50 ? (
             /* Use virtualized list for long conversations (50+ messages) */
             <SectionErrorBoundary sectionName="message list">
+              <div className="max-w-5xl mx-auto space-y-6">
+                {flowCreationPanel}
+                {flowGuidanceCard}
               <VirtualizedMessageList
                 messages={messages}
                 brandId={brandId}
@@ -2799,11 +2977,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   </div>
                 </div>
               )}
+              </div>
             </SectionErrorBoundary>
           ) : (
             /* Regular rendering for shorter conversations */
             <SectionErrorBoundary sectionName="message list">
-              <div className="max-w-5xl mx-auto">
+              <div className="max-w-5xl mx-auto space-y-6">
+                {flowCreationPanel}
+                {flowGuidanceCard}
                 {/* Flow Outline Display for parent flow conversations */}
                 {currentConversation?.is_flow && flowOutline && flowOutline.approved && (
                   <FlowOutlineDisplay
@@ -2874,7 +3055,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             <div className="max-w-4xl mx-auto">
               <ApproveOutlineButton
                 outline={pendingOutlineApproval}
-                conversationId={currentConversation.id}
                 onApprove={() => handleApproveOutline(pendingOutlineApproval)}
                 disabled={sending}
               />
@@ -2889,32 +3069,28 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
          messages.length > 0 &&
          messages[messages.length - 1]?.role === 'assistant' && 
          !sending && (
-          <div className="border-t border-gray-200 dark:border-gray-700 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 px-4 py-3">
-            <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="flex-shrink-0 w-10 h-10 bg-green-600 dark:bg-green-500 rounded-full flex items-center justify-center">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+            <div className="max-w-4xl mx-auto">
+              <InlineActionBanner
+                tone="success"
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                    Campaign idea ready!
-                  </p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">
-                    {detectedCampaign.title}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => handleCreateCampaignFromPlan(detectedCampaign.title, detectedCampaign.brief)}
-                className="w-full sm:w-auto px-4 py-2 bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600 text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center gap-2"
-              >
-                <span>Create Campaign in Writing Mode</span>
+                }
+                title="Campaign idea ready!"
+                message={detectedCampaign.title}
+                helperText="Move into Writing mode to turn this concept into a polished email."
+                action={{
+                  label: 'Create Campaign in Writing Mode',
+                  onClick: () => handleCreateCampaignFromPlan(detectedCampaign.title, detectedCampaign.brief),
+                  icon: (
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
-              </button>
+                  )
+                }}
+              />
             </div>
           </div>
         )}
@@ -2961,7 +3137,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         
         {/* Command Palette and Keyboard Shortcuts are now global - see layout.tsx */}
         </div>
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }

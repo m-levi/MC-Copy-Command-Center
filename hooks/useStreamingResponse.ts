@@ -24,71 +24,9 @@ const sanitizeContent = (content: string): string => {
  * Clean email content by removing any preamble before the actual email structure
  */
 const cleanEmailContent = (content: string): string => {
-  const clarificationMatch = content.match(/<clarification_request>([\s\S]*?)<\/clarification_request>/i);
-  if (clarificationMatch) {
-    return clarificationMatch[1].trim();
-  }
-
-  const nonCopyMatch = content.match(/<non_copy_response>([\s\S]*?)<\/non_copy_response>/i);
-  if (nonCopyMatch) {
-    return nonCopyMatch[1].trim();
-  }
-
-  const emailCopyMatch = content.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
-  let workingContent = emailCopyMatch ? emailCopyMatch[1] : content;
-
-  // Remove <email_strategy> tags and everything inside them
-  let cleaned = workingContent.replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '');
-  
-  // Find the start of the actual email (look for common email markers)
-  const emailStartPatterns: RegExp[] = [
-    /\*\*HERO SECTION:\*\*/i,
-    /HERO SECTION:/i,
-    /\*\*Section Title:\*\*/i,
-    /Section Title:/i,
-    /\*\*FINAL CTA SECTION:\*\*/i,
-    /FINAL CTA SECTION:/i,
-    /\*\*EMAIL SUBJECT LINE:\*\*/i,
-    /EMAIL SUBJECT LINE:/i,
-    /\*\*Sub-headline:\*\*/i,
-    /\*\*Headline:\*\*/i,
-    /\*\*Call to Action Button:\*\*/i,
-  ];
-
-  let startIndex = -1;
-  emailStartPatterns.forEach((pattern) => {
-    const match = cleaned.match(pattern);
-    if (match && match.index !== undefined) {
-      if (startIndex === -1 || match.index < startIndex) {
-        startIndex = match.index;
-      }
-    }
-  });
-
-  if (startIndex > 0) {
-    let adjustedStart = startIndex;
-    const beforeSlice = cleaned.substring(0, startIndex);
-    const lastDoubleNewline = beforeSlice.lastIndexOf('\n\n');
-    if (lastDoubleNewline !== -1) {
-      adjustedStart = lastDoubleNewline + 2;
-    } else {
-      const lastNewline = beforeSlice.lastIndexOf('\n');
-      if (lastNewline !== -1) {
-        adjustedStart = lastNewline + 1;
-      }
-    }
-    cleaned = cleaned.substring(adjustedStart);
-  }
-  
-  // Remove common meta-commentary patterns
-  cleaned = cleaned
-    .replace(/^I need to.*?\n\n/i, '')
-    .replace(/^Let me.*?\n\n/i, '')
-    .replace(/^Based on.*?\n\n/i, '')
-    .replace(/^First,.*?\n\n/i, '')
+  return content
+    .replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '')
     .trim();
-  
-  return cleaned;
 };
 
 /**
@@ -183,10 +121,6 @@ export function useStreamingResponse() {
           
           // If chunk still doesn't contain email structure markers, skip it
           // This prevents preamble from being added to content
-          const hasEmailMarker = /HERO SECTION|EMAIL SUBJECT|SECTION \d+|CALL-TO-ACTION|SUBJECT LINE/i.test(streamState.fullContent + cleanChunk);
-          if (!hasEmailMarker && streamState.fullContent.length === 0) {
-            continue; // Skip preamble chunks
-          }
           const result = processStreamChunk(streamState, cleanChunk);
           streamState = result.state;
           

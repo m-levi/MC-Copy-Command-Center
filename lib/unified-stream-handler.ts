@@ -50,12 +50,14 @@ const EMAIL_START_PATTERNS = [
   /FINAL CTA SECTION:/i,
   /\*\*EMAIL SUBJECT LINE:\*\*/i,
   /EMAIL SUBJECT LINE:/i,
+  /(^|\n)SUBJECT LINE:/i,
+  /(^|\n)SUBJECT:/i,
+  /(^|\n)PREVIEW TEXT:/i,
   /\*\*Sub-headline:\*\*/i,
   /\*\*Headline:\*\*/i,
   /\*\*Call to Action Button:\*\*/i,
-  /<clarification_request>/i,
-  /<email_copy>/i,
-  /<non_copy_response>/i,
+  /\bCall to Action\b/i,
+  /\bCTA\b/i,
 ] as const;
 
 const ANALYSIS_LEAK_PATTERNS = [
@@ -79,11 +81,17 @@ function findEmailStartIndex(text: string): number {
     }
   }
 
-  if (earliest === -1) {
-    return -1;
-  }
+  let start: number;
 
-  let start = earliest;
+  if (earliest === -1) {
+    const firstNonWhitespace = text.search(/\S/);
+    if (firstNonWhitespace === -1) {
+      return -1;
+    }
+    start = firstNonWhitespace;
+  } else {
+    start = earliest;
+  }
   const beforeSlice = text.substring(0, start);
   const lastDoubleNewline = beforeSlice.lastIndexOf('\n\n');
   if (lastDoubleNewline !== -1) {
@@ -121,14 +129,12 @@ function containsClarificationRequest(text: string): boolean {
 
 type ResponseWrapper = 'email_copy' | 'clarification_request' | 'non_copy_response';
 
-function hasWrapper(text: string, wrapper: ResponseWrapper): boolean {
-  const regex = new RegExp(`<${wrapper}[> ]`, 'i');
-  return regex.test(text);
+function hasWrapper(): boolean {
+  return false;
 }
 
-function hasClosingWrapper(text: string, wrapper: ResponseWrapper): boolean {
-  const regex = new RegExp(`</${wrapper}>`, 'i');
-  return regex.test(text);
+function hasClosingWrapper(): boolean {
+  return true;
 }
 
 function sanitizeClarificationContent(content: string): string {
@@ -541,8 +547,14 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
   const readable = new ReadableStream({
     async start(controller) {
       try {
+        // Helper to send structured JSON messages
+        const sendMessage = (type: string, data: any) => {
+          const message = JSON.stringify({ type, ...data }) + '\n';
+          controller.enqueue(encoder.encode(message));
+        };
+        
         // Send initial status
-        controller.enqueue(encoder.encode('[STATUS:analyzing_brand]'));
+        sendMessage('status', { status: 'analyzing_brand' });
         
         let chunkCount = 0;
         let fullResponse = '';
@@ -553,31 +565,9 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         let emailContentStarted = false;
         let preEmailBuffer = '';
         let trimmedAnalysisChars = 0;
-        let activeWrapper: ResponseWrapper | null = null;
-        let wrapperOpenedManually = false;
         let stopContentStreaming = false;
 
-        const openWrapper = (type: ResponseWrapper) => {
-          if (!activeWrapper) {
-            activeWrapper = type;
-            wrapperOpenedManually = true;
-            const tag = `<${type}>`;
-            controller.enqueue(encoder.encode(tag));
-            fullResponse += tag;
-            emailContentStarted = true;
-            console.log(`[${provider.toUpperCase()}] Opened wrapper: ${type}`);
-          }
-        };
-
-        const ensureWrapperClosed = () => {
-          if (activeWrapper && !hasClosingWrapper(fullResponse, activeWrapper)) {
-            const closingTag = `</${activeWrapper}>`;
-            controller.enqueue(encoder.encode(closingTag));
-            fullResponse += closingTag;
-            console.log(`[${provider.toUpperCase()}] Closed wrapper: ${activeWrapper}`);
-          }
-          activeWrapper = null;
-        };
+        // Wrapper functions removed - we no longer use XML tags for response formatting
         
         for await (const chunk of stream) {
           // Log chunk type for debugging (Anthropic only)
@@ -592,7 +582,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           if (stopContentStreaming) {
             if (parsed.thinkingEnd) {
               // still forward status transitions to close thinking blocks
-              controller.enqueue(encoder.encode('[THINKING:END]'));
+              sendMessage('thinking_end', {});
             }
             continue;
           }
@@ -601,11 +591,11 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           if (parsed.toolUse) {
             console.log(`[${provider.toUpperCase()}] Tool use started: ${parsed.toolUse}`);
             
-            controller.enqueue(encoder.encode(`[TOOL:${parsed.toolUse}:START]`));
+            sendMessage('tool_use', { tool: parsed.toolUse, status: 'start' });
             
             // Only show "searching_web" status for web search
             if (parsed.toolUse === 'web_search') {
-              controller.enqueue(encoder.encode('[STATUS:searching_web]'));
+              sendMessage('status', { status: 'searching_web' });
             }
             continue;
           }
@@ -620,8 +610,8 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           if (parsed.toolResult) {
             console.log(`[${provider.toUpperCase()}] Tool result received: ${parsed.toolResult}`);
             
-            controller.enqueue(encoder.encode(`[TOOL:${parsed.toolResult}:END]`));
-            controller.enqueue(encoder.encode('[STATUS:analyzing_brand]'));
+            sendMessage('tool_use', { tool: parsed.toolResult, status: 'end' });
+            sendMessage('status', { status: 'analyzing_brand' });
             
             if (parsed.toolResult === 'web_search' && webSearchContent) {
               console.log(`[${provider.toUpperCase()}] Web search completed - captured ${webSearchContent.length} chars of URLs`);
@@ -633,23 +623,32 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           // Web search results are often mentioned in thinking content - this is where URLs are typically found
           if (parsed.thinkingStart || parsed.isThinking) {
             if (!isInThinkingBlock) {
-              controller.enqueue(encoder.encode('[THINKING:START]'));
-              controller.enqueue(encoder.encode('[STATUS:thinking]'));
+              sendMessage('thinking_start', {});
+              sendMessage('status', { status: 'thinking' });
               isInThinkingBlock = true;
             }
           }
           
           if (parsed.reasoning) {
             thinkingContent += parsed.reasoning;
-            controller.enqueue(encoder.encode(`[THINKING:CHUNK]${parsed.reasoning}`));
+            // Send thinking content cleanly without breaking it up
+            sendMessage('thinking', { content: parsed.reasoning });
             continue;
           }
           
           if (parsed.thinkingEnd) {
             if (isInThinkingBlock) {
-              controller.enqueue(encoder.encode('[THINKING:END]'));
-              controller.enqueue(encoder.encode('[STATUS:analyzing_brand]'));
+              sendMessage('thinking_end', {});
+              sendMessage('status', { status: 'analyzing_brand' });
               isInThinkingBlock = false;
+              
+              // CRITICAL FIX: After thinking ends, if buffer is empty, force emailContentStarted
+              // so the NEXT content chunk streams immediately without waiting for markers
+              if (!emailContentStarted && preEmailBuffer.trim().length === 0) {
+                console.log(`[${provider.toUpperCase()}] Thinking ended - enabling immediate content streaming`);
+                emailContentStarted = true;
+                // Don't open wrapper yet - wait for actual content to arrive
+              }
             }
             continue;
           }
@@ -668,37 +667,20 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
 
               if (containsClarificationRequest(preEmailBuffer)) {
                 const bufferLength = preEmailBuffer.length;
-                const tagIndex = preEmailBuffer.search(/<clarification_request>/i);
-
-                if (tagIndex >= 0) {
-                  trimmedAnalysisChars += tagIndex;
-                  const stripped = preEmailBuffer
-                    .substring(tagIndex)
-                    .replace(/<\/?clarification_request>/gi, '');
-                  chunkText = sanitizeClarificationContent(stripped);
-                  preEmailBuffer = '';
-                  if (!hasWrapper(chunkText, 'clarification_request')) {
-                    openWrapper('clarification_request');
-                  } else {
-                    activeWrapper = 'clarification_request';
-                  }
-                } else {
-                  const trimmed = preEmailBuffer.trimStart();
-                  trimmedAnalysisChars += bufferLength - trimmed.length;
-                  openWrapper('clarification_request');
-                  chunkText = sanitizeClarificationContent(trimmed);
-                  preEmailBuffer = '';
-                }
+                const stripped = preEmailBuffer.replace(/<\/?clarification_request>/gi, '');
+                const trimmed = stripped.trimStart();
+                trimmedAnalysisChars += bufferLength - trimmed.length;
+                chunkText = sanitizeClarificationContent(trimmed);
+                preEmailBuffer = '';
 
                 emailContentStarted = true;
                 console.log(`[${provider.toUpperCase()}] Detected clarification request – streaming without trimming`);
 
                 if (chunkText) {
-                  controller.enqueue(encoder.encode(chunkText));
+                  sendMessage('text', { content: chunkText });
                   fullResponse += chunkText;
                 }
 
-                ensureWrapperClosed();
                 stopContentStreaming = true;
                 continue;
               } else {
@@ -708,23 +690,9 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
                 }
 
                 emailContentStarted = true;
-                const tagIndex = preEmailBuffer.search(/<email_copy>/i);
-
-                if (tagIndex >= 0 && tagIndex <= startIndex) {
-                  trimmedAnalysisChars += tagIndex;
-                  chunkText = preEmailBuffer.substring(tagIndex).trimStart();
-                  preEmailBuffer = '';
-                  activeWrapper = 'email_copy';
-                } else {
-                  trimmedAnalysisChars += startIndex;
-                  chunkText = preEmailBuffer.substring(startIndex).trimStart();
-                  preEmailBuffer = '';
-                  if (!hasWrapper(chunkText, 'email_copy')) {
-                    openWrapper('email_copy');
-                  } else {
-                    activeWrapper = 'email_copy';
-                  }
-                }
+                trimmedAnalysisChars += startIndex;
+                chunkText = preEmailBuffer.substring(startIndex).trimStart();
+                preEmailBuffer = '';
 
                 if (trimmedAnalysisChars > 0) {
                   console.log(`[${provider.toUpperCase()}] Trimmed ${trimmedAnalysisChars} chars of analysis before email content`);
@@ -739,6 +707,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
             fullResponse += chunkText;
             
             // Smart status detection based on content keywords
+            // Send status updates BEFORE content, never interleaved
             if (currentStatusIndex < STATUS_SEQUENCE.length) {
               const nextStatus = STATUS_SEQUENCE[currentStatusIndex];
               
@@ -753,13 +722,14 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
               
               // Advance status if threshold met OR keywords found
               if (hitThreshold || hasKeywords) {
-                controller.enqueue(encoder.encode(`[STATUS:${nextStatus.status}]`));
+                sendMessage('status', { status: nextStatus.status });
                 currentStatusIndex++;
                 console.log(`[${provider.toUpperCase()}] Status: ${nextStatus.status} (chunks: ${chunkCount}, keywords: ${hasKeywords})`);
               }
             }
             
-            controller.enqueue(encoder.encode(chunkText));
+            // Send content cleanly without any markers embedded in it
+            sendMessage('text', { content: chunkText });
             chunkCount++;
             
             if (chunkCount % 10 === 0) {
@@ -769,43 +739,40 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         }
         
         console.log(`[${provider.toUpperCase()}] Stream complete. Total: ${chunkCount} chunks, ${fullResponse.length} chars, ${thinkingContent.length} thinking chars`);
+        
+        console.log('═'.repeat(70));
+        console.log(`📤 [${provider.toUpperCase()}] FULL RESPONSE SENT TO CLIENT:`);
+        console.log('═'.repeat(70));
+        console.log('Full Response:', fullResponse);
+        console.log('═'.repeat(70));
+        console.log('Thinking Content:', thinkingContent.substring(0, 300));
+        console.log('═'.repeat(70));
 
         if (!emailContentStarted) {
           console.warn(`[${provider.toUpperCase()}] WARNING: Email markers not detected in streamed content. Applying fallback clean.`);
-          if (preEmailBuffer) {
+          if (preEmailBuffer && preEmailBuffer.trim().length > 0) {
             let fallbackContent = cleanWithLogging(preEmailBuffer).trim();
             if (fallbackContent) {
-              const wrapperType: ResponseWrapper = containsClarificationRequest(fallbackContent)
-                ? 'clarification_request'
-                : 'non_copy_response';
-
-              if (!hasWrapper(fallbackContent, wrapperType)) {
-                openWrapper(wrapperType);
-                const body =
-                  wrapperType === 'clarification_request'
-                    ? sanitizeClarificationContent(fallbackContent)
-                    : fallbackContent;
-                controller.enqueue(encoder.encode(body));
-                fullResponse += body;
-              } else {
-                activeWrapper = wrapperType;
-                const body =
-                  wrapperType === 'clarification_request'
-                    ? sanitizeClarificationContent(fallbackContent.replace(/<\/?clarification_request>/gi, ''))
-                    : fallbackContent;
-                controller.enqueue(encoder.encode(body));
-                fullResponse += body;
-              }
-
+              const isClarification = containsClarificationRequest(fallbackContent);
+              const body = isClarification
+                ? sanitizeClarificationContent(fallbackContent)
+                : fallbackContent;
+              controller.enqueue(encoder.encode(body));
+              fullResponse += body;
               emailContentStarted = true;
-              console.log(`[${provider.toUpperCase()}] Fallback content delivered (${fallbackContent.length} chars)`);
+              console.log(`[${provider.toUpperCase()}] Fallback content delivered (${body.length} chars, type: ${isClarification ? 'clarification' : 'other'})`);
+            } else {
+              console.error(`[${provider.toUpperCase()}] CRITICAL: fallbackContent empty after cleaning. Buffer length: ${preEmailBuffer.length}`);
+              console.error(`[${provider.toUpperCase()}] Buffer preview:`, preEmailBuffer.substring(0, 500));
             }
+          } else {
+            console.error(`[${provider.toUpperCase()}] CRITICAL: No content found - preEmailBuffer is empty. Stream had only thinking, no text content.`);
           }
+        } else if (fullResponse.trim().length === 0) {
+          console.error(`[${provider.toUpperCase()}] CRITICAL: emailContentStarted=true but fullResponse is empty - parser bug`);
         } else if (containsAnalysisLeak(fullResponse.slice(0, 400))) {
           console.warn(`[${provider.toUpperCase()}] WARNING: Potential analysis leakage detected in final output (conversation ${conversationId || 'N/A'})`);
         }
-
-        ensureWrapperClosed();
         
         // Log final content lengths for debugging
         console.log(`[${provider.toUpperCase()}] Final content breakdown:`, {
@@ -839,7 +806,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           
           if (productLinks.length > 0) {
             console.log('[Stream] Sending', productLinks.length, 'product links to client');
-            controller.enqueue(encoder.encode(`\n\n[PRODUCTS:${JSON.stringify(productLinks)}]`));
+            sendMessage('products', { products: productLinks });
           } else {
             console.log('[Stream] No product links found - box will be hidden');
           }

@@ -27,13 +27,13 @@ export function detectFlowOutline(message: string, flowType: FlowType): FlowOutl
     const nameMatch = message.match(/##\s*(.+?)\s*OUTLINE/);
     const flowName = nameMatch ? nameMatch[1].trim() : '';
 
-    // Extract emails
+    // Extract emails - now including Email Type field
     const emails: FlowOutlineEmail[] = [];
-    const emailRegex = /###\s*Email\s*(\d+):\s*(.+?)\n[\s\S]*?\*\*Timing:\*\*\s*(.+?)\n[\s\S]*?\*\*Purpose:\*\*\s*(.+?)\n[\s\S]*?\*\*Key Points:\*\*\n([\s\S]*?)\*\*Call-to-Action:\*\*\s*(.+?)(?=\n\n|---)/g;
+    const emailRegex = /###\s*Email\s*(\d+):\s*(.+?)\n[\s\S]*?\*\*Email Type:\*\*\s*(design|letter)\n[\s\S]*?\*\*Timing:\*\*\s*(.+?)\n[\s\S]*?\*\*Purpose:\*\*\s*(.+?)\n[\s\S]*?\*\*Key Points:\*\*\n([\s\S]*?)\*\*Call-to-Action:\*\*\s*(.+?)(?=\n\n|---)/g;
     
     let match;
     while ((match = emailRegex.exec(message)) !== null) {
-      const [, sequence, title, timing, purpose, keyPointsText, cta] = match;
+      const [, sequence, title, emailType, timing, purpose, keyPointsText, cta] = match;
       
       // Parse key points
       const keyPoints = keyPointsText
@@ -46,6 +46,7 @@ export function detectFlowOutline(message: string, flowType: FlowType): FlowOutl
       emails.push({
         sequence: parseInt(sequence, 10),
         title: title.trim(),
+        emailType: (emailType.trim() as 'design' | 'letter'),
         purpose: purpose.trim(),
         timing: timing.trim(),
         keyPoints,
@@ -149,6 +150,10 @@ export function validateFlowOutline(outline: FlowOutlineData): { valid: boolean;
 
     if (!email.title) {
       errors.push(`Email ${email.sequence} is missing a title`);
+    }
+
+    if (!email.emailType || (email.emailType !== 'design' && email.emailType !== 'letter')) {
+      errors.push(`Email ${email.sequence} is missing a valid email type (must be 'design' or 'letter')`);
     }
 
     if (!email.purpose) {
