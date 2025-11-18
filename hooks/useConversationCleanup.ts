@@ -145,3 +145,74 @@ export async function shouldDeleteEmptyConversation(
   return count === 0;
 }
 
+/**
+ * Bulk cleanup of all empty conversations for a brand
+ * Runs on page load to clean up any accumulated empty conversations
+ * ONLY deletes conversations with exactly 0 messages
+ */
+export async function bulkCleanupEmptyConversations(brandId: string): Promise<number> {
+  try {
+    const supabase = createClient();
+    
+    // Get all conversations for this brand
+    const { data: conversations, error: fetchError } = await supabase
+      .from('conversations')
+      .select('id, is_flow, parent_conversation_id')
+      .eq('brand_id', brandId);
+    
+    if (fetchError || !conversations) {
+      logger.error('[BulkCleanup] Error fetching conversations:', 
+        fetchError ? (fetchError.message || String(fetchError)) : 'No conversations returned',
+        fetchError
+      );
+      return 0;
+    }
+
+    let deletedCount = 0;
+    
+    // Check each conversation for messages
+    for (const conv of conversations) {
+      // NEVER delete flow conversations or child conversations
+      if (conv.is_flow || conv.parent_conversation_id) {
+        continue;
+      }
+      
+      // Count messages for this conversation
+      const { count, error: countError } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversation_id', conv.id);
+      
+      if (countError) {
+        logger.error('[BulkCleanup] Error counting messages:', countError);
+        continue;
+      }
+      
+      // Only delete if EXACTLY 0 messages
+      if (count === 0) {
+        const { error: deleteError } = await supabase
+          .from('conversations')
+          .delete()
+          .eq('id', conv.id);
+        
+        if (!deleteError) {
+          deletedCount++;
+          logger.log('[BulkCleanup] Deleted empty conversation:', conv.id);
+        } else {
+          logger.error('[BulkCleanup] Error deleting conversation:', deleteError);
+        }
+      }
+    }
+    
+    if (deletedCount > 0) {
+      logger.log(`[BulkCleanup] Cleaned up ${deletedCount} empty conversations for brand ${brandId}`);
+      trackEvent('bulk_cleanup_completed', { brandId, deletedCount });
+    }
+    
+    return deletedCount;
+  } catch (error) {
+    logger.error('[BulkCleanup] Error during bulk cleanup:', error);
+    return 0;
+  }
+}
+

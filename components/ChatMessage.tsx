@@ -2,8 +2,10 @@
 
 import { Message, ConversationMode, AIStatus } from '@/types';
 import { useState, useEffect, memo } from 'react';
+import { createPortal } from 'react-dom';
 import MessageEditor from './MessageEditor';
 import ThoughtProcess from './ThoughtProcess';
+import InlineCommentBox from './InlineCommentBox';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
@@ -22,6 +24,11 @@ interface ChatMessageProps {
   isStreaming?: boolean;
   aiStatus?: AIStatus;
   isStarred?: boolean; // Passed from parent to avoid DB query per message
+  commentCount?: number;
+  onCommentClick?: (highlightedText?: string) => void;
+  commentedRanges?: Array<{ text: string; commentCount: number }>; // Text ranges that have comments
+  conversationId?: string;
+  commentsData?: Array<{ id: string; quoted_text?: string; content: string }>; // Actual comment data for inline display
 }
 
 // Memoized component to prevent unnecessary re-renders
@@ -37,6 +44,11 @@ const ChatMessage = memo(function ChatMessage({
   isStreaming = false,
   aiStatus = 'idle',
   isStarred: isStarredProp = false, // Use prop instead of checking in component
+  commentCount = 0,
+  onCommentClick,
+  commentedRanges = [],
+  conversationId,
+  commentsData = [],
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -44,7 +56,27 @@ const ChatMessage = memo(function ChatMessage({
   const [isStarred, setIsStarred] = useState(isStarredProp);
   const [isStarring, setIsStarring] = useState(false);
   const [productLinksExpanded, setProductLinksExpanded] = useState(false);
+  const [selectedText, setSelectedText] = useState<string>('');
+  const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null);
+  const [showInlineCommentBox, setShowInlineCommentBox] = useState(false);
+  const [forceRender, setForceRender] = useState(0); // Force re-render
+  const [isMounted, setIsMounted] = useState(false);
   const supabase = createClient();
+  
+  // Ensure component is mounted for portal
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+  
+  // Debug: Log state changes (comment out in production)
+  // useEffect(() => {
+  //   console.log('[ChatMessage State Update]', {
+  //     selectedText,
+  //     selectionPosition,
+  //     hasHandler: !!onCommentClick,
+  //     isMounted
+  //   });
+  // }, [selectedText, selectionPosition, onCommentClick, isMounted]);
   
   // Update local state when prop changes
   useEffect(() => {
@@ -84,6 +116,89 @@ const ChatMessage = memo(function ChatMessage({
   const handleCancelEdit = () => {
     setIsEditing(false);
   };
+
+  // Handle text selection for highlighting and commenting
+  const handleTextSelection = (e: React.MouseEvent) => {
+    if (!onCommentClick) return;
+    
+    // Small delay to ensure selection is complete
+    setTimeout(() => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim();
+      
+      if (text && text.length >= 3) {
+        setSelectedText(text);
+        
+        // Get selection position for floating menu
+        try {
+          const range = selection?.getRangeAt(0);
+          const rect = range?.getBoundingClientRect();
+          
+          if (rect && rect.width > 0 && rect.height > 0) {
+            const position = {
+              x: rect.left + rect.width / 2,
+              y: Math.max(rect.top - 55, 80)
+            };
+            
+            setSelectionPosition(position);
+            setForceRender(prev => prev + 1);
+          }
+        } catch (err) {
+          // Silently fail
+        }
+      } else {
+        setSelectedText('');
+        setSelectionPosition(null);
+      }
+    }, 100);
+  };
+
+  const handleCommentOnHighlight = () => {
+    if (selectedText) {
+      // Show inline comment box instead of opening sidebar
+      setShowInlineCommentBox(true);
+    }
+  };
+
+  const handleCommentPosted = () => {
+    // Clear inline comment box
+    setShowInlineCommentBox(false);
+    setSelectedText('');
+    setSelectionPosition(null);
+    window.getSelection()?.removeAllRanges();
+    // Trigger parent to reload comment counts
+    setTimeout(() => {
+      onCommentClick?.(); // This will trigger comment count reload
+    }, 500); // Small delay to ensure comment is saved
+  };
+
+  // Close floating button when clicking outside or scrolling
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      // Don't clear if clicking the comment button itself
+      const target = e.target as HTMLElement;
+      if (target.closest('.floating-comment-btn')) return;
+      
+      if (selectedText) {
+        setSelectedText('');
+        setSelectionPosition(null);
+      }
+    };
+
+    const handleScroll = () => {
+      if (selectedText) {
+        setSelectedText('');
+        setSelectionPosition(null);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, true); // Capture phase for all scrolls
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [selectedText]);
 
   const handleReaction = (reactionType: 'thumbs_up' | 'thumbs_down') => {
     setReaction(reactionType);
@@ -185,15 +300,90 @@ const ChatMessage = memo(function ChatMessage({
 
   const isUser = message.role === 'user';
 
+  // Render floating elements via portal to avoid CSS containment clipping
+  const floatingElements = isMounted && typeof window !== 'undefined' ? createPortal(
+    <>
+      {/* Inline comment box - appears when user clicks "Comment" */}
+      {showInlineCommentBox && selectedText && selectionPosition && conversationId && (
+        <InlineCommentBox
+          position={{
+            x: Math.min(selectionPosition.x + 150, window.innerWidth - 340), // Keep on screen
+            y: selectionPosition.y
+          }}
+          quotedText={selectedText}
+          messageId={message.id}
+          conversationId={conversationId}
+          onClose={() => {
+            setShowInlineCommentBox(false);
+            setSelectedText('');
+            setSelectionPosition(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+          onCommentAdded={handleCommentPosted}
+        />
+      )}
+
+      {/* Floating selection menu - only show if inline box not open */}
+      {!showInlineCommentBox && selectionPosition && selectedText && onCommentClick && (
+        <div
+          className="floating-comment-btn fixed"
+          style={{
+            left: `${selectionPosition.x}px`,
+            top: `${selectionPosition.y}px`,
+            transform: 'translate(-50%, -100%)',
+            zIndex: 100000,
+            pointerEvents: 'auto',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="animate-in fade-in slide-in-from-bottom-2 duration-150">
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl flex items-center gap-1 p-1">
+              <button
+                onClick={handleCommentOnHighlight}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 font-medium"
+                title="Add comment"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                </svg>
+                Comment
+              </button>
+              <div className="w-px h-5 bg-gray-200 dark:bg-gray-700"></div>
+              <button
+                onClick={async () => {
+                  await navigator.clipboard.writeText(selectedText);
+                  toast.success('Copied!');
+                  setSelectedText('');
+                  setSelectionPosition(null);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 font-medium"
+                title="Copy text"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>,
+    document.body
+  ) : null;
+
   return (
-    <div 
-      className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 sm:mb-6 group`}
-      style={{
-        // CSS containment for better scroll performance
-        contain: 'layout style paint',
-        contentVisibility: 'auto',
-      }}
-    >
+    <>
+      {floatingElements}
+
+      <div 
+        className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 sm:mb-6 group`}
+        style={{
+          // CSS containment for better scroll performance
+          contain: 'layout style paint',
+          contentVisibility: 'auto',
+        }}
+      >
       <div
         className={`
           transition-all
@@ -226,7 +416,7 @@ const ChatMessage = memo(function ChatMessage({
             )}
           </div>
         ) : (
-          <div>
+          <div onMouseUp={handleTextSelection}>
             {/* Thought Process - Show if available (includes strategy and all non-email content) */}
             {(message.thinking || isStreaming) && (
               <ThoughtProcess 
@@ -286,7 +476,8 @@ const ChatMessage = memo(function ChatMessage({
                 {/* Content area */}
                 <div className="px-4 sm:px-6 py-4 sm:py-5">
                   {/* Render all content with ReactMarkdown - code blocks show raw, rest renders */}
-                  <div className="prose dark:prose-invert max-w-none 
+                  <div 
+                    className="prose dark:prose-invert max-w-none select-text cursor-text
                     prose-headings:font-bold prose-headings:text-gray-900 dark:prose-headings:text-gray-100
                     prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg 
                     prose-p:text-gray-800 dark:prose-p:text-gray-200 prose-p:leading-relaxed
@@ -296,9 +487,48 @@ const ChatMessage = memo(function ChatMessage({
                     prose-code:text-sm prose-code:text-gray-800 dark:prose-code:text-gray-200 
                     prose-pre:bg-gray-50 dark:prose-pre:bg-gray-900/50 prose-pre:border prose-pre:border-gray-200 dark:prose-pre:border-gray-700 prose-pre:rounded-lg prose-pre:p-4
                     prose-blockquote:border-l-4 prose-blockquote:border-gray-300 dark:prose-blockquote:border-gray-600 prose-blockquote:pl-4 prose-blockquote:italic
-                    prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline">
-                    <ReactMarkdown>{stripCampaignTags(message.content || 'No content')}</ReactMarkdown>
+                    prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline"
+                    style={{
+                      userSelect: 'text',
+                      WebkitUserSelect: 'text',
+                      MozUserSelect: 'text',
+                    }}
+                  >
+                    <ReactMarkdown>
+                      {stripCampaignTags(message.content || 'No content')}
+                    </ReactMarkdown>
                   </div>
+                  
+                  {/* Show commented text snippets outside/below markdown */}
+                  {commentsData && commentsData.length > 0 && commentsData.some(c => c.quoted_text) && (
+                    <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
+                      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-1 flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                        </svg>
+                        Comments on:
+                      </div>
+                      {commentsData.filter(c => c.quoted_text).map((comment) => (
+                        <button
+                          key={comment.id}
+                          onClick={() => onCommentClick?.()}
+                          className="block w-full text-left group px-1"
+                        >
+                          <div className="flex items-center gap-2 p-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 hover:border-yellow-300 dark:hover:border-yellow-700 transition-all">
+                            <div className="flex-shrink-0 w-4 h-4 rounded-full bg-yellow-400 dark:bg-yellow-600 flex items-center justify-center">
+                              <span className="text-white text-xs font-bold">💬</span>
+                            </div>
+                            <div className="flex-1 min-w-0 text-sm text-gray-700 dark:text-gray-300 font-medium truncate">
+                              "{comment.quoted_text}"
+                            </div>
+                            <svg className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 
                 {/* Product Links Section - Collapsible */}
@@ -438,18 +668,41 @@ const ChatMessage = memo(function ChatMessage({
             {/* Product Links Section - Now integrated into EmailPreview component */}
           </div>
         )}
+
+        {/* Small comment count badge at bottom - only if comments exist */}
+        {onCommentClick && commentCount > 0 && (
+          <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => onCommentClick()}
+              className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
+            >
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30">
+                <svg className="w-3 h-3 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+                <span className="font-bold text-blue-700 dark:text-blue-300">{commentCount}</span>
+              </div>
+              <span className="font-medium">{commentCount === 1 ? '1 comment' : `${commentCount} comments`}</span>
+            </button>
+          </div>
+        )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }, (prevProps, nextProps) => {
   // Custom comparison function for memo optimization
+  // NOTE: We're NOT comparing internal state like selectedText - that should always trigger re-render
   return (
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.thinking === nextProps.message.thinking &&
     prevProps.isRegenerating === nextProps.isRegenerating &&
     prevProps.mode === nextProps.mode &&
-    prevProps.brandId === nextProps.brandId
+    prevProps.brandId === nextProps.brandId &&
+    prevProps.commentCount === nextProps.commentCount &&
+    prevProps.commentsData?.length === nextProps.commentsData?.length && // Re-render if comments change
+    prevProps.onCommentClick === nextProps.onCommentClick
   );
 });
 

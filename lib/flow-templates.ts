@@ -30,6 +30,22 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     category: 'transactional'
   },
   {
+    id: 'browse_abandonment',
+    name: 'Browse Abandonment',
+    description: 'Re-engage browsers who didn\'t add to cart',
+    icon: '👀',
+    defaultEmailCount: 3,
+    category: 'transactional'
+  },
+  {
+    id: 'site_abandonment',
+    name: 'Site Abandonment',
+    description: 'Bring back visitors who left without action',
+    icon: '🔙',
+    defaultEmailCount: 2,
+    category: 'transactional'
+  },
+  {
     id: 'post_purchase',
     name: 'Post-Purchase',
     description: 'Thank customers and encourage repeat purchases',
@@ -59,6 +75,14 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     description: 'Educate and nurture leads over time',
     icon: '📚',
     defaultEmailCount: 5,
+    category: 'nurture'
+  },
+  {
+    id: 'do_your_research',
+    name: 'Do Your Research',
+    description: 'Help customers make informed decisions',
+    icon: '🔍',
+    defaultEmailCount: 4,
     category: 'nurture'
   }
 ];

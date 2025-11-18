@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { FlowOutlineData, AIModel, FlowOutlineEmail } from '@/types';
 import { buildFlowEmailPrompt } from '@/lib/flow-prompts';
+import { generateMermaidChart } from '@/lib/mermaid-generator';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -50,6 +51,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
     }
 
+    // Generate Mermaid chart
+    const mermaidChart = generateMermaidChart(outline);
+
     // Create flow outline record
     const { data: flowOutline, error: outlineError } = await supabase
       .from('flow_outlines')
@@ -57,6 +61,7 @@ export async function POST(request: NextRequest) {
         conversation_id: conversationId,
         flow_type: flowType,
         outline_data: outline,
+        mermaid_chart: mermaidChart,
         approved: true,
         approved_at: new Date().toISOString(),
         email_count: outline.emails.length

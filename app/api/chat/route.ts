@@ -12,6 +12,8 @@ import { loadMemoryContext as loadClaudeMemoryContext } from '@/lib/claude-memor
 import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
 import { buildSystemPrompt, buildStandardEmailPromptV2, buildBrandInfo, buildContextInfo } from '@/lib/chat-prompts';
 import { handleUnifiedStream } from '@/lib/unified-stream-handler';
+import { messageQueue } from '@/lib/queue/message-queue';
+import { createClient } from '@/lib/supabase/server';
 
 // Temporarily disable edge runtime to debug memory loading issues
 // export const runtime = 'edge';
@@ -221,6 +223,22 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
 
     // Extract website URL from brand context
     const websiteUrl = brandContext?.website_url;
+
+    // NOTE: Message queue integration is available but currently disabled to maintain real-time streaming UX.
+    // To enable queue mode:
+    // 1. Set ENABLE_MESSAGE_QUEUE=true in environment variables
+    // 2. Create message record first
+    // 3. Queue the job with messageQueue.enqueue()
+    // 4. Return job ID and message ID immediately
+    // 5. Client should use SSE endpoint /api/messages/[id]/stream to get updates
+    // 6. Background worker processes jobs via /api/cron/process-queue
+    // 
+    // Current implementation uses direct streaming for better UX.
+    // Queue mode is useful for:
+    // - High-volume scenarios
+    // - Rate limiting
+    // - Background processing
+    // - Better error recovery
 
     // Use unified stream handler with retry logic and fallback
     try {

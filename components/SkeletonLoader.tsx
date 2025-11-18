@@ -5,12 +5,12 @@ interface SkeletonProps {
 }
 
 /**
- * Basic skeleton component
+ * Basic skeleton component with fade transitions
  */
 export function Skeleton({ className = '' }: SkeletonProps) {
   return (
     <div
-      className={`animate-pulse bg-gray-200 dark:bg-gray-700 rounded ${className}`}
+      className={`animate-pulse bg-gray-200 dark:bg-gray-700 rounded transition-opacity duration-300 ${className}`}
     />
   );
 }

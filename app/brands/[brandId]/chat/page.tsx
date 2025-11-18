@@ -13,6 +13,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import { executeBulkAction } from '@/lib/conversation-actions';
 import InlineActionBanner from '@/components/InlineActionBanner';
 import FlowGuidanceCard from '@/components/FlowGuidanceCard';
+import FlowGenerationProgress from '@/components/FlowGenerationProgress';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 
@@ -23,14 +24,16 @@ const FlowCreationPanel = lazy(() => import('@/components/FlowCreationPanel'));
 const FlowOutlineDisplay = lazy(() => import('@/components/FlowOutlineDisplay'));
 const FlowNavigation = lazy(() => import('@/components/FlowNavigation'));
 const ApproveOutlineButton = lazy(() => import('@/components/ApproveOutlineButton'));
-const FlowGenerationProgress = lazy(() => import('@/components/FlowGenerationProgress'));
 const ConversationOptionsMenu = lazy(() => import('@/components/ConversationOptionsMenu'));
+const ShareModal = lazy(() => import('@/components/ShareModal'));
+const CommentsSidebar = lazy(() => import('@/components/CommentsSidebar'));
+import ActiveJobsIndicator from '@/components/ActiveJobsIndicator';
 import { FilterType } from '@/components/ConversationFilterDropdown';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 import { useDraftSave, loadDraft, clearDraft } from '@/hooks/useDraftSave';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
-import { useConversationCleanup } from '@/hooks/useConversationCleanup';
+import { useConversationCleanup, bulkCleanupEmptyConversations } from '@/hooks/useConversationCleanup';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { 
   getCachedMessages, 
@@ -235,12 +238,23 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [showMemorySettings, setShowMemorySettings] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [commentsSidebarCollapsed, setCommentsSidebarCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('commentsSidebarCollapsed') !== 'false';
+    }
+    return true;
+  });
+  const [focusedMessageIdForComments, setFocusedMessageIdForComments] = useState<string | null>(null);
+  const [highlightedTextForComment, setHighlightedTextForComment] = useState<string | null>(null);
+  const [messageCommentCounts, setMessageCommentCounts] = useState<Record<string, number>>({});
+  const [messageComments, setMessageComments] = useState<Record<string, Array<{ id: string; quoted_text?: string; content: string }>>>({});
   const [pendingConversationSelection, setPendingConversationSelection] = useState<string | null>(null);
-  const [isCreatingConversation, setIsCreatingConversation] = useState(false);
+  const [isCreatingEmail, setIsCreatingEmail] = useState(false);
   
   // Flow-related state
   const [showFlowTypeSelector, setShowFlowTypeSelector] = useState(false);
-  const [isCreatingFlowConversation, setIsCreatingFlowConversation] = useState(false);
+  const [isCreatingFlow, setIsCreatingFlow] = useState(false);
   const [selectedFlowType, setSelectedFlowType] = useState<FlowType | null>(null);
   const [flowOutline, setFlowOutline] = useState<FlowOutline | null>(null);
   const [flowChildren, setFlowChildren] = useState<Conversation[]>([]);
@@ -261,6 +275,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const requestCoalescerRef = useRef(new RequestCoalescer());
   const supabase = createClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
   const { isOnline, addToQueue, removeFromQueue } = useOfflineQueue();
   
   // Create a ref for loadConversations to avoid dependency issues
@@ -284,6 +300,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   };
 
   useDraftSave(currentConversation?.id || null, draftContent);
+
+  // Helper to update URL with conversation ID
+  const updateConversationUrl = useCallback((conversationId: string | null) => {
+    if (!conversationId) {
+      router.replace(`/brands/${brandId}/chat`);
+    } else {
+      router.replace(`/brands/${brandId}/chat?conversation=${conversationId}`);
+    }
+  }, [brandId, router]);
 
   // Auto-cleanup empty conversations on unmount
   const { cleanupIfEmpty } = useConversationCleanup({
@@ -336,6 +361,20 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setPendingConversationSelection(targetConversationId);
     }
   }, [conversations.length]);
+
+  // Load conversation from URL parameter
+  useEffect(() => {
+    const conversationIdFromUrl = searchParams.get('conversation');
+    if (conversationIdFromUrl && conversations.length > 0) {
+      const targetConversation = conversations.find(c => c.id === conversationIdFromUrl);
+      if (targetConversation && (!currentConversation || currentConversation.id !== conversationIdFromUrl)) {
+        setCurrentConversation(targetConversation);
+      }
+    } else if (!conversationIdFromUrl && currentConversation) {
+      // If URL doesn't have conversation param but we have one selected, update URL
+      updateConversationUrl(currentConversation.id);
+    }
+  }, [searchParams, conversations, currentConversation, updateConversationUrl]);
 
   // Handle pending conversation selection
   useEffect(() => {
@@ -521,86 +560,122 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     applyConversationFilter();
   }, [conversations, currentFilter, selectedPersonId, currentUserId]);
 
+  // Auto-create a new conversation when opening a brand if none is selected
   useEffect(() => {
-    if (currentConversation) {
-      loadMessages();
+    // Only auto-create if:
+    // 1. Page has finished loading
+    // 2. No conversation is currently selected
+    // 3. We're not already in the process of creating one
+    // 4. User ID is available
+    if (!loading && !currentConversation && !isCreatingEmail && !isCreatingFlow && currentUserId) {
+      // Small delay to ensure everything is initialized
+      const timer = setTimeout(() => {
+        handleNewConversation();
+      }, 100);
       
-      // Subscribe to real-time message updates
-      const messageChannel = supabase
-        .channel(`messages:${currentConversation.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'messages',
-            filter: `conversation_id=eq.${currentConversation.id}`,
-          },
-          (payload) => {
-            logger.log('New message received:', payload.new);
-            const newMessage = payload.new as Message;
-            
-            // Only add if not already in state (avoid duplicates from own sends)
-            setMessages((prev) => {
-              const exists = prev.some(m => m.id === newMessage.id);
-              if (!exists) {
-                // Update cache
-                addCachedMessage(currentConversation.id, newMessage);
-                trackEvent('message_received_realtime', {
-                  conversationId: currentConversation.id,
-                  role: newMessage.role
-                });
-                return [...prev, newMessage];
-              }
-              return prev;
-            });
-          }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'messages',
-            filter: `conversation_id=eq.${currentConversation.id}`,
-          },
-          (payload) => {
-            logger.log('Message updated:', payload.new);
-            const updatedMessage = payload.new as Message;
-            
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === updatedMessage.id ? updatedMessage : msg
-              )
-            );
-            
-            // Update cache
-            updateCachedMessage(currentConversation.id, updatedMessage);
-          }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'DELETE',
-            schema: 'public',
-            table: 'messages',
-            filter: `conversation_id=eq.${currentConversation.id}`,
-          },
-          (payload) => {
-            logger.log('Message deleted:', payload.old);
-            const deletedId = (payload.old as any).id;
-            
-            setMessages((prev) => prev.filter((msg) => msg.id !== deletedId));
-          }
-        )
-        .subscribe();
-      
-      // Cleanup subscription on unmount or conversation change
-      return () => {
-        messageChannel.unsubscribe();
-      };
+      return () => clearTimeout(timer);
     }
-  }, [currentConversation]);
+  }, [loading, currentConversation, isCreatingEmail, isCreatingFlow, currentUserId]);
+
+  useEffect(() => {
+    if (!currentConversation?.id) {
+      logger.log('[MessagesEffect] No conversation selected, clearing state');
+      setMessages([]);
+      setDraftContent('');
+      setLoadingMessages(false);
+      return;
+    }
+
+    // Use conversation ID to prevent stale closures
+    const conversationId = currentConversation.id;
+    logger.log('[MessagesEffect] Loading messages for conversation:', conversationId);
+    
+    // Load messages and draft
+    loadMessages();
+    
+    // Load draft for this conversation
+    const draft = loadDraft(conversationId);
+    if (draft) {
+      logger.log('[MessagesEffect] Loaded draft for conversation:', conversationId);
+      setDraftContent(draft);
+    }
+    
+    // Subscribe to real-time message updates
+    const messageChannel = supabase
+      .channel(`messages:${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          logger.log('[Realtime] New message received:', payload.new);
+          const newMessage = payload.new as Message;
+          
+          // Only add if not already in state (avoid duplicates from own sends)
+          setMessages((prev) => {
+            const exists = prev.some(m => m.id === newMessage.id);
+            if (!exists) {
+              // Update cache
+              addCachedMessage(conversationId, newMessage);
+              trackEvent('message_received_realtime', {
+                conversationId,
+                role: newMessage.role
+              });
+              return [...prev, newMessage];
+            }
+            return prev;
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          logger.log('[Realtime] Message updated:', payload.new);
+          const updatedMessage = payload.new as Message;
+          
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === updatedMessage.id ? updatedMessage : msg
+            )
+          );
+          
+          // Update cache
+          updateCachedMessage(conversationId, updatedMessage);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          logger.log('[Realtime] Message deleted:', payload.old);
+          const deletedId = (payload.old as any).id;
+          
+          setMessages((prev) => prev.filter((msg) => msg.id !== deletedId));
+        }
+      )
+      .subscribe();
+    
+    // Cleanup subscription on unmount or conversation change
+    return () => {
+      logger.log('[MessagesEffect] Cleaning up for conversation:', conversationId);
+      messageChannel.unsubscribe();
+    };
+  }, [currentConversation?.id]);
 
   useEffect(() => {
     // Only auto-scroll if NOT currently streaming
@@ -622,8 +697,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     // Try to detect and parse outline
     const outline = detectFlowOutline(lastMessage.content, currentConversation.flow_type);
     if (outline) {
-      logger.log('Detected flow outline:', outline);
+      logger.log('✅ Detected flow outline:', outline);
       setPendingOutlineApproval(outline);
+    } else {
+      logger.log('❌ No outline detected in message:', lastMessage.content.substring(0, 200));
     }
   }, [messages, currentConversation?.is_flow, currentConversation?.flow_type, flowOutline?.approved]);
 
@@ -643,6 +720,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       setCurrentUserId(user.id);
+
+      // Cleanup any accumulated empty conversations on page load
+      // This runs in the background and doesn't block page load
+      bulkCleanupEmptyConversations(brandId).catch(error => {
+        logger.error('[Init] Background cleanup failed:', error);
+        // Don't show error to user - this is a background optimization
+      });
 
       // Get user's profile
       const { data: profile } = await supabase
@@ -807,9 +891,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (cached && cached.length > 0) {
         setConversations(cached);
         
-        // DON'T auto-select - let user start fresh
-        // The "No conversation selected" empty state will show instead
-        
         trackPerformance('load_conversations', performance.now() - startTime, { source: 'cache' });
         
         // Refresh in background
@@ -821,7 +902,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       await fetchAndCacheConversations();
       trackPerformance('load_conversations', performance.now() - startTime, { source: 'database' });
     } catch (error) {
-      logger.error('Error loading conversations:', error);
+      logger.error('Error loading conversations:', error instanceof Error ? error.message : String(error), error);
       toast.error('Unable to load conversations. Check your connection and try again.', {
         duration: 5000,
       });
@@ -850,34 +931,54 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       cacheConversations(brandId, data);
       setConversations(data);
-      
-      // DON'T auto-select - let user start fresh
-      // The "No conversation selected" empty state will show instead
     }
   };
 
   const loadMessages = async () => {
-    if (!currentConversation) return;
+    if (!currentConversation) {
+      logger.log('[LoadMessages] No current conversation');
+      return;
+    }
 
+    // Skip loading messages for temporary/optimistic conversation IDs
+    if (currentConversation.id.startsWith('temp-')) {
+      logger.log('[LoadMessages] Skipping temp conversation:', currentConversation.id);
+      setMessages([]);
+      setLoadingMessages(false);
+      return;
+    }
+
+    // Capture conversation ID at start to detect race conditions
+    const conversationId = currentConversation.id;
     const startTime = performance.now();
+    
+    logger.log('[LoadMessages] Loading messages for:', conversationId);
 
     try {
       // Check cache first for instant loading
-      const cached = getCachedMessages(currentConversation.id);
+      const cached = getCachedMessages(conversationId);
       if (cached && cached.length > 0) {
-        setMessages(cached);
+        // Verify we're still on the same conversation (prevent race condition)
+        if (currentConversation?.id !== conversationId) {
+          logger.log('[LoadMessages] Conversation changed during cache load, aborting');
+          return;
+        }
+        
+        // Deduplicate cached messages
+        const uniqueMessages = cached.filter((message, index, self) => 
+          index === self.findIndex(m => m.id === message.id)
+        );
+        setMessages(uniqueMessages);
         setLoadingMessages(false);
         
         trackPerformance('load_messages', performance.now() - startTime, { 
           source: 'cache',
-          count: cached.length 
+          count: uniqueMessages.length,
+          originalCount: cached.length
         });
         
-        // Prefetch draft
-        const draft = loadDraft(currentConversation.id);
-        if (draft) {
-          setDraftContent(draft);
-        }
+        // Load comment counts for messages
+        loadCommentCounts(uniqueMessages.map(m => m.id));
         
         return;
       }
@@ -888,37 +989,59 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Use request coalescer to prevent duplicate calls
       await requestCoalescerRef.current.execute(
         async () => {
+          // Verify we're still on the same conversation before loading
+          if (currentConversation?.id !== conversationId) {
+            logger.log('[LoadMessages] Conversation changed before DB load, aborting');
+            return;
+          }
+          
           // Load from database
           const { data, error } = await supabase
             .from('messages')
             .select('*')
-            .eq('conversation_id', currentConversation.id)
+            .eq('conversation_id', conversationId)
             .order('created_at', { ascending: true });
 
           if (error) throw error;
           
-          if (data) {
-            cacheMessages(currentConversation.id, data);
-            setMessages(data);
-            trackPerformance('load_messages', performance.now() - startTime, { 
-              source: 'database',
-              count: data.length 
-            });
+          // Final check: verify we're still on the same conversation before setting state
+          if (currentConversation?.id !== conversationId) {
+            logger.log('[LoadMessages] Conversation changed after DB load, aborting');
+            return;
           }
           
-          // Load draft
-          const draft = loadDraft(currentConversation.id);
-          if (draft) {
-            setDraftContent(draft);
+          if (data) {
+            // Deduplicate messages from database
+            const uniqueMessages = data.filter((message, index, self) => 
+              index === self.findIndex(m => m.id === message.id)
+            );
+            
+            cacheMessages(conversationId, uniqueMessages);
+            setMessages(uniqueMessages);
+            trackPerformance('load_messages', performance.now() - startTime, { 
+              source: 'database',
+              count: uniqueMessages.length,
+              originalCount: data.length
+            });
+            
+            // Load comment counts for messages
+            loadCommentCounts(uniqueMessages.map(m => m.id));
           }
           
           // IMPORTANT: Hide loading state after database load
           setLoadingMessages(false);
         },
-        currentConversation.id
+        conversationId
       );
     } catch (error) {
-      logger.error('Error loading messages:', error);
+      // Better error logging with details
+      const errorDetails = error instanceof Error 
+        ? { message: error.message, stack: error.stack, name: error.name }
+        : typeof error === 'object' && error !== null
+        ? { ...error, code: (error as any).code, message: (error as any).message, details: (error as any).details }
+        : { error };
+      
+      logger.error('[LoadMessages] Error loading messages:', errorDetails);
       toast.error('Failed to load messages');
       setLoadingMessages(false);
     }
@@ -926,7 +1049,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
   const handleNewConversation = async () => {
     try {
-      setIsCreatingConversation(true);
+      setIsCreatingEmail(true);
       
       // Abort any ongoing AI generation before switching
       if (abortControllerRef.current) {
@@ -943,10 +1066,41 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setIsCreatingConversation(false);
+        setIsCreatingEmail(false);
         return;
       }
 
+      // Optimistic UI: Create temporary conversation object immediately
+      const tempId = `temp-${Date.now()}`;
+      const optimisticConversation: Conversation = {
+        id: tempId,
+        brand_id: brandId,
+        user_id: user.id,
+        created_by_name: currentUserName,
+        title: 'New Conversation',
+        model: selectedModel,
+        conversation_type: 'email',
+        mode: 'email_copy',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Add to conversations list optimistically
+      setConversations(prev => [optimisticConversation, ...prev]);
+      
+      // Select it immediately for instant navigation feel
+      setCurrentConversation(optimisticConversation);
+      setConversationMode('email_copy');
+      setMessages([]);
+      setEmailType('design');
+      setDraftContent('');
+      setDetectedCampaign(null);
+      setPendingOutlineApproval(null);
+      setIsGeneratingFlow(false);
+      setFlowGenerationProgress(0);
+      setSelectedFlowType(null);
+
+      // Now create in database
       const { data, error } = await supabase
         .from('conversations')
         .insert({
@@ -956,27 +1110,30 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           title: 'New Conversation',
           model: selectedModel,
           conversation_type: 'email',
-          mode: 'email_copy', // Start with writing mode by default
+          mode: 'email_copy',
         })
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // Roll back optimistic update on error
+        setConversations(prev => prev.filter(c => c.id !== tempId));
+        setCurrentConversation(null);
+        throw error;
+      }
 
+      // Replace optimistic conversation with real one
+      setConversations(prev => prev.map(c => c.id === tempId ? data : c));
       setCurrentConversation(data);
-      setConversationMode('email_copy');
-      setMessages([]);
-      setEmailType('design');
-      setDraftContent('');
-      setDetectedCampaign(null);
+      
       await loadConversations();
       toast.success('New conversation created');
       trackEvent('conversation_created', { conversationId: data.id });
     } catch (error) {
-      logger.error('Error creating conversation:', error);
+      logger.error('Error creating conversation:', error instanceof Error ? error.message : String(error), error);
       toast.error('Failed to create conversation');
     } finally {
-      setIsCreatingConversation(false);
+      setIsCreatingEmail(false);
     }
   };
 
@@ -1001,22 +1158,70 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   };
 
   const handleSelectConversation = async (conversationId: string) => {
+    // Prevent selecting the same conversation twice
+    if (currentConversation?.id === conversationId) {
+      logger.log('[SelectConversation] Already on this conversation, skipping');
+      return;
+    }
+
     // Optimistically update UI immediately for instant feedback
     const conversation = conversations.find((c) => c.id === conversationId);
     if (!conversation) return;
 
-    // Only show loading state if we don't have cached messages
+    logger.log('[SelectConversation] Switching to conversation:', conversationId);
+
+    // Abort any ongoing AI generation before switching
+    if (abortControllerRef.current && sending) {
+      abortControllerRef.current.abort();
+      setSending(false);
+      setAiStatus('idle');
+      toast('Generation stopped - switching conversations', { icon: '⏹️' });
+    }
+
+    // Auto-delete current conversation if it's empty (do this before UI update)
+    if (currentConversation && 
+        messages.length === 0 && 
+        currentConversation.id !== conversationId) {
+      cleanupIfEmpty(currentConversation.id, 'empty_on_switch').catch(logger.error);
+    }
+
+    // INSTANT scroll to top (no animation) - prevents jarring jumps
+    if (messagesEndRef.current) {
+      const container = messagesEndRef.current.closest('.overflow-y-auto');
+      if (container) {
+        container.scrollTop = 0; // Instant scroll to top
+      }
+    }
+
+    // CRITICAL: Clear messages immediately to prevent showing wrong conversation
+    setMessages([]);
+    
+    // Clear draft immediately - will be loaded by useEffect if it exists
+    setDraftContent('');
+    
+    // Clear all conversation-specific state
+    setDetectedCampaign(null);
+    setPendingOutlineApproval(null);
+    setIsGeneratingFlow(false);
+    setFlowGenerationProgress(0);
+    setRegeneratingMessageId(null);
+    setFocusedMessageIdForComments(null);
+    setHighlightedTextForComment(null);
+    
+    // Check for cached messages - if available, use them immediately (no loading state)
     const cached = getCachedMessages(conversationId);
-    if (!cached || cached.length === 0) {
+    const hasCachedMessages = cached && cached.length > 0;
+    
+    // Only show loading state if we DON'T have cached messages
+    if (!hasCachedMessages) {
       setLoadingMessages(true);
     }
     
     // Update current conversation immediately (optimistic update)
     setCurrentConversation(conversation);
+    updateConversationUrl(conversationId);
     setSelectedModel(conversation.model as AIModel);
     setConversationMode(conversation.mode || 'planning');
-    setDraftContent(''); // Clear draft when switching
-    setDetectedCampaign(null); // Clear any detected campaign
     
     // Set email type based on conversation
     if (conversation.is_flow) {
@@ -1031,21 +1236,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (emailType === 'flow') {
         setEmailType('design');
       }
-    }
-    
-    // Abort any ongoing AI generation before switching
-    if (abortControllerRef.current && sending) {
-      abortControllerRef.current.abort();
-      setSending(false);
-      setAiStatus('idle');
-      toast('Generation stopped - switching conversations', { icon: '⏹️' });
-    }
-
-    // Auto-delete current conversation if it's empty (do this after UI update)
-    if (currentConversation && 
-        messages.length === 0 && 
-        currentConversation.id !== conversationId) {
-      cleanupIfEmpty(currentConversation.id, 'empty_on_switch').catch(logger.error);
     }
 
     // Use startTransition for non-urgent updates
@@ -1111,6 +1301,63 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   };
 
+  // Load comment counts for messages
+  const loadCommentCounts = useCallback(async (messageIds: string[]) => {
+    if (!currentConversation || messageIds.length === 0) return;
+    
+    try {
+      const response = await fetch(`/api/conversations/${currentConversation.id}/comments`);
+      if (!response.ok) {
+        console.log('[Comment Counts] API returned:', response.status);
+        return;
+      }
+      
+      const data = await response.json();
+      const comments = data.comments || [];
+      
+      console.log('[Comment Counts] Loaded comments:', comments.length, 'for conversation', currentConversation.id);
+      
+      // Count comments per message AND store comment data
+      const counts: Record<string, number> = {};
+      const commentsByMessage: Record<string, Array<{ id: string; quoted_text?: string; content: string }>> = {};
+      
+      messageIds.forEach(id => {
+        const messageComments = comments.filter((c: any) => c.message_id === id && !c.resolved);
+        if (messageComments.length > 0) {
+          counts[id] = messageComments.length;
+          commentsByMessage[id] = messageComments.map((c: any) => ({
+            id: c.id,
+            quoted_text: c.quoted_text,
+            content: c.content
+          }));
+          console.log('[Comment Counts] Message', id.substring(0, 8), 'has', messageComments.length, 'comments');
+        }
+      });
+      
+      setMessageCommentCounts(counts);
+      setMessageComments(commentsByMessage);
+      console.log('[Comment Counts] Final counts:', counts);
+      console.log('[Comment Data] Comments by message:', commentsByMessage);
+    } catch (error) {
+      logger.error('Failed to load comment counts:', error);
+      // Don't show error - this is a background operation
+    }
+  }, [currentConversation]);
+
+  // Reload comment counts when comments sidebar opens
+  useEffect(() => {
+    if (!commentsSidebarCollapsed && currentConversation && messages.length > 0) {
+      loadCommentCounts(messages.map(m => m.id));
+    }
+  }, [commentsSidebarCollapsed, currentConversation, messages.length, loadCommentCounts]);
+
+  // Persist comments sidebar collapsed state
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('commentsSidebarCollapsed', String(commentsSidebarCollapsed));
+    }
+  }, [commentsSidebarCollapsed]);
+
   const handleRenameConversation = async (conversationId: string, newTitle: string) => {
     try {
       const response = await fetch(`/api/conversations/${conversationId}/name`, {
@@ -1163,7 +1410,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const handleSelectFlowType = async (flowType: FlowType) => {
     try {
       logger.log('[Flow] Creating flow conversation for type:', flowType);
-      setIsCreatingFlowConversation(true);
+      setIsCreatingFlow(true);
       setShowFlowTypeSelector(false);
       setSelectedFlowType(flowType);
       
@@ -1171,19 +1418,51 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) {
         logger.error('[Flow] No user found');
+        setIsCreatingFlow(false);
         return;
       }
 
+      const flowTitle = `New ${flowType.replace(/_/g, ' ')} Flow`;
       const flowData = {
         brand_id: brandId,
         user_id: user.user.id,
-        title: `New ${flowType.replace(/_/g, ' ')} Flow`,
+        title: flowTitle,
         model: selectedModel,
         conversation_type: 'email' as const,
         mode: 'email_copy' as const,
         is_flow: true,
         flow_type: flowType
       };
+
+      // Optimistic UI: Create temporary flow conversation immediately
+      const tempId = `temp-flow-${Date.now()}`;
+      const optimisticFlow: Conversation = {
+        id: tempId,
+        brand_id: brandId,
+        user_id: user.user.id,
+        created_by_name: currentUserName,
+        title: flowTitle,
+        model: selectedModel,
+        conversation_type: 'email',
+        mode: 'email_copy',
+        is_flow: true,
+        flow_type: flowType,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Add to conversations list optimistically
+      setConversations(prev => [optimisticFlow, ...prev]);
+      
+      // Select it immediately
+      setCurrentConversation(optimisticFlow);
+      setEmailType('flow');
+      setMessages([]);
+      setPendingOutlineApproval(null);
+      setIsGeneratingFlow(false);
+      setFlowGenerationProgress(0);
+      setFlowOutline(null);
+      setFlowChildren([]);
 
       logger.log('[Flow] Inserting conversation with data:', flowData);
 
@@ -1195,6 +1474,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       if (error) {
         logger.error('[Flow] Error creating conversation:', error);
+        logger.error('[Flow] Error details:', JSON.stringify(error, null, 2));
+        logger.error('[Flow] Error message:', error.message);
+        logger.error('[Flow] Error code:', error.code);
+        logger.error('[Flow] Error hint:', error.hint);
+        logger.error('[Flow] Error details:', error.details);
+        
+        // Roll back optimistic update on error
+        setConversations(prev => prev.filter(c => c.id !== tempId));
+        setCurrentConversation(null);
+        setEmailType('design');
         throw error;
       }
 
@@ -1202,12 +1491,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       logger.log('[Flow] is_flow value:', newConversation.is_flow);
       logger.log('[Flow] flow_type value:', newConversation.flow_type);
 
-      // Set emailType to flow
-      setEmailType('flow');
-      
-      // Load the new conversation
+      // Replace optimistic conversation with real one
+      setConversations(prev => prev.map(c => c.id === tempId ? newConversation : c));
       setCurrentConversation(newConversation);
-      setMessages([]);
+      
       await loadConversations();
       
       logger.log('[Flow] Conversation loaded, check sidebar for is_flow:', newConversation.is_flow);
@@ -1218,7 +1505,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Reset email type
       setEmailType('design');
     } finally {
-      setIsCreatingFlowConversation(false);
+      setIsCreatingFlow(false);
     }
   };
 
@@ -1263,6 +1550,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     if (!currentConversation) return;
 
     let flowProgressChannel: ReturnType<typeof supabase.channel> | null = null;
+    let progressInterval: NodeJS.Timeout | null = null;
     const observedChildIds = new Set<string>();
     
     try {
@@ -1271,6 +1559,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setFlowGenerationProgress(0);
       
       logger.log('[Flow UI] Starting flow generation for', outline.emails.length, 'emails');
+      
+      // Set initial progress to 1 to show we're starting
+      setFlowGenerationProgress(1);
       
       // Subscribe to child conversation inserts for real-time progress updates
       flowProgressChannel = supabase
@@ -1288,11 +1579,31 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             if (inserted?.id) {
               observedChildIds.add(inserted.id);
               const progressCount = Math.min(outline.emails.length, observedChildIds.size);
+              console.log('[Flow Progress] Email created, updating progress:', progressCount);
               setFlowGenerationProgress(progressCount);
             }
           }
         )
         .subscribe();
+      
+      // Fallback: Poll for progress every 3 seconds if realtime updates fail
+      progressInterval = setInterval(async () => {
+        try {
+          const { data: children } = await supabase
+            .from('conversations')
+            .select('id')
+            .eq('parent_conversation_id', currentConversation.id);
+          
+          if (children && children.length > observedChildIds.size) {
+            children.forEach(c => observedChildIds.add(c.id));
+            const progressCount = Math.min(outline.emails.length, children.length);
+            console.log('[Flow Progress] Polling detected progress:', progressCount);
+            setFlowGenerationProgress(progressCount);
+          }
+        } catch (error) {
+          console.error('[Flow Progress] Error polling progress:', error);
+        }
+      }, 3000);
       
       logger.log('[Flow UI] Calling generate-emails API...');
       const response = await fetch('/api/flows/generate-emails', {
@@ -1373,6 +1684,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     } finally {
       if (flowProgressChannel) {
         flowProgressChannel.unsubscribe();
+      }
+      if (progressInterval) {
+        clearInterval(progressInterval);
       }
       setSending(false);
       setIsGeneratingFlow(false);
@@ -2633,15 +2947,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     <div className="relative h-screen bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
       <Toaster position="top-right" />
       
-      {/* Flow Generation Progress Modal */}
-      {isGeneratingFlow && pendingOutlineApproval && (
-        <Suspense fallback={<div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"><div className="text-white">Loading...</div></div>}>
-          <FlowGenerationProgress
-            totalEmails={pendingOutlineApproval.emails.length}
-            currentEmail={flowGenerationProgress}
-            isGenerating={isGeneratingFlow}
-          />
-        </Suspense>
+      {/* Subtle loading progress bar at top */}
+      {loadingMessages && (
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-500 z-50 animate-pulse">
+          <div className="h-full bg-blue-400 dark:bg-blue-300 animate-shimmer"></div>
+        </div>
       )}
       
       {/* Enhanced Sidebar and Main Content with Resizable Panels */}
@@ -2685,7 +2995,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                 handleNewConversation();
                 setShowFlowTypeSelector(true);
               }}
-              isCreatingConversation={isCreatingConversation}
+              isCreatingEmail={isCreatingEmail}
+              isCreatingFlow={isCreatingFlow}
             />
           </SectionErrorBoundary>
         </SidebarPanelWrapper>
@@ -2723,6 +3034,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               handleNewConversation();
               setShowFlowTypeSelector(true);
             }}
+            isCreatingEmail={isCreatingEmail}
+            isCreatingFlow={isCreatingFlow}
           />
         </SectionErrorBoundary>
         </div>
@@ -2776,18 +3089,43 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                 </h2>
               </div>
               
-              {/* Three-dot menu - Clean! */}
+              {/* Action buttons */}
               {currentConversation && (
-                <button
-                  data-conversation-menu-trigger
-                  onClick={() => setShowConversationMenu(!showConversationMenu)}
-                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
-                  title="Conversation Options"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowShareModal(true)}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
+                    title="Share Conversation"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const newState = !commentsSidebarCollapsed;
+                      console.log('[Comments Toggle] Changing from', commentsSidebarCollapsed, 'to', newState);
+                      setCommentsSidebarCollapsed(newState);
+                      // Removed toast notification - visual feedback is immediate via panel
+                    }}
+                    className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors ${commentsSidebarCollapsed ? 'text-gray-600 dark:text-gray-400' : 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'}`}
+                    title={commentsSidebarCollapsed ? 'Show comments' : 'Hide comments'}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                  </button>
+                  <button
+                    data-conversation-menu-trigger
+                    onClick={() => setShowConversationMenu(!showConversationMenu)}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
+                    title="Conversation Options"
+                  >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                    </svg>
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -2931,8 +3269,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             </div>
             )
           ) : loadingMessages ? (
-            /* Loading skeleton */
-            <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            /* Loading skeleton with fade-in animation */
+            <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-200">
               <div className="space-y-6">
                 {flowCreationPanel}
                 {flowGuidanceCard}
@@ -2945,7 +3283,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           ) : messages.length > 50 ? (
             /* Use virtualized list for long conversations (50+ messages) */
             <SectionErrorBoundary sectionName="message list">
-              <div className="max-w-5xl mx-auto space-y-6">
+              <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-200">
                 {flowCreationPanel}
                 {flowGuidanceCard}
               <VirtualizedMessageList
@@ -2962,10 +3300,19 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                 starredEmailContents={starredEmailContents}
               />
               
+              {/* Inline Flow Generation Progress */}
+              {isGeneratingFlow && pendingOutlineApproval && (
+                <FlowGenerationProgress
+                  totalEmails={pendingOutlineApproval.emails.length}
+                  currentEmail={flowGenerationProgress}
+                  isGenerating={isGeneratingFlow}
+                />
+              )}
+              
               <div ref={messagesEndRef} />
               
               {/* Show preparing indicator when sending but no AI message yet */}
-              {sending && messages.filter(m => m.role === 'assistant').length === messages.filter(m => m.role === 'user').length - 1 && (
+              {sending && !isGeneratingFlow && messages.filter(m => m.role === 'assistant').length === messages.filter(m => m.role === 'user').length - 1 && (
                 <div className="mb-3 inline-block">
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <div className="flex gap-1">
@@ -2982,13 +3329,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           ) : (
             /* Regular rendering for shorter conversations */
             <SectionErrorBoundary sectionName="message list">
-              <div className="max-w-5xl mx-auto space-y-6">
+              <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-200">
                 {flowCreationPanel}
                 {flowGuidanceCard}
                 {/* Flow Outline Display for parent flow conversations */}
                 {currentConversation?.is_flow && flowOutline && flowOutline.approved && (
                   <FlowOutlineDisplay
                     outline={flowOutline.outline_data}
+                    mermaidChart={flowOutline.mermaid_chart}
                     children={flowChildren}
                     onSelectChild={(childId) => handleSelectConversation(childId)}
                     currentChildId={currentConversation.id}
@@ -2997,7 +3345,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
                 
                 {/* Messages */}
-                {messages.map((message, index) => (
+                {messages
+                  // Deduplicate messages by ID (in case of race conditions)
+                  .filter((message, index, self) => 
+                    index === self.findIndex(m => m.id === message.id)
+                  )
+                  .map((message, index) => (
                 <ChatMessage
                   key={message.id}
                   message={message}
@@ -3023,13 +3376,37 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   isRegenerating={regeneratingMessageId === message.id}
                   isStreaming={message.role === 'assistant' && index === messages.length - 1 && sending}
                   aiStatus={aiStatus}
+                  commentCount={messageCommentCounts[message.id] || 0}
+                  commentsData={messageComments[message.id] || []}
+                  conversationId={currentConversation?.id}
+                  onCommentClick={(highlightedText) => {
+                    // If highlighted text, it's for inline comment box (handled in ChatMessage)
+                    // If no highlighted text, it's clicking "View comments" - open sidebar
+                    if (!highlightedText) {
+                      setFocusedMessageIdForComments(message.id);
+                      setCommentsSidebarCollapsed(false);
+                    }
+                    // Reload comment counts after inline comment is added
+                    if (messages.length > 0) {
+                      loadCommentCounts(messages.map(m => m.id));
+                    }
+                  }}
                 />
               ))}
+              
+              {/* Inline Flow Generation Progress */}
+              {isGeneratingFlow && pendingOutlineApproval && (
+                <FlowGenerationProgress
+                  totalEmails={pendingOutlineApproval.emails.length}
+                  currentEmail={flowGenerationProgress}
+                  isGenerating={isGeneratingFlow}
+                />
+              )}
               
               <div ref={messagesEndRef} />
               
               {/* Show preparing indicator when sending but no AI message yet */}
-              {sending && messages.filter(m => m.role === 'assistant').length === messages.filter(m => m.role === 'user').length - 1 && (
+              {sending && !isGeneratingFlow && messages.filter(m => m.role === 'assistant').length === messages.filter(m => m.role === 'user').length - 1 && (
                 <div className="mb-3 inline-block">
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <div className="flex gap-1">
@@ -3047,17 +3424,33 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         </div>
 
         {/* Approve Outline Button (Flow Mode) */}
-        {currentConversation?.is_flow && 
-         pendingOutlineApproval && 
-         !flowOutline?.approved && 
-         !sending && (
-          <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+        {(() => {
+          const shouldShow = currentConversation?.is_flow && 
+                            pendingOutlineApproval && 
+                            !flowOutline?.approved && 
+                            !sending;
+          
+          if (currentConversation?.is_flow) {
+            console.log('[Approve Button Debug]', {
+              isFlow: currentConversation?.is_flow,
+              hasPendingOutline: !!pendingOutlineApproval,
+              flowOutlineApproved: flowOutline?.approved,
+              sending,
+              shouldShow
+            });
+          }
+          
+          return shouldShow;
+        })() && (
+          <div className="border-t border-gray-200 dark:border-gray-700 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
             <div className="max-w-4xl mx-auto">
-              <ApproveOutlineButton
-                outline={pendingOutlineApproval}
-                onApprove={() => handleApproveOutline(pendingOutlineApproval)}
-                disabled={sending}
-              />
+              <Suspense fallback={<div className="p-4 text-center text-gray-500">Loading...</div>}>
+                <ApproveOutlineButton
+                  outline={pendingOutlineApproval!}
+                  onApprove={() => handleApproveOutline(pendingOutlineApproval!)}
+                  disabled={sending}
+                />
+              </Suspense>
             </div>
           </div>
         )}
@@ -3069,7 +3462,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
          messages.length > 0 &&
          messages[messages.length - 1]?.role === 'assistant' && 
          !sending && (
-          <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+          <div className="border-t border-gray-200 dark:border-gray-700 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
             <div className="max-w-4xl mx-auto">
               <InlineActionBanner
                 tone="success"
@@ -3112,6 +3505,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             emailType={emailType}
             onEmailTypeChange={handleEmailTypeChange}
             hasMessages={messages.length > 0}
+            autoFocus={messages.length === 0}
           />
         )}
 
@@ -3134,10 +3528,69 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             />
           </SectionErrorBoundary>
         )}
+
+        {/* Share Modal */}
+        {showShareModal && currentConversation && (
+          <Suspense fallback={null}>
+            <ShareModal
+              conversationId={currentConversation.id}
+              isOpen={showShareModal}
+              onClose={() => setShowShareModal(false)}
+            />
+          </Suspense>
+        )}
+
+        {/* Active Jobs Indicator */}
+        <ActiveJobsIndicator />
         
         {/* Command Palette and Keyboard Shortcuts are now global - see layout.tsx */}
         </div>
         </ResizablePanel>
+
+        {/* Comments Sidebar - Resizable */}
+        {!commentsSidebarCollapsed && currentConversation && (
+          <>
+            <ResizableHandle 
+              withHandle 
+              className="w-px bg-gray-200 dark:bg-gray-700 hover:bg-blue-500 dark:hover:bg-blue-500 transition-all data-[resize-handle-active]:bg-blue-500"
+              style={{ cursor: 'col-resize' }}
+            />
+            <ResizablePanel 
+              defaultSize={25} 
+              minSize={15} 
+              maxSize={40}
+              className="min-w-0"
+            >
+              <Suspense fallback={
+                <div className="h-full bg-white dark:bg-gray-950 p-4">
+                  <div className="space-y-4">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="animate-pulse flex gap-3">
+                        <div className="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-800"></div>
+                        <div className="flex-1 space-y-2">
+                          <div className="h-3 bg-gray-200 dark:bg-gray-800 rounded w-24"></div>
+                          <div className="h-3 bg-gray-200 dark:bg-gray-800 rounded w-full"></div>
+                          <div className="h-3 bg-gray-200 dark:bg-gray-800 rounded w-3/4"></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              }>
+                <CommentsSidebar
+                  conversationId={currentConversation.id}
+                  focusedMessageId={focusedMessageIdForComments}
+                  highlightedText={highlightedTextForComment}
+                  onHighlightedTextUsed={() => setHighlightedTextForComment(null)}
+                  onSendToChat={(text) => {
+                    setDraftContent(prev => prev ? `${prev}\n\n${text}` : text);
+                    // Removed toast notification - text appears in input immediately
+                  }}
+                />
+              </Suspense>
+            </ResizablePanel>
+          </>
+        )}
       </ResizablePanelGroup>
     </div>
   );

@@ -12,6 +12,7 @@ import ConversationExplorer from './ConversationExplorer';
 import BulkActionBar from './BulkActionBar';
 import { SidebarLoadingSkeleton } from './SkeletonLoader';
 import { useSidebarPanel } from '@/contexts/SidebarPanelContext';
+import LoadingDots from './LoadingDots';
 
 interface ChatSidebarEnhancedProps {
   brandName: string;
@@ -42,7 +43,8 @@ interface ChatSidebarEnhancedProps {
   onNavigateHome?: () => void;
   onNewFlow?: () => void;
   isLoading?: boolean; // Show loading skeleton when true
-  isCreatingConversation?: boolean;
+  isCreatingEmail?: boolean;
+  isCreatingFlow?: boolean;
 }
 
 interface TooltipState {
@@ -79,7 +81,8 @@ export default function ChatSidebarEnhanced({
   onNavigateHome,
   onNewFlow,
   isLoading = false,
-  isCreatingConversation = false
+  isCreatingEmail = false,
+  isCreatingFlow = false
 }: ChatSidebarEnhancedProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -587,14 +590,14 @@ export default function ChatSidebarEnhanced({
               <button
                 type="button"
                 onClick={handleMobileNewConversation}
-                disabled={isCreatingConversation}
-                className="py-2.5 px-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1.5 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                disabled={isCreatingEmail || isCreatingFlow}
+                className="py-2.5 px-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm active:scale-95"
               >
-                {isCreatingConversation ? (
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 4 0 00-4 4H4z" />
-                  </svg>
+                {isCreatingEmail ? (
+                  <div className="flex items-center gap-1.5">
+                    <LoadingDots size="sm" color="white" />
+                    <span className="text-xs">Creating...</span>
+                  </div>
                 ) : (
                   <>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -607,14 +610,14 @@ export default function ChatSidebarEnhanced({
               <button
                 type="button"
                 onClick={handleMobileNewFlow}
-                disabled={isCreatingConversation}
-                className="py-2.5 px-3 bg-purple-600 hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1.5 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                disabled={isCreatingEmail || isCreatingFlow}
+                className="py-2.5 px-3 bg-purple-600 hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm active:scale-95"
               >
-                {isCreatingConversation ? (
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 4 0 00-4 4H4z" />
-                  </svg>
+                {isCreatingFlow ? (
+                  <div className="flex items-center gap-1.5">
+                    <LoadingDots size="sm" color="white" />
+                    <span className="text-xs">Creating...</span>
+                  </div>
                 ) : (
                   <>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -673,15 +676,12 @@ export default function ChatSidebarEnhanced({
             <button
               type="button"
               onClick={handleMobileNewConversation}
-              disabled={isCreatingConversation}
+              disabled={isCreatingEmail || isCreatingFlow}
               className="w-11 h-11 flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               title="New Email"
             >
-              {isCreatingConversation ? (
-                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                </svg>
+              {isCreatingEmail || isCreatingFlow ? (
+                <LoadingDots size="md" color="gray" />
               ) : (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />

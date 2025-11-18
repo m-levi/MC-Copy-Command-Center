@@ -20,6 +20,7 @@ interface ChatInputProps {
   emailType?: EmailType;
   onEmailTypeChange?: (type: EmailType) => void;
   hasMessages?: boolean; // Track if conversation has any messages
+  autoFocus?: boolean; // Auto-focus the input on mount
 }
 
 export default function ChatInput({ 
@@ -36,7 +37,8 @@ export default function ChatInput({
   onModelChange,
   emailType = 'design',
   onEmailTypeChange,
-  hasMessages = false
+  hasMessages = false,
+  autoFocus = false
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showSlashCommands, setShowSlashCommands] = useState(false);
@@ -223,8 +225,8 @@ export default function ChatInput({
     const currentLine = value.substring(lineStart, start);
     
     // Check if current line starts with a list marker
-    // Match: optional spaces + (-, *, +, or number.) + space + content
-    const listMatch = currentLine.match(/^(\s*)([-*+]|\d+\.)\s(.*)$/);
+    // Match: optional spaces + (-, *, +, •, or number.) + space + content
+    const listMatch = currentLine.match(/^(\s*)([-*+•]|\d+\.)\s(.*)$/);
     
     if (listMatch) {
       const indent = listMatch[1];
@@ -236,23 +238,48 @@ export default function ChatInput({
         e.preventDefault();
         
         const isNumbered = /^\d+\.$/.test(marker);
+        // For bullet character, keep using it
         const newMarker = isNumbered ? `${parseInt(marker) + 1}.` : marker;
         const newLine = `\n${indent}${newMarker} `;
         
         const newValue = value.substring(0, start) + newLine + value.substring(end);
+        const newPos = start + newLine.length;
+        
+        // Update value and cursor position synchronously
+        textarea.value = newValue;
+        textarea.setSelectionRange(newPos, newPos);
         setMessage(newValue);
         
-        // Set cursor and resize
-        setTimeout(() => {
-          const newPos = start + newLine.length;
-          textarea.setSelectionRange(newPos, newPos);
+        // Resize after state update
+        requestAnimationFrame(() => {
           textarea.style.height = 'auto';
           textarea.style.height = textarea.scrollHeight + 'px';
-        }, 0);
+        });
+        
+        return true;
+      } else {
+        // If list item is empty, remove the marker and exit list mode
+        e.preventDefault();
+        
+        // Remove the current line with the marker
+        const beforeMarker = value.substring(0, lineStart);
+        const afterCursor = value.substring(end);
+        const newValue = beforeMarker + '\n' + afterCursor;
+        const newPos = lineStart + 1;
+        
+        // Update value and cursor position synchronously
+        textarea.value = newValue;
+        textarea.setSelectionRange(newPos, newPos);
+        setMessage(newValue);
+        
+        // Resize after state update
+        requestAnimationFrame(() => {
+          textarea.style.height = 'auto';
+          textarea.style.height = textarea.scrollHeight + 'px';
+        });
         
         return true;
       }
-      // If list item is empty, let Shift+Enter make a normal newline
     }
     
     return false;
@@ -329,15 +356,40 @@ export default function ChatInput({
   }, []); // Empty deps - use ref to access latest onDraftChange
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newValue = e.target.value;
-    setMessage(newValue);
+    let newValue = e.target.value;
+    const textarea = e.target;
+    const cursorPos = textarea.selectionStart;
+    
+    // Auto-convert bullet list markers (- or * followed by space)
+    const textBeforeCursor = newValue.substring(0, cursorPos);
+    const lines = textBeforeCursor.split('\n');
+    const currentLine = lines[lines.length - 1];
+    
+    // If current line is exactly "- " or "* ", convert to bullet
+    if (currentLine === '- ' || currentLine === '* ') {
+      const beforeList = newValue.substring(0, cursorPos - 2);
+      const afterCursor = newValue.substring(cursorPos);
+      newValue = beforeList + '• ' + afterCursor;
+      const newCursorPos = beforeList.length + 2;
+      
+      // Update textarea value directly FIRST
+      textarea.value = newValue;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+      
+      // Then update state
+      setMessage(newValue);
+    } else {
+      setMessage(newValue);
+    }
     
     // Debounce the save
     debouncedSave(newValue);
     
     // Auto-expand textarea
-    e.target.style.height = 'auto';
-    e.target.style.height = e.target.scrollHeight + 'px';
+    requestAnimationFrame(() => {
+      textarea.style.height = 'auto';
+      textarea.style.height = textarea.scrollHeight + 'px';
+    });
   };
 
   // Cleanup timeout on unmount and when conversationId changes
@@ -348,6 +400,17 @@ export default function ChatInput({
       }
     };
   }, [conversationId]);
+
+  // Auto-focus the input when requested
+  useEffect(() => {
+    if (autoFocus && textareaRef.current && !disabled && !isGenerating) {
+      // Small delay to ensure DOM is ready
+      const timer = setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [autoFocus, disabled, isGenerating, conversationId]);
 
   const charCount = message.length;
 

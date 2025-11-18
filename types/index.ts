@@ -29,10 +29,13 @@ export type EmailStyle = Extract<EmailType, 'design' | 'letter'>;
 export type FlowType = 
   | 'welcome_series'
   | 'abandoned_cart'
+  | 'browse_abandonment'
+  | 'site_abandonment'
   | 'post_purchase'
   | 'winback'
   | 'product_launch'
-  | 'educational_series';
+  | 'educational_series'
+  | 'do_your_research';
 
 export interface FlowTemplate {
   id: FlowType;
@@ -67,6 +70,7 @@ export interface FlowOutline {
   conversation_id: string;
   flow_type: FlowType;
   outline_data: FlowOutlineData;
+  mermaid_chart?: string; // Auto-generated Mermaid flowchart syntax
   approved: boolean;
   approved_at?: string;
   email_count: number;

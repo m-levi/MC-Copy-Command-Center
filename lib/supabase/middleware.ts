@@ -42,13 +42,14 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Allow access to public auth pages
+  // Allow access to public auth pages and shared conversations
   const publicPaths = [
     '/login',
     '/signup',
     '/forgot-password',
     '/reset-password',
     '/auth/confirm',
+    '/shared',  // Allow unauthenticated access to shared conversations
   ];
   
   const isPublicPath = publicPaths.some(path => 
@@ -62,8 +63,10 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Redirect authenticated users away from auth pages (except confirmation)
-  if (user && isPublicPath && request.nextUrl.pathname !== '/auth/confirm') {
+  // Redirect authenticated users away from auth pages (except confirmation and shared links)
+  if (user && isPublicPath && 
+      request.nextUrl.pathname !== '/auth/confirm' &&
+      !request.nextUrl.pathname.startsWith('/shared')) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);

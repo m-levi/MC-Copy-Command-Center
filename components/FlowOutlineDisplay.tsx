@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { FlowOutlineData, Conversation } from '@/types';
+import FlowchartViewer from './FlowchartViewer';
 
 interface FlowOutlineDisplayProps {
   outline: FlowOutlineData;
+  mermaidChart?: string;
   children?: Conversation[];
   onSelectChild: (childId: string) => void;
   currentChildId?: string;
@@ -13,12 +15,14 @@ interface FlowOutlineDisplayProps {
 
 export default function FlowOutlineDisplay({
   outline,
+  mermaidChart,
   children = [],
   onSelectChild,
   currentChildId,
   onEdit
 }: FlowOutlineDisplayProps) {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [showFlowchart, setShowFlowchart] = useState(false);
 
   // Get status for each email
   const getEmailStatus = (sequence: number) => {
@@ -119,6 +123,36 @@ export default function FlowOutlineDisplay({
               </p>
             </div>
           </div>
+
+          {/* Flowchart Section */}
+          {mermaidChart && (
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-4 overflow-visible">
+              <div className="flex items-center justify-between mb-3">
+                <button
+                  onClick={() => setShowFlowchart(!showFlowchart)}
+                  className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                  aria-label={showFlowchart ? 'Hide flowchart' : 'Show flowchart'}
+                >
+                  <svg 
+                    className={`w-4 h-4 transition-transform duration-200 ${showFlowchart ? 'rotate-90' : ''}`}
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span>📊 Flow Visualization</span>
+                </button>
+              </div>
+              
+              <FlowchartViewer
+                mermaidChart={mermaidChart}
+                flowName={outline.flowName}
+                isVisible={showFlowchart}
+                onToggle={() => setShowFlowchart(!showFlowchart)}
+              />
+            </div>
+          )}
 
           {/* Email list */}
           <div className="space-y-2">

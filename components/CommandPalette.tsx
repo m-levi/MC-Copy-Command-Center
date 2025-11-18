@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Brand, Conversation, ConversationWithStatus } from '@/types';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
+import { performSearch, SearchResult } from '@/lib/search-service';
+import { logger } from '@/lib/logger';
 
 interface CommandItem {
   id: string;
@@ -55,6 +57,8 @@ export default function CommandPalette({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [searchFilter, setSearchFilter] = useState<SearchFilter>('all');
+  const [apiSearchResults, setApiSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -78,6 +82,26 @@ export default function CommandPalette({
     setRecentSearches(updated);
     localStorage.setItem('command-palette-recent', JSON.stringify(updated));
   };
+
+  // Perform API search when query is long enough
+  useEffect(() => {
+    if (query.trim().length >= 3) {
+      setIsSearching(true);
+      performSearch(query, 'all', {}, 1, 10)
+        .then((response) => {
+          setApiSearchResults(response.results);
+        })
+        .catch((error) => {
+          logger.error('Search API error:', error);
+          setApiSearchResults([]);
+        })
+        .finally(() => {
+          setIsSearching(false);
+        });
+    } else {
+      setApiSearchResults([]);
+    }
+  }, [query]);
 
   // Advanced fuzzy search with better scoring and highlighting
   const fuzzyMatch = (text: string, query: string): { matches: boolean; score: number; highlightIndices: number[] } => {
@@ -463,6 +487,36 @@ export default function CommandPalette({
       });
     }
 
+    // Add API search results if available
+    if (apiSearchResults.length > 0 && query.trim().length >= 3) {
+      apiSearchResults.forEach((result) => {
+        const existingIndex = items.findIndex((item) => item.id === result.id);
+        if (existingIndex === -1) {
+          items.push({
+            id: result.id,
+            type: result.type === 'brand' ? 'brand' : result.type === 'conversation' ? 'conversation' : 'action',
+            label: result.title,
+            description: result.content?.substring(0, 100),
+            icon: result.type === 'brand' ? '🏷️' : result.type === 'conversation' ? '💬' : '📧',
+            score: 200, // High score for API results
+            onExecute: () => {
+              if (result.type === 'brand' && result.id) {
+                onSelectBrand(result.id);
+              } else if (result.type === 'conversation' && result.id) {
+                onSelectConversation(result.id, result.brand_id);
+              }
+              onClose();
+            },
+            meta: {
+              createdAt: result.created_at,
+              updatedAt: result.updated_at,
+              brandId: result.brand_id,
+            },
+          });
+        }
+      });
+    }
+
     // Sort by score descending, then by recency
     return items
       .sort((a, b) => {
@@ -473,7 +527,7 @@ export default function CommandPalette({
         return bTime.localeCompare(aTime);
       })
       .slice(0, 25); // Show top 25 results
-  }, [query, searchQuery, filterQuery, isCommandMode, isFilterMode, searchFilter, brands, conversations, currentBrandId, onSelectBrand, onSelectConversation, onNewConversation, onNewFlow, onClose, router]);
+  }, [query, searchQuery, filterQuery, isCommandMode, isFilterMode, searchFilter, brands, conversations, currentBrandId, apiSearchResults, onSelectBrand, onSelectConversation, onNewConversation, onNewFlow, onClose, router]);
 
   // Reset selected index when filtered items change
   useEffect(() => {

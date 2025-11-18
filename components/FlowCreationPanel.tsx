@@ -10,8 +10,8 @@ interface FlowCreationPanelProps {
 
 export default function FlowCreationPanel({ onCreate, onCancel }: FlowCreationPanelProps) {
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
         {/* Header */}
         <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">
           <div>
@@ -36,11 +36,12 @@ export default function FlowCreationPanel({ onCreate, onCancel }: FlowCreationPa
         {/* Flow Type Grid */}
         <div className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {FLOW_TEMPLATES.map((template) => (
+            {FLOW_TEMPLATES.map((template, index) => (
               <button
-                key={template.type}
-                onClick={() => onCreate(template.type)}
-                className="group relative p-6 border-2 border-gray-200 dark:border-gray-800 rounded-xl hover:border-blue-500 dark:hover:border-blue-600 hover:shadow-lg transition-all duration-200 text-left cursor-pointer"
+                key={template.id}
+                onClick={() => onCreate(template.id as FlowType)}
+                className="group relative p-6 border-2 border-gray-200 dark:border-gray-800 rounded-xl hover:border-blue-500 dark:hover:border-blue-600 hover:shadow-lg transition-all duration-200 text-left cursor-pointer active:scale-95 animate-in fade-in slide-in-from-bottom-2"
+                style={{ animationDelay: `${index * 50}ms` }}
               >
                 {/* Icon & Badge */}
                 <div className="flex items-start justify-between mb-3">
@@ -48,7 +49,7 @@ export default function FlowCreationPanel({ onCreate, onCancel }: FlowCreationPa
                     {template.icon}
                   </div>
                   <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
-                    {template.emailCount} emails
+                    {template.defaultEmailCount} emails
                   </span>
                 </div>
 
@@ -62,13 +63,13 @@ export default function FlowCreationPanel({ onCreate, onCancel }: FlowCreationPa
                   </p>
                 </div>
 
-                {/* Trigger */}
+                {/* Category Badge */}
                 <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
                     </svg>
-                    <span>Trigger: {template.trigger}</span>
+                    <span className="capitalize">{template.category}</span>
                   </div>
                 </div>
 

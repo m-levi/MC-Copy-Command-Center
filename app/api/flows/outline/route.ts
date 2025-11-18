@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { FlowOutlineData } from '@/types';
+import { generateMermaidChart } from '@/lib/mermaid-generator';
 
 export const runtime = 'edge';
 
@@ -32,6 +33,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
     }
 
+    // Generate Mermaid chart
+    const mermaidChart = generateMermaidChart(outlineData);
+
     // Create or update flow outline
     const { data: outline, error: outlineError } = await supabase
       .from('flow_outlines')
@@ -39,6 +43,7 @@ export async function POST(request: NextRequest) {
         conversation_id: conversationId,
         flow_type: outlineData.flowType,
         outline_data: outlineData,
+        mermaid_chart: mermaidChart,
         approved: false,
         email_count: outlineData.emails.length
       }, {

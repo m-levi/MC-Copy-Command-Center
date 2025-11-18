@@ -9,6 +9,7 @@ import { BrandGridSkeleton } from '@/components/SkeletonLoader';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 import { logger } from '@/lib/logger';
+import NotificationCenter from '@/components/NotificationCenter';
 
 // Lazy load the modal since it's not needed on initial render
 const BrandModal = lazy(() => import('@/components/BrandModal'));
@@ -321,6 +322,9 @@ export default function HomePage() {
                 Team Management
               </button>
             )}
+            <div className="relative">
+              <NotificationCenter />
+            </div>
             <button
               onClick={() => router.push('/settings')}
               className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500"
