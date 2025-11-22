@@ -21,10 +21,18 @@ export default function ActiveJobsIndicator() {
     const interval = setInterval(async () => {
       try {
         const response = await fetch('/api/jobs?status=queued&status=processing&status=streaming');
+        if (!response.ok) {
+          // Skip non-OK responses silently (API might not exist yet)
+          return;
+        }
         const data = await response.json();
         setJobs(data.jobs || []);
       } catch (error) {
-        logger.error('Failed to fetch jobs:', error);
+        // Only log non-network errors to avoid console pollution during page transitions
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (!errorMessage.includes('Failed to fetch') && !errorMessage.includes('aborted')) {
+          logger.error('Failed to fetch jobs:', error);
+        }
       }
     }, 2000);
 
@@ -75,7 +83,15 @@ export default function ActiveJobsIndicator() {
                 </div>
                 <button
                   onClick={async () => {
-                    await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
+                    try {
+                      await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
+                    } catch (error) {
+                      // Silently fail - job may have already completed
+                      const errorMessage = error instanceof Error ? error.message : String(error);
+                      if (!errorMessage.includes('Failed to fetch') && !errorMessage.includes('aborted')) {
+                        logger.error('Failed to cancel job:', error);
+                      }
+                    }
                   }}
                   className="text-xs text-red-600 hover:text-red-700"
                 >

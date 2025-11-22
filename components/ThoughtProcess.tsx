@@ -12,6 +12,18 @@ interface ThoughtProcessProps {
   aiStatus?: AIStatus;
 }
 
+// Keyframes for subtle breathing animation (like skeleton loader)
+const breatheKeyframes = `
+  @keyframes breathe {
+    0%, 100% { 
+      opacity: 1;
+    }
+    50% { 
+      opacity: 0.7;
+    }
+  }
+`;
+
 // Helper function to format thinking content with styled web search indicators
 function formatThinkingContent(content: string) {
   // Split by web search markers
@@ -86,34 +98,49 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
     return 'thought process';
   };
 
+  // Helper to capitalize label
+  const capitalizeLabel = (label: string) => {
+    if (!label) return '';
+    return label
+      .split(' ')
+      .map(word => word && word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   return (
-    <div className={`mb-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden ${isStreaming ? 'shadow-lg' : ''}`}>
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer group"
+    <>
+      <style>{breatheKeyframes}</style>
+      <div 
+        className={`mb-4 rounded-lg border bg-white dark:bg-gray-800 overflow-hidden transition-all duration-300 ${
+          isStreaming 
+            ? 'border-blue-200 dark:border-blue-800/50' 
+            : 'border-gray-200 dark:border-gray-700'
+        }`}
+        style={isStreaming ? { animation: 'breathe 2.5s ease-in-out infinite' } : undefined}
       >
-        <div className="flex items-center gap-2.5">
-          <span className="text-sm text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300">
-            {getDisplayLabel()}
-          </span>
-          {isStreaming && (
-            <div className="flex gap-1">
-              <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms', animationDuration: '1.4s' }}></div>
-              <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '200ms', animationDuration: '1.4s' }}></div>
-              <div className="w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '400ms', animationDuration: '1.4s' }}></div>
-            </div>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer group"
+        >
+          <div className="flex items-center gap-3">
+            <span className={`text-sm transition-colors ${
+              isStreaming 
+                ? 'text-blue-600 dark:text-blue-400 font-medium' 
+                : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300'
+            }`}>
+              {capitalizeLabel(getDisplayLabel())}
+            </span>
+          </div>
+          {isExpanded ? (
+            <ChevronDownIcon className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors" />
+          ) : (
+            <ChevronRightIcon className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors" />
           )}
-        </div>
-        {isExpanded ? (
-          <ChevronDownIcon className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors" />
-        ) : (
-          <ChevronRightIcon className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors" />
-        )}
-      </button>
+        </button>
       
       {/* Mini peek during streaming - show most recent content */}
       {isStreaming && !isExpanded && (parsedThinking || parsedEmailStrategy) && (
-        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gradient-to-b from-transparent to-gray-50/50 dark:to-gray-900/50">
+        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50/30 dark:bg-gray-900/30">
           <div className="relative overflow-hidden h-12">
             <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed transition-all duration-300 ease-out">
               {(() => {
@@ -152,8 +179,8 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
                 return '...' + tail.trim();
               })()}
             </div>
-            {/* Fade effect at bottom - matches background colors for seamless blend */}
-            <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-gray-50/50 via-gray-50/30 dark:from-gray-900/50 dark:via-gray-900/30 to-transparent pointer-events-none"></div>
+            {/* Subtle fade effect at bottom */}
+            <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-gray-50/30 dark:from-gray-900/30 to-transparent pointer-events-none"></div>
           </div>
         </div>
       )}
@@ -251,7 +278,8 @@ export default function ThoughtProcess({ thinking, emailStrategy, isStreaming = 
           )}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

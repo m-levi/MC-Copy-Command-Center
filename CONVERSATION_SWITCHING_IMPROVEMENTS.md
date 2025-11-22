@@ -1,5 +1,7 @@
 # Conversation Switching Performance Improvements
 
+> **Update**: Further improved in `SMART_SCROLL_IMPROVEMENTS.md` - conversations now stay at top instead of auto-scrolling to bottom.
+
 ## Problem Statement
 
 Conversation switching felt "janky" even though it worked correctly. The issues were:

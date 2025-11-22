@@ -13,7 +13,7 @@ export function extractConversationContext(messages: Message[]): ConversationCon
   // Analyze messages to extract context
   for (const message of messages) {
     if (message.role === 'user') {
-      const content = message.content.toLowerCase();
+      const content = (message.content ?? '').toLowerCase();
       
       // Detect campaign type
       if (content.includes('launch') || content.includes('announcement')) {

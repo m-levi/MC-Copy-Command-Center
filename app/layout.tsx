@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 import GlobalKeyboardShortcuts from "@/components/GlobalKeyboardShortcuts";
+import DebugPanel from "@/components/DebugPanel";
+import PageTransition from "@/components/PageTransition";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,8 +32,11 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <ThemeProvider>
-          {children}
+          <PageTransition>
+            {children}
+          </PageTransition>
           <GlobalKeyboardShortcuts />
+          <DebugPanel />
         </ThemeProvider>
       </body>
     </html>

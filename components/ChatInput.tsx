@@ -440,8 +440,8 @@ export default function ChatInput({
   };
 
   return (
-    <div className="bg-[#fcfcfc] dark:bg-gray-900 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-      <div className="max-w-5xl mx-auto">
+    <div className="relative px-4 sm:px-6 lg:px-8 pt-0 pb-4 sm:pb-5 bg-transparent">
+      <div className="max-w-5xl mx-auto relative">
         {/* Slash Command Suggestions */}
         {showSlashCommands && (
           <div className="mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden backdrop-blur-xl">
@@ -479,7 +479,7 @@ export default function ChatInput({
         )}
 
         {/* Main Input Card - matching Figma design */}
-        <div className="bg-white dark:bg-gray-800 border border-[#e3e3e3] dark:border-gray-700 rounded-2xl sm:rounded-[20px] shadow-sm overflow-visible">
+        <div className="bg-white dark:bg-gray-800 border border-[#e3e3e3] dark:border-gray-700 rounded-2xl sm:rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.06),0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.3),0_2px_8px_rgba(0,0,0,0.4)] overflow-visible transition-all duration-200 focus-within:border-[#c5c5c5] dark:focus-within:border-gray-600 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08),0_2px_10px_rgba(0,0,0,0.1)]">
           <div className="px-4 sm:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3">
             <textarea
               ref={textareaRef}

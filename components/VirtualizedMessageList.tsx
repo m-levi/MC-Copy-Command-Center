@@ -82,17 +82,18 @@ export default function VirtualizedMessageList({
     setVisibleRange({ start, end });
   }, [messages, messageHeights, shouldVirtualize]);
 
+
   // Update visible range on scroll
   useEffect(() => {
-    if (!shouldVirtualize) return;
-
     const container = containerRef.current;
     if (!container) return;
 
     let rafId: number;
     const handleScroll = () => {
       if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(calculateVisibleRange);
+      rafId = requestAnimationFrame(() => {
+        calculateVisibleRange();
+      });
     };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
@@ -195,77 +196,65 @@ export default function VirtualizedMessageList({
   return (
     <div
       ref={containerRef}
-      className="flex-1 overflow-y-auto px-8 py-8 bg-[#fcfcfc] dark:bg-gray-950"
-      style={{ 
+      style={{
+        height: shouldVirtualize ? getTotalHeight() : 'auto',
         position: 'relative',
-        // Performance optimizations for smooth scrolling
-        willChange: 'scroll-position',
-        WebkitOverflowScrolling: 'touch',
-        scrollBehavior: 'smooth',
-        contain: 'layout style paint',
       }}
     >
       <div
         style={{
-          height: shouldVirtualize ? getTotalHeight() : 'auto',
-          position: 'relative',
+          transform: shouldVirtualize ? `translateY(${getOffsetY()}px)` : 'none',
+          position: shouldVirtualize ? 'absolute' : 'relative',
+          top: 0,
+          left: 0,
+          right: 0,
         }}
       >
-        <div
-          style={{
-            transform: shouldVirtualize ? `translateY(${getOffsetY()}px)` : 'none',
-            position: shouldVirtualize ? 'absolute' : 'relative',
-            top: 0,
-            left: 0,
-            right: 0,
-          }}
-        >
-          {visibleMessages.map((message, relativeIndex) => {
-            const actualIndex = shouldVirtualize ? visibleRange.start + relativeIndex : relativeIndex;
-            
-            return (
-              <div
-                key={message.id}
-                data-message-id={message.id}
-                ref={(el) => {
-                  if (el) {
-                    measureRefs.current.set(message.id, el);
-                  } else {
-                    measureRefs.current.delete(message.id);
-                  }
-                }}
-              >
-                <ChatMessage
-                  message={message}
-                  brandId={brandId}
-                  mode={mode}
-                  isStarred={message.role === 'assistant' ? starredEmailContents.has(message.content) : false}
-                  onRegenerate={
-                    message.role === 'assistant' &&
-                    actualIndex === messages.length - 1 &&
-                    !sending
-                      ? () => onRegenerate(actualIndex)
-                      : undefined
-                  }
-                  onRegenerateSection={onRegenerateSection}
-                  onEdit={
-                    message.role === 'user'
-                      ? (newContent) => onEdit(actualIndex, newContent)
-                      : undefined
-                  }
-                  onReaction={
-                    message.role === 'assistant'
-                      ? (reaction) => onReaction(message.id, reaction)
-                      : undefined
-                  }
-                  isRegenerating={regeneratingMessageId === message.id}
-                  isStreaming={message.role === 'assistant' && actualIndex === messages.length - 1 && sending}
-                  aiStatus={aiStatus}
-                />
-              </div>
-            );
-          })}
-        </div>
+        {visibleMessages.map((message, relativeIndex) => {
+          const actualIndex = shouldVirtualize ? visibleRange.start + relativeIndex : relativeIndex;
+          
+          return (
+            <div
+              key={message.id}
+              data-message-id={message.id}
+              ref={(el) => {
+                if (el) {
+                  measureRefs.current.set(message.id, el);
+                } else {
+                  measureRefs.current.delete(message.id);
+                }
+              }}
+            >
+              <ChatMessage
+                message={message}
+                brandId={brandId}
+                mode={mode}
+                isStarred={message.role === 'assistant' ? starredEmailContents.has(message.content ?? '') : false}
+                onRegenerate={
+                  message.role === 'assistant' &&
+                  actualIndex === messages.length - 1 &&
+                  !sending
+                    ? () => onRegenerate(actualIndex)
+                    : undefined
+                }
+                onRegenerateSection={onRegenerateSection}
+                onEdit={
+                  message.role === 'user'
+                    ? (newContent) => onEdit(actualIndex, newContent)
+                    : undefined
+                }
+                onReaction={
+                  message.role === 'assistant'
+                    ? (reaction) => onReaction(message.id, reaction)
+                    : undefined
+                }
+                isRegenerating={regeneratingMessageId === message.id}
+                isStreaming={message.role === 'assistant' && actualIndex === messages.length - 1 && sending}
+                aiStatus={aiStatus}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

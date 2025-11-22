@@ -111,51 +111,58 @@ export default function ConversationCard({
     }
   };
 
-  // Get status badge
-  const getStatusBadge = () => {
-    if (!conversation.status || conversation.status === 'idle') return null;
+  // Get status display
+  const getStatusDisplay = () => {
+    if (!conversation.status || conversation.status === 'idle') {
+      // Default: Show creator avatar/name
+      return conversation.created_by_name ? (
+        <div className="flex items-center gap-1 text-[10px] text-gray-400">
+          <div className="w-4 h-4 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[8px] font-medium text-gray-600 dark:text-gray-400">
+            {conversation.created_by_name.charAt(0).toUpperCase()}
+          </div>
+        </div>
+      ) : null;
+    }
 
     const statusConfig = {
       loading: {
-        color: 'bg-blue-500',
-        text: 'Loading',
-        animate: 'animate-pulse'
+        text: 'Loading...',
+        color: 'text-blue-600 dark:text-blue-400',
+        icon: (
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+          </span>
+        )
       },
       ai_responding: {
-        color: 'bg-gradient-to-r from-blue-500 to-purple-500',
-        text: 'AI Responding',
-        animate: 'animate-pulse'
+        text: 'Generating...',
+        color: 'text-blue-600 dark:text-blue-400',
+        icon: (
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+          </span>
+        )
       },
       error: {
-        color: 'bg-red-500',
         text: 'Error',
-        animate: 'animate-pulse'
+        color: 'text-red-600 dark:text-red-400',
+        icon: (
+          <div className="w-2 h-2 rounded-full bg-red-500"></div>
+        )
       }
     };
 
-    const config = statusConfig[conversation.status];
+    const config = statusConfig[conversation.status as keyof typeof statusConfig];
     if (!config) return null;
 
     return (
-      <div className={`absolute top-3 right-3 flex items-center gap-1.5 px-2 py-1 ${config.color} rounded-full text-white text-[10px] font-semibold ${config.animate}`}>
-        <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+      <div className={`flex items-center gap-1.5 text-[10px] font-medium ${config.color}`}>
+        {config.icon}
         {config.text}
       </div>
     );
-  };
-
-  // Generate gradient background based on conversation ID
-  const getGradient = () => {
-    const gradients = [
-      'from-blue-400 to-blue-600',
-      'from-purple-400 to-purple-600',
-      'from-pink-400 to-pink-600',
-      'from-indigo-400 to-indigo-600',
-      'from-cyan-400 to-cyan-600',
-      'from-teal-400 to-teal-600',
-    ];
-    const index = conversation.id.charCodeAt(0) % gradients.length;
-    return gradients[index];
   };
 
   return (
@@ -175,158 +182,118 @@ export default function ConversationCard({
       }}
       className={`
         group relative
-        rounded-xl
+        rounded-lg
         transition-all duration-200
-        cursor-pointer overflow-hidden
+        cursor-pointer overflow-hidden border
         ${isSelected
-          ? 'bg-blue-50 dark:bg-blue-950/30 shadow-md border-2 border-blue-200 dark:border-blue-800'
+          ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
           : isActive 
-            ? 'bg-blue-600 dark:bg-blue-700 shadow-lg ring-2 ring-blue-400 dark:ring-blue-500 animate-pulse-subtle' 
-            : 'bg-white dark:bg-gray-800 shadow-sm hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-750'
+            ? 'bg-white dark:bg-gray-800 border-blue-500 dark:border-blue-400 shadow-sm ring-1 ring-blue-500/20 dark:ring-blue-400/20' 
+            : 'bg-white dark:bg-gray-900 border-transparent hover:border-gray-200 dark:hover:border-gray-700 hover:shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800'
         }
       `}
     >
 
-      {/* Thumbnail/Header with gradient */}
-      <div className={`h-20 bg-gradient-to-br ${getGradient()} relative`}>
-        {/* Bulk selection checkbox */}
-        {bulkSelectMode && (
-          <div 
-            className="absolute top-2 left-2 z-10"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleSelect?.(e);
-            }}
-          >
-            <div className={`
-              w-5 h-5 rounded flex items-center justify-center transition-all cursor-pointer
-              ${isSelected 
-                ? 'bg-blue-600 dark:bg-blue-500 scale-100' 
-                : 'bg-white/95 dark:bg-gray-900/95 border-2 border-white dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-400 scale-95'
-              }
-            `}>
-              {isSelected && (
-                <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-            </div>
+      {/* Bulk selection checkbox */}
+      {bulkSelectMode && (
+        <div 
+          className="absolute top-3 left-3 z-10"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect?.(e);
+          }}
+        >
+          <div className={`
+            w-4 h-4 rounded flex items-center justify-center transition-all cursor-pointer border
+            ${isSelected 
+              ? 'bg-blue-600 border-blue-600' 
+              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:border-blue-500'
+            }
+          `}>
+            {isSelected && (
+              <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            )}
           </div>
-        )}
-        
-        {/* Pin indicator */}
-        {!bulkSelectMode && isPinned && (
-          <div className="absolute top-2 left-2 p-1 bg-white/90 dark:bg-gray-900/90 rounded-full">
-            <svg className="w-3.5 h-3.5 text-yellow-500 fill-current" viewBox="0 0 24 24">
-              <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z" />
-            </svg>
-          </div>
-        )}
-
-        {/* Status badge */}
-        {getStatusBadge()}
-
-        {/* Type badge */}
-        <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm rounded-full text-[10px] font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">
-          {conversation.is_flow 
-            ? conversation.flow_type === 'abandoned_cart' ? 'Cart'
-            : conversation.flow_type === 'welcome_series' ? 'Welcome'
-            : conversation.flow_type === 'post_purchase' ? 'Post-Purchase'
-            : conversation.flow_type === 'winback' ? 'Winback'
-            : conversation.flow_type === 'product_launch' ? 'Launch'
-            : conversation.flow_type === 'educational_series' ? 'Education'
-            : 'Flow'
-            : conversation.mode === 'planning' ? 'Planning'
-            : 'Email'}
         </div>
-      </div>
+      )}
 
       {/* Content */}
-      <div className="p-4">
-        {/* Title */}
-        <h3 className={`text-sm font-semibold line-clamp-2 mb-2 min-h-[2.5rem] ${
-          isActive ? 'text-white' : 'text-gray-900 dark:text-gray-100'
-        }`}>
-          {conversation.title || 'New Conversation'}
-        </h3>
-
-        {/* Flow info for parent flows */}
-        {conversation.is_flow && (
-          <div className={`text-xs mb-2 ${
-            isActive ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'
+      <div className={`p-3 ${bulkSelectMode ? 'pl-9' : ''}`}>
+        {/* Header: Title & Date */}
+        <div className="flex justify-between items-start gap-2 mb-1">
+          <h3 className={`text-sm font-medium line-clamp-1 ${
+            isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-gray-100'
           }`}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                <span className="font-medium">
-                  {conversation.flow_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </span>
-              </div>
-              <button
-                onClick={handleToggleExpand}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-all ${
-                  isActive ? 'text-blue-100 bg-blue-500/20' : 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700'
-                }`}
-                title={isExpanded ? 'Collapse emails' : 'Show emails'}
-              >
-                <span className="font-semibold">{flowChildren.length || flowChildrenCount}</span>
-                <svg 
-                  className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        )}
+            {conversation.title || 'New Conversation'}
+          </h3>
+          <span className="text-[10px] text-gray-400 flex-shrink-0 whitespace-nowrap pt-0.5">
+            {new Date(conversation.last_message_at || conversation.created_at).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric'
+            })}
+          </span>
+        </div>
 
         {/* Preview */}
         {conversation.last_message_preview && (
-          <p className={`text-xs line-clamp-3 mb-3 leading-relaxed ${
-            isActive ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'
-          }`}>
+          <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2 leading-relaxed">
             {conversation.last_message_preview}
           </p>
         )}
 
-        {/* Footer */}
-        <div className={`flex items-center justify-between text-xs pt-2 border-t ${
-          isActive 
-            ? 'text-blue-100 border-blue-500' 
-            : 'text-gray-500 dark:text-gray-400 border-gray-100 dark:border-gray-700'
-        }`}>
-          <div className="flex items-center gap-1.5">
-            {conversation.created_by_name && (
-              <>
-                <span className="truncate max-w-[100px]">{conversation.created_by_name}</span>
-                <span>•</span>
-              </>
-            )}
-            <span>
-              {new Date(conversation.last_message_at || conversation.created_at).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric'
-              })}
+        {/* Footer: Badges & Info */}
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center gap-2 overflow-hidden">
+            {/* Type Badge */}
+            <span className={`
+              text-[10px] px-1.5 py-0.5 rounded-md font-medium uppercase tracking-wider flex-shrink-0
+              ${conversation.is_flow 
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' 
+                : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'}
+            `}>
+               {conversation.is_flow ? 'Flow' : 'Email'}
             </span>
+
+            {/* Pin Indicator */}
+            {isPinned && (
+              <svg className="w-3 h-3 text-gray-400 dark:text-gray-500 transform rotate-45" fill="currentColor" viewBox="0 0 24 24">
+                 <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z" />
+              </svg>
+            )}
           </div>
 
-          {/* Progress indicator */}
-          {conversation.status === 'ai_responding' && conversation.aiProgress !== undefined && (
-            <div className="flex items-center gap-1">
-              <div className="w-16 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
-                  style={{ width: `${conversation.aiProgress}%` }}
-                ></div>
-              </div>
-            </div>
-          )}
+          {/* Status / Progress */}
+           <div className="flex items-center gap-2">
+            {getStatusDisplay()}
+           </div>
         </div>
+        
+        {/* Flow Info (if expanded) */}
+        {conversation.is_flow && (
+             <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                 <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <span>{flowChildren.length || flowChildrenCount} emails</span>
+                 </div>
+                 <button
+                    onClick={handleToggleExpand}
+                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-400 transition-colors"
+                  >
+                    <svg 
+                      className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                 </button>
+             </div>
+        )}
       </div>
 
       {/* Quick Actions Overlay */}

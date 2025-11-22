@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback, memo, lazy, Suspense } from 'react';
+import { useEffect, useState, useMemo, useCallback, memo, lazy, Suspense, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Brand, Organization, OrganizationRole } from '@/types';
 import BrandCard from '@/components/BrandCard';
@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 import { logger } from '@/lib/logger';
 import NotificationCenter from '@/components/NotificationCenter';
+import { RequestCoalescer } from '@/lib/performance-utils';
 
 // Lazy load the modal since it's not needed on initial render
 const BrandModal = lazy(() => import('@/components/BrandModal'));
@@ -34,6 +35,7 @@ export default function HomePage() {
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const supabase = createClient();
   const router = useRouter();
+  const requestCoalescerRef = useRef(new RequestCoalescer<void>());
 
   // Load preferences from localStorage
   useEffect(() => {
@@ -54,83 +56,85 @@ export default function HomePage() {
   }, [viewMode]);
 
   const loadBrands = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        router.push('/login');
-        return;
+    return requestCoalescerRef.current.execute(async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          router.push('/login');
+          return;
+        }
+
+        setCurrentUserId(user.id);
+
+        logger.log('Fetching org membership for user:', user.id);
+
+        // Get user's organization membership
+        const { data: memberData, error: memberError } = await supabase
+          .from('organization_members')
+          .select('role, organization_id')
+          .eq('user_id', user.id)
+          .single();
+
+        logger.log('Organization membership query result:', {
+          data: memberData,
+          error: memberError,
+          hasData: !!memberData,
+          hasError: !!memberError
+        });
+
+        if (memberError || !memberData) {
+          logger.error('Organization membership error:', memberError);
+          logger.error('User ID being queried:', user.id);
+          logger.error('Full error object:', JSON.stringify(memberError, null, 2));
+          toast.error('You are not part of any organization. Please contact an admin.');
+          await supabase.auth.signOut();
+          router.push('/login');
+          return;
+        }
+
+        // Get organization details separately
+        const { data: orgData, error: orgError } = await supabase
+          .from('organizations')
+          .select('*')
+          .eq('id', memberData.organization_id)
+          .single();
+
+        if (orgError || !orgData) {
+          logger.error('Organization fetch error:', orgError);
+          toast.error('Failed to load organization details.');
+          await supabase.auth.signOut();
+          router.push('/login');
+          return;
+        }
+
+        const org = orgData as Organization;
+        const role = memberData.role as OrganizationRole;
+        
+        setOrganization(org);
+        setUserRole(role);
+        setCanManageBrands(role === 'admin' || role === 'brand_manager');
+
+        // Load all brands for the organization
+        const { data, error } = await supabase
+          .from('brands')
+          .select('*')
+          .eq('organization_id', org.id)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          logger.error('Brands fetch error:', error);
+          throw error;
+        }
+
+        setBrands(data || []);
+      } catch (error: any) {
+        logger.error('Error loading brands:', error);
+        toast.error(error.message || 'Failed to load brands');
+      } finally {
+        setLoading(false);
       }
-
-      setCurrentUserId(user.id);
-
-      logger.log('Fetching org membership for user:', user.id);
-
-      // Get user's organization membership
-      const { data: memberData, error: memberError } = await supabase
-        .from('organization_members')
-        .select('role, organization_id')
-        .eq('user_id', user.id)
-        .single();
-
-      logger.log('Organization membership query result:', {
-        data: memberData,
-        error: memberError,
-        hasData: !!memberData,
-        hasError: !!memberError
-      });
-
-      if (memberError || !memberData) {
-        logger.error('Organization membership error:', memberError);
-        logger.error('User ID being queried:', user.id);
-        logger.error('Full error object:', JSON.stringify(memberError, null, 2));
-        toast.error('You are not part of any organization. Please contact an admin.');
-        await supabase.auth.signOut();
-        router.push('/login');
-        return;
-      }
-
-      // Get organization details separately
-      const { data: orgData, error: orgError } = await supabase
-        .from('organizations')
-        .select('*')
-        .eq('id', memberData.organization_id)
-        .single();
-
-      if (orgError || !orgData) {
-        logger.error('Organization fetch error:', orgError);
-        toast.error('Failed to load organization details.');
-        await supabase.auth.signOut();
-        router.push('/login');
-        return;
-      }
-
-      const org = orgData as Organization;
-      const role = memberData.role as OrganizationRole;
-      
-      setOrganization(org);
-      setUserRole(role);
-      setCanManageBrands(role === 'admin' || role === 'brand_manager');
-
-      // Load all brands for the organization
-      const { data, error } = await supabase
-        .from('brands')
-        .select('*')
-        .eq('organization_id', org.id)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        logger.error('Brands fetch error:', error);
-        throw error;
-      }
-
-      setBrands(data || []);
-    } catch (error: any) {
-      logger.error('Error loading brands:', error);
-      toast.error(error.message || 'Failed to load brands');
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   const handleCreateBrand = useCallback(() => {

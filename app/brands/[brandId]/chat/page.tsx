@@ -251,6 +251,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [messageComments, setMessageComments] = useState<Record<string, Array<{ id: string; quoted_text?: string; content: string }>>>({});
   const [pendingConversationSelection, setPendingConversationSelection] = useState<string | null>(null);
   const [isCreatingEmail, setIsCreatingEmail] = useState(false);
+  const isSelectingConversationRef = useRef(false);
   
   // Flow-related state
   const [showFlowTypeSelector, setShowFlowTypeSelector] = useState(false);
@@ -270,9 +271,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [starredEmailContents, setStarredEmailContents] = useState<Set<string>>(new Set());
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const brandSwitcherRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const requestCoalescerRef = useRef(new RequestCoalescer());
+  const conversationsCoalescerRef = useRef(new RequestCoalescer<void>());
   const supabase = createClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -364,23 +368,33 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
   // Load conversation from URL parameter
   useEffect(() => {
+    // Don't interfere if we're already selecting a conversation programmatically
+    if (isSelectingConversationRef.current) {
+      return;
+    }
+
     const conversationIdFromUrl = searchParams.get('conversation');
     if (conversationIdFromUrl && conversations.length > 0) {
-      const targetConversation = conversations.find(c => c.id === conversationIdFromUrl);
-      if (targetConversation && (!currentConversation || currentConversation.id !== conversationIdFromUrl)) {
-        setCurrentConversation(targetConversation);
+      // Only update if conversation is different from current
+      if (currentConversation?.id !== conversationIdFromUrl) {
+        const targetConversation = conversations.find(c => c?.id === conversationIdFromUrl);
+        if (targetConversation?.id) {
+          logger.log('[URL Effect] Loading conversation from URL:', conversationIdFromUrl);
+          // Use handleSelectConversation to properly load the conversation
+          handleSelectConversation(conversationIdFromUrl);
+        }
       }
-    } else if (!conversationIdFromUrl && currentConversation) {
+    } else if (!conversationIdFromUrl && currentConversation?.id) {
       // If URL doesn't have conversation param but we have one selected, update URL
       updateConversationUrl(currentConversation.id);
     }
-  }, [searchParams, conversations, currentConversation, updateConversationUrl]);
+  }, [searchParams, conversations, currentConversation?.id]);
 
   // Handle pending conversation selection
   useEffect(() => {
     if (pendingConversationSelection && conversations.length > 0) {
-      const conversation = conversations.find((c) => c.id === pendingConversationSelection);
-      if (conversation) {
+      const conversation = conversations.find((c) => c?.id === pendingConversationSelection);
+      if (conversation?.id) {
         handleSelectConversation(pendingConversationSelection);
         setPendingConversationSelection(null);
       }
@@ -677,39 +691,109 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     };
   }, [currentConversation?.id]);
 
+  // Track if we just switched conversations to prevent auto-scroll on initial load
+  const justSwitchedConversation = useRef(false);
+  const previousMessageCount = useRef(messages.length);
+
   useEffect(() => {
-    // Only auto-scroll if NOT currently streaming
-    // This lets users stay at the top and watch the indicator while AI generates
-    if (!sending) {
+    // Don't auto-scroll if we just switched conversations
+    if (justSwitchedConversation.current) {
+      justSwitchedConversation.current = false;
+      previousMessageCount.current = messages.length;
+      return;
+    }
+
+    // Only auto-scroll if a NEW message was added (not on initial load)
+    const messageCountIncreased = messages.length > previousMessageCount.current;
+    previousMessageCount.current = messages.length;
+
+    if (!messageCountIncreased) {
+      return; // Don't scroll if messages didn't increase (just loaded existing)
+    }
+
+    // Check if user is already near the bottom (within 100px)
+    const container = messagesScrollRef.current;
+    if (container) {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      
+      // Only auto-scroll if user is near bottom AND not currently streaming
+      // This lets users read older messages without being interrupted
+      if (isNearBottom && !sending) {
+        scrollToBottom();
+      }
+    } else if (!sending) {
+      // Fallback if no container ref
       scrollToBottom();
     }
   }, [messages, sending]);
 
   // Detect flow outline in AI responses
   useEffect(() => {
-    if (!currentConversation?.is_flow || !currentConversation.flow_type) return;
-    if (flowOutline?.approved) return; // Don't detect if already approved
-    if (messages.length === 0) return;
+    if (!currentConversation?.is_flow || !currentConversation.flow_type) {
+      console.log('[Outline Detection] Not a flow conversation or no flow type');
+      return;
+    }
+    if (flowOutline?.approved) {
+      console.log('[Outline Detection] Outline already approved, skipping');
+      return;
+    }
+    if (messages.length === 0) {
+      console.log('[Outline Detection] No messages yet');
+      return;
+    }
 
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage.role !== 'assistant') return;
+    if (lastMessage.role !== 'assistant') {
+      console.log('[Outline Detection] Last message is not from assistant');
+      return;
+    }
+
+    console.log('[Outline Detection] Attempting to detect outline in message...');
+    console.log('[Outline Detection] Message preview:', lastMessage.content.substring(0, 300));
 
     // Try to detect and parse outline
     const outline = detectFlowOutline(lastMessage.content, currentConversation.flow_type);
     if (outline) {
-      logger.log('✅ Detected flow outline:', outline);
+      console.log('✅ [Outline Detection] Successfully detected flow outline:', outline);
       setPendingOutlineApproval(outline);
     } else {
-      logger.log('❌ No outline detected in message:', lastMessage.content.substring(0, 200));
+      console.log('❌ [Outline Detection] No outline detected');
+      console.log('[Outline Detection] Has OUTLINE keyword:', lastMessage.content.includes('OUTLINE'));
+      console.log('[Outline Detection] Has Goal keyword:', lastMessage.content.includes('Goal:'));
+      console.log('[Outline Detection] Has Audience keyword:', lastMessage.content.includes('Audience:'));
     }
   }, [messages, currentConversation?.is_flow, currentConversation?.flow_type, flowOutline?.approved]);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((instant = false) => {
     // Use requestAnimationFrame for smoother scrolling
-    requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    });
+    const container = messagesScrollRef.current;
+    if (container) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: instant ? 'instant' : 'smooth',
+      });
+    } else {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'instant' : 'smooth' });
+      });
+    }
   }, []);
+
+  // Track scroll position for scroll-to-bottom button
+  useEffect(() => {
+    const container = messagesScrollRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const distanceFromBottom = container.scrollHeight - (container.scrollTop + container.clientHeight);
+      setShowScrollToBottom(distanceFromBottom > 300);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll(); // Initial check
+
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [currentConversation?.id]);
 
   const initializePage = async () => {
     try {
@@ -724,7 +808,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Cleanup any accumulated empty conversations on page load
       // This runs in the background and doesn't block page load
       bulkCleanupEmptyConversations(brandId).catch(error => {
-        logger.error('[Init] Background cleanup failed:', error);
+        // Only log non-network errors to avoid console pollution
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (!errorMessage.includes('aborted') && !errorMessage.includes('Failed to fetch')) {
+          logger.error('[Init] Background cleanup failed:', error);
+        }
         // Don't show error to user - this is a background optimization
       });
 
@@ -883,30 +971,33 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   };
 
   const loadConversations = async () => {
-    const startTime = performance.now();
-    
-    try {
-      // Check cache first
-      const cached = getCachedConversations(brandId);
-      if (cached && cached.length > 0) {
-        setConversations(cached);
-        
-        trackPerformance('load_conversations', performance.now() - startTime, { source: 'cache' });
-        
-        // Refresh in background
-        fetchAndCacheConversations();
-        return;
-      }
+    // Use RequestCoalescer to prevent duplicate API calls
+    return conversationsCoalescerRef.current.execute(async () => {
+      const startTime = performance.now();
       
-      // Load from database
-      await fetchAndCacheConversations();
-      trackPerformance('load_conversations', performance.now() - startTime, { source: 'database' });
-    } catch (error) {
-      logger.error('Error loading conversations:', error instanceof Error ? error.message : String(error), error);
-      toast.error('Unable to load conversations. Check your connection and try again.', {
-        duration: 5000,
-      });
-    }
+      try {
+        // Check cache first
+        const cached = getCachedConversations(brandId);
+        if (cached && cached.length > 0) {
+          setConversations(cached);
+          
+          trackPerformance('load_conversations', performance.now() - startTime, { source: 'cache' });
+          
+          // Refresh in background
+          fetchAndCacheConversations();
+          return;
+        }
+        
+        // Load from database
+        await fetchAndCacheConversations();
+        trackPerformance('load_conversations', performance.now() - startTime, { source: 'database' });
+      } catch (error) {
+        logger.error('Error loading conversations:', error instanceof Error ? error.message : String(error), error);
+        toast.error('Unable to load conversations. Check your connection and try again.', {
+          duration: 5000,
+        });
+      }
+    }, 'loadConversations');
   };
   
   const fetchAndCacheConversations = async () => {
@@ -1126,6 +1217,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setConversations(prev => prev.map(c => c.id === tempId ? data : c));
       setCurrentConversation(data);
       
+      // Update URL to reflect the new conversation
+      updateConversationUrl(data.id);
+      
       await loadConversations();
       toast.success('New conversation created');
       trackEvent('conversation_created', { conversationId: data.id });
@@ -1158,6 +1252,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   };
 
   const handleSelectConversation = async (conversationId: string) => {
+    // Validate conversationId
+    if (!conversationId) {
+      logger.error('[SelectConversation] No conversation ID provided');
+      return;
+    }
+
     // Prevent selecting the same conversation twice
     if (currentConversation?.id === conversationId) {
       logger.log('[SelectConversation] Already on this conversation, skipping');
@@ -1165,8 +1265,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
 
     // Optimistically update UI immediately for instant feedback
-    const conversation = conversations.find((c) => c.id === conversationId);
-    if (!conversation) return;
+    const conversation = conversations.find((c) => c?.id === conversationId);
+    if (!conversation?.id) {
+      logger.error('[SelectConversation] Conversation not found:', conversationId);
+      return;
+    }
+
+    // Mark that we're selecting a conversation to prevent URL effect from interfering
+    isSelectingConversationRef.current = true;
 
     logger.log('[SelectConversation] Switching to conversation:', conversationId);
 
@@ -1192,6 +1298,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         container.scrollTop = 0; // Instant scroll to top
       }
     }
+
+    // Mark that we just switched - prevents auto-scroll to bottom on load
+    justSwitchedConversation.current = true;
 
     // CRITICAL: Clear messages immediately to prevent showing wrong conversation
     setMessages([]);
@@ -1220,7 +1329,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     // Update current conversation immediately (optimistic update)
     setCurrentConversation(conversation);
     updateConversationUrl(conversationId);
-    setSelectedModel(conversation.model as AIModel);
+    setSelectedModel((conversation.model as AIModel) || 'claude-3-5-sonnet-20241022');
     setConversationMode(conversation.mode || 'planning');
     
     // Set email type based on conversation
@@ -1251,6 +1360,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
       
       trackEvent('conversation_selected', { conversationId });
+      
+      // Clear the selection flag after URL has been updated
+      setTimeout(() => {
+        isSelectingConversationRef.current = false;
+      }, 100);
     });
   };
   
@@ -2955,7 +3069,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       )}
       
       {/* Enhanced Sidebar and Main Content with Resizable Panels */}
-      <ResizablePanelGroup direction="horizontal" className="h-screen">
+      <ResizablePanelGroup 
+        direction="horizontal" 
+        className="h-screen"
+        autoSaveId="chat-layout-panels"
+      >
         {/* Sidebar Panel - Desktop only, mobile uses overlay */}
         <SidebarPanelWrapper
           defaultSize={25}
@@ -3044,7 +3162,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         <ResizableHandle withHandle className="hidden lg:flex" />
 
         {/* Main chat area */}
-        <ResizablePanel defaultSize={75} minSize={50} className="min-w-0">
+        <ResizablePanel 
+          id="main-chat-panel"
+          defaultSize={75} 
+          minSize={50} 
+          className="min-w-0"
+        >
           <div className="flex flex-col h-screen w-full min-w-0">
         {/* Enhanced Navigation Header - Cleaner without breadcrumb */}
         <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
@@ -3151,18 +3274,20 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         </div>
 
         {/* Messages */}
-        <div 
-          className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 bg-[#fcfcfc] dark:bg-gray-950"
-          style={{
-            // Hardware acceleration and smooth scrolling
-            willChange: 'scroll-position',
-            WebkitOverflowScrolling: 'touch',
-            // Optimize scroll performance
-            scrollBehavior: 'smooth',
-            // Reduce layout thrashing
-            contain: 'layout style paint',
-          }}
-        >
+        <div className="relative flex-1">
+          <div 
+            ref={messagesScrollRef}
+            className="absolute inset-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 bg-[#fcfcfc] dark:bg-gray-950"
+            style={{
+              // Hardware acceleration and smooth scrolling
+              willChange: 'scroll-position',
+              WebkitOverflowScrolling: 'touch',
+              // Optimize scroll performance
+              scrollBehavior: 'smooth',
+              // Reduce layout thrashing
+              contain: 'layout style paint',
+            }}
+          >
           {!currentConversation ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-md px-4">
@@ -3487,6 +3612,21 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             </div>
           </div>
         )}
+        
+          {/* Scroll to bottom button */}
+          {showScrollToBottom && (
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              className="hidden sm:flex items-center justify-center w-8 h-8 text-gray-400 dark:text-gray-500 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-full shadow-sm border border-gray-200/50 dark:border-gray-700/50 transition-all hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:shadow-md focus:outline-none absolute bottom-6 right-6 z-20 opacity-60 hover:opacity-100"
+              title="Scroll to latest message"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              </svg>
+            </button>
+          )}
+        </div>
 
         {/* Input */}
         {currentConversation && (
@@ -3556,6 +3696,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               style={{ cursor: 'col-resize' }}
             />
             <ResizablePanel 
+              id="comments-panel"
               defaultSize={25} 
               minSize={15} 
               maxSize={40}

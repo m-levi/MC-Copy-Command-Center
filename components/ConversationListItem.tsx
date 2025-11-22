@@ -147,23 +147,26 @@ function ConversationListItem({
     }
   }, [bulkSelectMode, onToggleSelect, onSelect]);
 
+  // Close context menu when clicking outside is handled by the menu itself,
+  // but we need to sync the state here
   const handleCloseContextMenu = useCallback(() => {
     setContextMenuPosition(null);
+    setShowThreeDotMenu(false);
   }, []);
 
   return (
-    <div>
+    <div className="relative">
       {/* Main conversation item */}
       <div
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         className={`
-          group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all
+          group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer border
           ${isSelected
-            ? 'bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800'
+            ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
             : isActive 
-              ? 'bg-blue-600 dark:bg-blue-700 text-white' 
-              : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100'
+              ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' 
+              : 'hover:bg-gray-50 dark:hover:bg-gray-800/50 text-gray-900 dark:text-gray-100 border-transparent'
           }
         `}
       >
@@ -194,48 +197,45 @@ function ConversationListItem({
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className={`text-sm font-medium truncate ${
-              isActive ? 'text-white' : 'text-gray-900 dark:text-gray-100'
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className={`text-sm font-semibold truncate ${
+              isActive 
+                ? 'text-gray-900 dark:text-gray-50' 
+                : 'text-gray-900 dark:text-gray-100'
             }`}>
               {conversation.title || 'New Conversation'}
             </h3>
             {isPinned && (
-              <svg className="w-3 h-3 text-yellow-500 fill-current flex-shrink-0" viewBox="0 0 24 24">
+              <svg className="w-3 h-3 text-yellow-500 dark:text-yellow-400 transform rotate-45 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z" />
               </svg>
             )}
           </div>
           
           {/* Meta info with type tag */}
-          <div className={`flex items-center gap-2 text-xs ${
-            isActive ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'
+          <div className={`flex items-center gap-1.5 text-xs ${
+            isActive ? 'text-blue-700/70 dark:text-blue-300/60' : 'text-gray-500 dark:text-gray-400'
           }`}>
             {/* Type tag */}
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
-              isActive 
-                ? 'bg-blue-500/30 text-blue-100' 
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
+              conversation.is_flow
+                ? isActive 
+                  ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                  : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400'
+                : isActive 
+                  ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
             }`}>
-              {conversation.is_flow 
-                ? conversation.flow_type === 'abandoned_cart' ? 'Cart'
-                : conversation.flow_type === 'welcome_series' ? 'Welcome'
-                : conversation.flow_type === 'post_purchase' ? 'Post-Purchase'
-                : conversation.flow_type === 'winback' ? 'Winback'
-                : conversation.flow_type === 'product_launch' ? 'Launch'
-                : conversation.flow_type === 'educational_series' ? 'Education'
-                : 'Flow'
-                : conversation.mode === 'planning' ? 'Planning'
-                : 'Email'}
+              {conversation.is_flow ? 'Flow' : 'Email'}
             </span>
             {conversation.created_by_name && (
               <>
-                <span>•</span>
-                <span className="truncate max-w-[80px]">{conversation.created_by_name}</span>
+                <span className="opacity-40">•</span>
+                <span className="truncate max-w-[80px] font-medium">{conversation.created_by_name}</span>
               </>
             )}
-            <span>•</span>
-            <span>{formatDate(conversation.last_message_at || conversation.created_at)}</span>
+            <span className="opacity-40">•</span>
+            <span className="font-medium">{formatDate(conversation.last_message_at || conversation.created_at)}</span>
           </div>
         </div>
 
@@ -243,15 +243,15 @@ function ConversationListItem({
         {conversation.is_flow && (
           <button
             onClick={handleToggleExpand}
-            className={`flex-shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-semibold transition-all ${
+            className={`flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded transition-all ${
               isActive 
-                ? 'bg-blue-500/30 text-white hover:bg-blue-500/50' 
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
+                ? 'text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40' 
+                : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
             }`}
           >
-            <span>{flowChildren.length || flowChildrenCount}</span>
+            <span className="text-[10px] font-medium">{flowChildren.length || flowChildrenCount}</span>
             <svg 
-              className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+              className={`w-3 h-3 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
               fill="none" 
               stroke="currentColor" 
               viewBox="0 0 24 24"
@@ -265,12 +265,12 @@ function ConversationListItem({
         {!bulkSelectMode && (
           <button
             onClick={handleThreeDotClick}
-            className={`flex-shrink-0 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity ${
-              showThreeDotMenu ? 'opacity-100' : ''
+            className={`flex-shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-100 transition-all ${
+              showThreeDotMenu ? 'opacity-100 bg-gray-100 dark:bg-gray-800' : ''
             } ${
               isActive 
-                ? 'hover:bg-blue-500/30 text-white' 
-                : 'hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-400'
+                ? 'text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40' 
+                : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
             }`}
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">

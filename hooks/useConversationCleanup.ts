@@ -40,6 +40,12 @@ export function useConversationCleanup({
     reason: 'empty_on_unmount' | 'empty_on_new_click' | 'empty_on_switch'
   ): Promise<boolean> => {
     try {
+      // Skip temporary conversations that haven't been saved to database yet
+      if (targetConversationId.startsWith('temp-')) {
+        logger.log('[Cleanup] Skipping temporary conversation:', targetConversationId);
+        return false;
+      }
+
       // NEVER auto-delete flow conversations or child conversations
       if (isFlow || isChild) {
         logger.log('[Cleanup] Skipping auto-delete for flow/child conversation:', targetConversationId);
@@ -53,7 +59,8 @@ export function useConversationCleanup({
         .eq('conversation_id', targetConversationId);
       
       if (countError) {
-        logger.error('[Cleanup] Error checking message count:', countError);
+        // Don't log errors for conversations that might not exist yet
+        logger.log('[Cleanup] Could not check message count for conversation', targetConversationId, '- may not exist in database yet');
         return false;
       }
       
@@ -130,6 +137,11 @@ export async function shouldDeleteEmptyConversation(
     return false;
   }
 
+  // Skip temporary conversations that haven't been saved to database yet
+  if (conversationId.startsWith('temp-')) {
+    return false;
+  }
+
   // Additional database check for safety
   const supabase = createClient();
   const { count, error } = await supabase
@@ -138,7 +150,8 @@ export async function shouldDeleteEmptyConversation(
     .eq('conversation_id', conversationId);
   
   if (error) {
-    logger.error('[Cleanup] Error checking message count:', error);
+    // Don't log errors for conversations that might not exist yet
+    logger.log('[Cleanup] Could not check message count for conversation', conversationId, '- may not exist in database yet');
     return false;
   }
 
@@ -172,35 +185,55 @@ export async function bulkCleanupEmptyConversations(brandId: string): Promise<nu
     
     // Check each conversation for messages
     for (const conv of conversations) {
-      // NEVER delete flow conversations or child conversations
-      if (conv.is_flow || conv.parent_conversation_id) {
-        continue;
-      }
-      
-      // Count messages for this conversation
-      const { count, error: countError } = await supabase
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('conversation_id', conv.id);
-      
-      if (countError) {
-        logger.error('[BulkCleanup] Error counting messages:', countError);
-        continue;
-      }
-      
-      // Only delete if EXACTLY 0 messages
-      if (count === 0) {
-        const { error: deleteError } = await supabase
-          .from('conversations')
-          .delete()
-          .eq('id', conv.id);
-        
-        if (!deleteError) {
-          deletedCount++;
-          logger.log('[BulkCleanup] Deleted empty conversation:', conv.id);
-        } else {
-          logger.error('[BulkCleanup] Error deleting conversation:', deleteError);
+      try {
+        // Skip if conversation is invalid
+        if (!conv || !conv.id) {
+          continue;
         }
+        
+        // NEVER delete flow conversations or child conversations
+        if (conv.is_flow || conv.parent_conversation_id) {
+          continue;
+        }
+        
+        // Count messages for this conversation
+        const { count, error: countError } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', conv.id);
+        
+        if (countError) {
+          // Only log non-abort errors
+          if (!countError.message?.includes('aborted') && !countError.message?.includes('Failed to fetch')) {
+            logger.error('[BulkCleanup] Error counting messages for conversation', conv.id, ':', countError);
+          }
+          continue;
+        }
+        
+        // Only delete if EXACTLY 0 messages
+        if (count === 0) {
+          const { error: deleteError } = await supabase
+            .from('conversations')
+            .delete()
+            .eq('id', conv.id);
+          
+          if (!deleteError) {
+            deletedCount++;
+            logger.log('[BulkCleanup] Deleted empty conversation:', conv.id);
+          } else {
+            // Only log non-abort errors
+            if (!deleteError.message?.includes('aborted') && !deleteError.message?.includes('Failed to fetch')) {
+              logger.error('[BulkCleanup] Error deleting conversation:', deleteError);
+            }
+          }
+        }
+      } catch (error) {
+        // Silently continue on network errors to avoid polluting console
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (!errorMessage.includes('aborted') && !errorMessage.includes('Failed to fetch')) {
+          logger.error('[BulkCleanup] Unexpected error processing conversation', conv.id, ':', error);
+        }
+        continue;
       }
     }
     
@@ -211,7 +244,11 @@ export async function bulkCleanupEmptyConversations(brandId: string): Promise<nu
     
     return deletedCount;
   } catch (error) {
-    logger.error('[BulkCleanup] Error during bulk cleanup:', error);
+    // Only log non-network errors to avoid console pollution
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (!errorMessage.includes('aborted') && !errorMessage.includes('Failed to fetch')) {
+      logger.error('[BulkCleanup] Error during bulk cleanup:', error);
+    }
     return 0;
   }
 }

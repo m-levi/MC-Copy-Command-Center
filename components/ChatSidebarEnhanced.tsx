@@ -13,6 +13,7 @@ import BulkActionBar from './BulkActionBar';
 import { SidebarLoadingSkeleton } from './SkeletonLoader';
 import { useSidebarPanel } from '@/contexts/SidebarPanelContext';
 import LoadingDots from './LoadingDots';
+import SidebarHeader from './SidebarHeader';
 
 interface ChatSidebarEnhancedProps {
   brandName: string;
@@ -88,16 +89,13 @@ export default function ChatSidebarEnhanced({
   const [editingTitle, setEditingTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
-  const [showBrandSwitcher, setShowBrandSwitcher] = useState(false);
-  const [focusedBrandIndex, setFocusedBrandIndex] = useState<number>(-1);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const brandSwitcherRef = useRef<HTMLButtonElement>(null);
-  const brandDropdownRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(600);
   const [bulkSelectMode, setBulkSelectMode] = useState(false);
   const [selectedConversationIds, setSelectedConversationIds] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [hoveredTooltip, setHoveredTooltip] = useState<TooltipState | null>(null);
+  const [showFabMenu, setShowFabMenu] = useState(false);
   const router = useRouter();
   
   // Get collapse state from context (provided by panel wrapper on desktop)
@@ -216,64 +214,35 @@ export default function ChatSidebarEnhanced({
 
   // Note: toggleCollapse is now provided by context from the panel wrapper
 
-  // Brand switcher keyboard navigation
-  const handleBrandKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!showBrandSwitcher || allBrands.length <= 1) return;
-
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        setFocusedBrandIndex(prev => 
-          prev < allBrands.length - 1 ? prev + 1 : 0
-        );
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setFocusedBrandIndex(prev => 
-          prev > 0 ? prev - 1 : allBrands.length - 1
-        );
-        break;
-      case 'Enter':
-        e.preventDefault();
-        if (focusedBrandIndex >= 0 && focusedBrandIndex < allBrands.length) {
-          const selectedBrand = allBrands[focusedBrandIndex];
-          onBrandSwitch?.(selectedBrand.id);
-          setShowBrandSwitcher(false);
-          setFocusedBrandIndex(-1);
-        }
-        break;
-      case 'Escape':
-        e.preventDefault();
-        setShowBrandSwitcher(false);
-        setFocusedBrandIndex(-1);
-        brandSwitcherRef.current?.focus();
-        break;
-    }
-  }, [showBrandSwitcher, allBrands, focusedBrandIndex, onBrandSwitch]);
-
-  // Open brand switcher and set initial focus
-  const handleOpenBrandSwitcher = useCallback(() => {
-    setShowBrandSwitcher(true);
-    // Set focus to current brand
-    const currentIndex = allBrands.findIndex(b => b.id === brandId);
-    setFocusedBrandIndex(currentIndex >= 0 ? currentIndex : 0);
-  }, [allBrands, brandId]);
-
   // Calculate list height for virtualization
   useEffect(() => {
     const calculateHeight = () => {
       if (sidebarRef.current) {
-        // Total height minus header, button, filter, search, and footer
+        // Total height minus header, button, filter, search
+        // We don't subtract footer as it doesn't exist
         const totalHeight = sidebarRef.current.clientHeight;
-        const usedHeight = 220 + (searchQuery ? 80 : 60); // Approximate header + controls
-        setListHeight(Math.max(totalHeight - usedHeight, 400));
+        
+        // Measure exact used height if possible, or use a safer approximation
+        // Header (~60px) + Buttons (~50px) + Filter/Search (~50px) + Padding (~20px)
+        const usedHeight = 180; 
+        
+        setListHeight(Math.max(totalHeight - usedHeight, 200));
       }
     };
 
     calculateHeight();
+    // Use a ResizeObserver for more robust sizing
+    const resizeObserver = new ResizeObserver(calculateHeight);
+    if (sidebarRef.current) {
+      resizeObserver.observe(sidebarRef.current);
+    }
+    
     window.addEventListener('resize', calculateHeight);
-    return () => window.removeEventListener('resize', calculateHeight);
-  }, [searchQuery]);
+    return () => {
+      window.removeEventListener('resize', calculateHeight);
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   // Bulk action handlers that depend on orderedConversations
   const handleSelectAll = useCallback(() => {
@@ -336,24 +305,6 @@ export default function ChatSidebarEnhanced({
     }
   }, [isMobileOpen, onMobileToggle]);
 
-  // Close brand switcher dropdown on outside click
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        showBrandSwitcher &&
-        brandSwitcherRef.current &&
-        !brandSwitcherRef.current.contains(event.target as Node)
-      ) {
-        setShowBrandSwitcher(false);
-      }
-    };
-
-    if (showBrandSwitcher) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [showBrandSwitcher]);
-
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -405,172 +356,31 @@ export default function ChatSidebarEnhanced({
         ref={sidebarRef}
         className={`
           bg-white dark:bg-gray-900 text-black dark:text-white 
-          flex flex-col h-screen border-r border-gray-200 dark:border-gray-700 
-          transition-all duration-200 ease-in-out
+          flex flex-col border-r border-gray-200 dark:border-gray-700 
+          transition-transform duration-300 ease-in-out
           
-          /* Mobile: Fixed overlay sidebar (removed from flow) */
+          /* Mobile: Fixed overlay sidebar */
           fixed lg:relative
-          top-0 left-0 bottom-0
+          inset-y-0 left-0
           z-50 lg:z-auto
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           
-          /* Responsive width - let ResizablePanel handle desktop width */
-          w-[85vw] sm:w-80 lg:w-full lg:h-full
+          /* Responsive width - mobile to desktop */
+          w-[280px] xs:w-[320px] sm:w-[360px] md:w-[380px] lg:w-full
         `}
+        style={{ height: '100vh', height: '100dvh' }}
       >
-        {/* Streamlined Single-Line Header */}
-        <div className="border-b border-gray-200 dark:border-gray-700">
-          {!isCollapsed ? (
-            <div className="p-3">
-              {/* Single Row: Everything on one line */}
-              <div className="flex items-center justify-between gap-2">
-                {/* Left: Back button + Brand Name */}
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <button
-                    onClick={onNavigateHome}
-                    className="flex-shrink-0 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-                    title="All Brands"
-                  >
-                    <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-
-                  {/* Brand Switcher */}
-                  <div className="relative flex-1 min-w-0">
-                    <button
-                      ref={brandSwitcherRef}
-                      onClick={handleOpenBrandSwitcher}
-                      onKeyDown={handleBrandKeyDown}
-                      className="flex items-center gap-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1.5 -mx-2 rounded transition-colors cursor-pointer w-full"
-                    >
-                      <h2 className="text-base font-semibold truncate text-gray-900 dark:text-white">{brandName}</h2>
-                      {allBrands.length > 1 && (
-                        <svg 
-                          className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform ${showBrandSwitcher ? 'rotate-180' : ''}`} 
-                          fill="none" 
-                          stroke="currentColor" 
-                          viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                      )}
-                    </button>
-
-                    {/* Brand Switcher Dropdown with Keyboard Navigation */}
-                    {showBrandSwitcher && allBrands.length > 1 && (
-                      <div 
-                        ref={brandDropdownRef}
-                        className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden z-50"
-                        onKeyDown={handleBrandKeyDown}
-                      >
-                        <div className="max-h-[300px] overflow-y-auto py-1">
-                          {allBrands.map((b, index) => (
-                            <button
-                              key={b.id}
-                              onClick={() => {
-                                onBrandSwitch?.(b.id);
-                                setShowBrandSwitcher(false);
-                                setFocusedBrandIndex(-1);
-                              }}
-                              className={`
-                                w-full px-3 py-2 text-sm text-left transition-colors cursor-pointer flex items-center justify-between
-                                ${index === focusedBrandIndex
-                                  ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-200'
-                                  : b.id === brandId
-                                    ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium'
-                                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                                }
-                              `}
-                            >
-                              <span className="truncate">{b.name}</span>
-                              {b.id === brandId && (
-                                <svg className="w-4 h-4 ml-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                </svg>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right: Action Icons */}
-                <div className="flex items-center gap-0.5 flex-shrink-0">
-                  {brandId && (
-                    <button
-                      onClick={() => router.push(`/brands/${brandId}`)}
-                      className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-                      title="Brand Settings"
-                    >
-                      <svg className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setIsExplorerOpen(true)}
-                    className="hidden lg:block p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-                    title="Expand View"
-                  >
-                    <svg className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                    </svg>
-                  </button>
-                  {toggleCollapse && (
-                    <button
-                      onClick={toggleCollapse}
-                      className="hidden lg:block p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-                      title="Collapse sidebar"
-                    >
-                      <svg className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                      </svg>
-                    </button>
-                  )}
-
-                  {/* Mobile close button */}
-                  <button
-                    onClick={() => onMobileToggle?.(false)}
-                    className="lg:hidden p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-                    aria-label="Close sidebar"
-                  >
-                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* Collapsed header - icon only */
-            <div className="hidden lg:flex flex-col items-center py-3 px-2 gap-2">
-              {toggleCollapse && (
-                <button
-                  onClick={toggleCollapse}
-                  className="w-11 h-11 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
-                  title="Expand sidebar"
-                >
-                  <svg className="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                  </svg>
-                </button>
-              )}
-              <button
-                onClick={onNavigateHome}
-                className="w-11 h-11 flex items-center justify-center hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-colors cursor-pointer"
-                title="All Brands"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-            </div>
-          )}
-        </div>
+        <SidebarHeader
+          brandName={brandName}
+          brandId={brandId}
+          allBrands={allBrands}
+          isCollapsed={isCollapsed}
+          toggleCollapse={toggleCollapse}
+          onBrandSwitch={onBrandSwitch}
+          onNavigateHome={onNavigateHome}
+          onMobileToggle={onMobileToggle}
+          onOpenExplorer={() => setIsExplorerOpen(true)}
+        />
 
         {/* Bulk action bar */}
         {bulkSelectMode && selectedConversationIds.size > 0 && (
@@ -584,90 +394,47 @@ export default function ChatSidebarEnhanced({
         )}
 
         {!isCollapsed ? (
-          <div className="p-3 space-y-3">
-            {/* New conversation buttons - compact */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={handleMobileNewConversation}
-                disabled={isCreatingEmail || isCreatingFlow}
-                className="py-2.5 px-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm active:scale-95"
-              >
-                {isCreatingEmail ? (
-                  <div className="flex items-center gap-1.5">
-                    <LoadingDots size="sm" color="white" />
-                    <span className="text-xs">Creating...</span>
-                  </div>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                    </svg>
-                    <span>Email</span>
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={handleMobileNewFlow}
-                disabled={isCreatingEmail || isCreatingFlow}
-                className="py-2.5 px-3 bg-purple-600 hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm active:scale-95"
-              >
-                {isCreatingFlow ? (
-                  <div className="flex items-center gap-1.5">
-                    <LoadingDots size="sm" color="white" />
-                    <span className="text-xs">Creating...</span>
-                  </div>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    <span>Flow</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Filter and Search - Combined Row */}
-            <div className="space-y-2">
-              <ConversationFilterDropdown
-                currentFilter={currentFilter}
-                selectedPersonId={selectedPersonId}
-                teamMembers={teamMembers}
-                onFilterChange={onFilterChange}
-              />
-              
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <ConversationSearch
-                    value={searchQuery}
-                    onChange={setSearchQuery}
-                    onClear={() => setSearchQuery('')}
-                  />
-                </div>
-                <button
-                  onClick={handleToggleBulkSelect}
-                  className={`p-2 rounded-lg transition-colors cursor-pointer flex-shrink-0 ${
-                    bulkSelectMode
-                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400'
-                  }`}
-                  title={bulkSelectMode ? 'Exit selection mode' : 'Select multiple'}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                    {bulkSelectMode ? (
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    ) : (
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    )}
-                  </svg>
-                </button>
+          <div className="px-3 pt-3 pb-2 space-y-3 border-b border-gray-100 dark:border-gray-800">
+            {/* Filter and Search - Integrated Row */}
+            <div className="flex items-stretch gap-2">
+              <div className="flex-1 min-w-0">
+                <ConversationSearch
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  onClear={() => setSearchQuery('')}
+                />
               </div>
+              
+              {/* Filter Button - Compact */}
+              <div className="flex-shrink-0">
+                <ConversationFilterDropdown
+                   currentFilter={currentFilter}
+                   selectedPersonId={selectedPersonId}
+                   teamMembers={teamMembers}
+                   onFilterChange={onFilterChange}
+                   compact={true} 
+                />
+              </div>
+
+              {/* Bulk Select Toggle */}
+              <button
+                onClick={handleToggleBulkSelect}
+                className={`p-2 rounded-lg transition-colors cursor-pointer flex-shrink-0 border ${
+                  bulkSelectMode
+                    ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-400'
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+                title={bulkSelectMode ? 'Exit selection mode' : 'Select multiple'}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  {bulkSelectMode ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  )}
+                </svg>
+              </button>
             </div>
-            
-            {/* Divider Line */}
-            <div className="h-px bg-gray-200 dark:bg-gray-700" />
           </div>
         ) : (
           /* Collapsed: Icon-only view */
@@ -787,7 +554,6 @@ export default function ChatSidebarEnhanced({
                 const isActive = conversation.id === currentConversationId;
                 const isPinned = pinnedConversationIds.includes(conversation.id);
                 const isFlow = conversation.is_flow;
-                const tooltipText = `${conversation.title || 'Untitled Conversation'}${isPinned ? ' 📌' : ''}`;
                 
                 return (
                   <button
@@ -866,6 +632,75 @@ export default function ChatSidebarEnhanced({
             document.body
           )}
         </div>
+
+        {/* Floating Action Button - Only show when not collapsed */}
+        {!isCollapsed && (
+          <div className="absolute bottom-4 right-4 z-30">
+            {/* FAB Menu */}
+            {showFabMenu && (
+              <div className="absolute bottom-full right-0 mb-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[160px]">
+                <button
+                  onClick={() => {
+                    handleMobileNewConversation();
+                    setShowFabMenu(false);
+                  }}
+                  disabled={isCreatingEmail || isCreatingFlow}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left disabled:opacity-50"
+                >
+                  <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">New Email</span>
+                </button>
+                <button
+                  onClick={() => {
+                    handleMobileNewFlow();
+                    setShowFabMenu(false);
+                  }}
+                  disabled={isCreatingEmail || isCreatingFlow}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left disabled:opacity-50 border-t border-gray-100 dark:border-gray-700"
+                >
+                  <div className="w-8 h-8 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">New Flow</span>
+                </button>
+              </div>
+            )}
+
+            {/* FAB Button */}
+            <button
+              onClick={() => setShowFabMenu(!showFabMenu)}
+              disabled={isCreatingEmail || isCreatingFlow}
+              className={`
+                w-14 h-14 rounded-full
+                bg-white dark:bg-gray-800
+                border border-gray-300 dark:border-gray-600
+                shadow-md hover:shadow-lg
+                text-blue-600 dark:text-blue-400
+                flex items-center justify-center
+                transition-all duration-200
+                disabled:opacity-50 disabled:cursor-not-allowed
+                hover:border-blue-500 dark:hover:border-blue-500
+                hover:scale-105 active:scale-95
+                ${showFabMenu ? 'rotate-45 border-blue-500 dark:border-blue-500 scale-105' : ''}
+              `}
+              title="New Conversation"
+            >
+              {isCreatingEmail || isCreatingFlow ? (
+                <LoadingDots size="md" color="blue" />
+              ) : (
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+              )}
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Full-screen explorer */}
@@ -886,5 +721,3 @@ export default function ChatSidebarEnhanced({
     </>
   );
 }
-
-

@@ -33,26 +33,26 @@ export default function ConversationSearch({
   }, [value, onClear]);
 
   return (
-    <div className="relative">
+    <div className="relative w-full">
       <div
         className={`
-          relative flex items-center rounded-full
+          relative flex items-center rounded-lg
           bg-white dark:bg-gray-800
           border transition-all duration-200
           ${isFocused 
             ? 'border-blue-500 dark:border-blue-400 shadow-md ring-2 ring-blue-100 dark:ring-blue-900/50' 
-            : 'border-gray-300 dark:border-gray-600 shadow-sm'
+            : 'border-gray-200 dark:border-gray-700'
           }
         `}
       >
         {/* Search Icon */}
-        <div className="pl-4 pr-2">
+        <div className="pl-3 pr-2 flex-shrink-0">
           <svg
-            className={`w-4 h-4 transition-colors duration-200 ${
+            className={`w-4 h-4 transition-colors ${
               isFocused || value
                 ? 'text-blue-500 dark:text-blue-400'
                 : 'text-gray-400 dark:text-gray-500'
-            } ${value ? 'animate-pulse' : ''}`}
+            }`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -76,7 +76,7 @@ export default function ConversationSearch({
           onBlur={() => setIsFocused(false)}
           placeholder={placeholder}
           className="
-            flex-1 py-2 pr-2 text-sm
+            flex-1 py-2 pr-1 text-sm min-w-0
             bg-transparent
             text-gray-900 dark:text-gray-100
             placeholder-gray-400 dark:placeholder-gray-500
@@ -89,15 +89,15 @@ export default function ConversationSearch({
           <button
             onClick={onClear}
             className="
-              mr-2 p-1.5 rounded-full
+              mr-2 p-1 rounded-full flex-shrink-0
               hover:bg-gray-100 dark:hover:bg-gray-700
-              transition-all duration-150
+              transition-colors
               group cursor-pointer
             "
-            title="Clear search (Esc)"
+            title="Clear (Esc)"
           >
             <svg
-              className="w-4 h-4 text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300"
+              className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -111,23 +111,7 @@ export default function ConversationSearch({
             </svg>
           </button>
         )}
-
-        {/* ESC hint when there's a value */}
-        {value && (
-          <div className="mr-3 text-xs text-gray-400 dark:text-gray-500">
-            <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-semibold">
-              ESC
-            </kbd>
-          </div>
-        )}
       </div>
-
-      {/* Result count indicator */}
-      {value && (
-        <div className="absolute -bottom-5 left-0 text-xs text-gray-500 dark:text-gray-400">
-          Searching...
-        </div>
-      )}
     </div>
   );
 }
