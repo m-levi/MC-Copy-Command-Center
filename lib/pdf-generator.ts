@@ -63,13 +63,12 @@ export async function exportChartToPDF(
 
     // Convert SVG to canvas
     const canvas = await html2canvas(element, {
-      backgroundColor: '#ffffff',
-      scale: 2, // Higher quality
+      background: '#ffffff',
       useCORS: true,
       logging: false,
       width: width,
       height: height
-    });
+    } as any);
 
     // Convert canvas to image data
     const imgData = canvas.toDataURL('image/png');

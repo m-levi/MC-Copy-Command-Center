@@ -58,7 +58,7 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
 
     let matchCount = 0;
 
-    visit(tree, 'text', (node: any, index: number | null, parent: any) => {
+    visit(tree, 'text', (node: any, index: number | undefined, parent: any) => {
       if (!parent || typeof node.value !== 'string') return;
 
       const originalValue = node.value as string;
@@ -311,31 +311,34 @@ const ChatMessage = memo(function ChatMessage({
         break;
       }
 
+      // TypeScript type assertion - we know earliestMatch is not null here
+      const match = earliestMatch as { index: number; highlightIdx: number; isStart: boolean };
+
       // Add content before marker
-      if (earliestMatch.index > 0) {
+      if (match.index > 0) {
         parts.push(
           <ReactMarkdown key={key++}>
-            {remaining.substring(0, earliestMatch.index)}
+            {remaining.substring(0, match.index)}
           </ReactMarkdown>
         );
       }
 
-      const marker = earliestMatch.isStart
-        ? `{{HIGHLIGHT_${earliestMatch.highlightIdx}_START}}`
-        : `{{HIGHLIGHT_${earliestMatch.highlightIdx}_END}}`;
+      const marker = match.isStart
+        ? `{{HIGHLIGHT_${match.highlightIdx}_START}}`
+        : `{{HIGHLIGHT_${match.highlightIdx}_END}}`;
 
-      if (earliestMatch.isStart) {
+      if (match.isStart) {
         // Find the corresponding end marker
-        const endMarker = `{{HIGHLIGHT_${earliestMatch.highlightIdx}_END}}`;
-        const endIdx = remaining.indexOf(endMarker, earliestMatch.index + marker.length);
+        const endMarker = `{{HIGHLIGHT_${match.highlightIdx}_END}}`;
+        const endIdx = remaining.indexOf(endMarker, match.index + marker.length);
         
         if (endIdx !== -1) {
           const highlightedText = remaining.substring(
-            earliestMatch.index + marker.length,
+            match.index + marker.length,
             endIdx
           );
           
-          const highlight = inlineHighlights[earliestMatch.highlightIdx];
+          const highlight = inlineHighlights[match.highlightIdx];
           
           parts.push(
             <button
@@ -358,7 +361,7 @@ const ChatMessage = memo(function ChatMessage({
       }
 
       // Skip this marker and continue
-      remaining = remaining.substring(earliestMatch.index + marker.length);
+      remaining = remaining.substring(match.index + marker.length);
     }
 
     if (typeof window !== 'undefined' && parts.length > 0) {

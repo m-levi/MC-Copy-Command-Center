@@ -7,11 +7,11 @@ export const dynamic = 'force-dynamic';
 // PUT - Update a memory
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { brandId: string; memoryId: string } }
+  { params }: { params: Promise<{ brandId: string; memoryId: string }> }
 ) {
   try {
     const supabase = await createClient();
-    const { brandId, memoryId } = params;
+    const { brandId, memoryId } = await params;
     const body = await request.json();
     const { title, content, category } = body;
 
@@ -65,11 +65,11 @@ export async function PUT(
 // DELETE - Delete a memory
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { brandId: string; memoryId: string } }
+  { params }: { params: Promise<{ brandId: string; memoryId: string }> }
 ) {
   try {
     const supabase = await createClient();
-    const { brandId, memoryId } = params;
+    const { brandId, memoryId } = await params;
 
     // Verify user has access to this brand
     const { data: brand, error: brandError } = await supabase

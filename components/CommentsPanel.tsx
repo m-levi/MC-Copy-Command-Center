@@ -134,7 +134,7 @@ export default function CommentsPanel({
   const toggleResolve = async (commentId: string, currentResolved: boolean) => {
     try {
       // Note: This would require a PATCH endpoint - for now just show toast
-      toast.info('Resolve feature coming soon');
+      toast('Resolve feature coming soon');
     } catch (error) {
       logger.error('Failed to resolve comment:', error);
     }

@@ -8,9 +8,9 @@ export const runtime = 'nodejs';
 // POST: Cancel a job
 export const POST = withErrorHandling(async (
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context?: { params: Promise<{ id: string }> }
 ) => {
-  const { id: jobId } = await params;
+  const { id: jobId } = await context!.params;
 
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();

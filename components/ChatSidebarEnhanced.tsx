@@ -368,7 +368,7 @@ export default function ChatSidebarEnhanced({
           /* Responsive width - mobile to desktop */
           w-[280px] xs:w-[320px] sm:w-[360px] md:w-[380px] lg:w-full
         `}
-        style={{ height: '100vh', height: '100dvh' }}
+        style={{ height: '100dvh' }}
       >
         <SidebarHeader
           brandName={brandName}

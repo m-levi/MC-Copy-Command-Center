@@ -11,11 +11,11 @@ export const runtime = 'nodejs';
 // GET: Access shared conversation via token (using service role to bypass RLS)
 export const GET = withErrorHandling(async (
   req: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
+  context?: { params: Promise<{ token: string }> }
 ) => {
   console.log('[Shared API Service] ========== REQUEST START ==========');
   
-  const { token } = await params;
+  const { token } = await context!.params;
   console.log('[Shared API Service] Token:', token);
 
   // Use service role client to bypass RLS - we validate access via share token instead

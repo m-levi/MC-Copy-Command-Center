@@ -60,7 +60,7 @@ export default function ActionButton({
       case 'loading':
         return (
           <>
-            <LoadingDots size="sm" color={variant === 'primary' || variant === 'danger' ? 'white' : 'current'} />
+            <LoadingDots size="sm" color={variant === 'primary' || variant === 'danger' ? 'white' : 'gray'} />
             {loadingText && <span>{loadingText}</span>}
             {!loadingText && children}
           </>

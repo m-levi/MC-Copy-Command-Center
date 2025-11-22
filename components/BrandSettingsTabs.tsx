@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Brand } from '@/types';
 import BrandDetailsTab from './BrandDetailsTab';
 import BrandStyleGuideTab from './BrandStyleGuideTab';
@@ -19,7 +19,7 @@ export type TabId = 'details' | 'style-guide' | 'guidelines' | 'memories' | 'dos
 interface Tab {
   id: TabId;
   label: string;
-  icon: JSX.Element;
+  icon: React.ReactElement;
   badge?: number;
 }
 

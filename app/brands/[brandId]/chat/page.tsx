@@ -2675,17 +2675,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           finalThinking = allThinkingContent;
           finalEmailCopy = allStreamedContent;
           finalClarification = '';
-          const finalOtherContent = '';
           finalResponseType = 'email_copy';
           // productLinks already set from messages
 
-          // Ensure finalContent is always a valid string
-          finalContent =
-            finalResponseType === 'clarification'
-              ? (finalClarification || '')
-              : finalResponseType === 'other'
-                ? (finalOtherContent || '')
-                : (finalEmailCopy || finalClarification || finalOtherContent || '');
+          // Ensure finalContent is always a valid string (use email copy since that's what we have)
+          finalContent = finalEmailCopy || '';
           
           finalContent = stripControlMarkers(finalContent);
           
@@ -3617,7 +3611,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           {showScrollToBottom && (
             <button
               type="button"
-              onClick={scrollToBottom}
+              onClick={() => scrollToBottom()}
               className="hidden sm:flex items-center justify-center w-8 h-8 text-gray-400 dark:text-gray-500 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-full shadow-sm border border-gray-200/50 dark:border-gray-700/50 transition-all hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:shadow-md focus:outline-none absolute bottom-6 right-6 z-20 opacity-60 hover:opacity-100"
               title="Scroll to latest message"
             >

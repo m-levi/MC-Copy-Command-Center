@@ -7,11 +7,11 @@ export const dynamic = 'force-dynamic';
 // GET - Fetch all memories for a brand
 export async function GET(
   request: NextRequest,
-  { params }: { params: { brandId: string } }
+  { params }: { params: Promise<{ brandId: string }> }
 ) {
   try {
     const supabase = await createClient();
-    const { brandId } = params;
+    const { brandId } = await params;
 
     // Verify user has access to this brand
     const { data: brand, error: brandError } = await supabase
@@ -49,11 +49,11 @@ export async function GET(
 // POST - Create a new memory
 export async function POST(
   request: NextRequest,
-  { params }: { params: { brandId: string } }
+  { params }: { params: Promise<{ brandId: string }> }
 ) {
   try {
     const supabase = await createClient();
-    const { brandId } = params;
+    const { brandId } = await params;
     const body = await request.json();
     const { title, content, category = 'general' } = body;
 

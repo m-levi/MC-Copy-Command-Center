@@ -12,9 +12,9 @@ export const runtime = 'nodejs';
 // DELETE: Revoke a share
 export const DELETE = withErrorHandling(async (
   req: NextRequest,
-  { params }: { params: Promise<{ id: string; shareId: string }> }
+  context?: { params: Promise<{ id: string; shareId: string }> }
 ) => {
-  const { id: conversationId, shareId } = await params;
+  const { id: conversationId, shareId } = await context!.params;
 
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -54,9 +54,9 @@ export const DELETE = withErrorHandling(async (
 // PUT: Update share permissions
 export const PUT = withErrorHandling(async (
   req: NextRequest,
-  { params }: { params: Promise<{ id: string; shareId: string }> }
+  context?: { params: Promise<{ id: string; shareId: string }> }
 ) => {
-  const { id: conversationId, shareId } = await params;
+  const { id: conversationId, shareId } = await context!.params;
   const { permissionLevel, expiresInDays } = await req.json();
 
   if (!permissionLevel || !['view', 'comment', 'edit'].includes(permissionLevel)) {

@@ -9,9 +9,9 @@ export const runtime = 'nodejs';
  */
 export const GET = withErrorHandling(async (
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context?: { params: Promise<{ id: string }> }
 ) => {
-  const { id: messageId } = await params;
+  const { id: messageId } = await context!.params;
 
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();

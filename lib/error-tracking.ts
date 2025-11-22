@@ -15,12 +15,13 @@ export function initErrorTracking() {
     // Only initialize in production or if SENTRY_DSN is set
     if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
       // Dynamic import to avoid bundling Sentry in development
+      // @ts-ignore - Sentry is an optional dependency
       import('@sentry/nextjs').then((Sentry) => {
         Sentry.init({
           dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
           environment: process.env.NODE_ENV,
           tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-          beforeSend(event, hint) {
+          beforeSend(event: any, hint: any) {
             // Filter out sensitive data
             if (event.request) {
               delete event.request.cookies;
@@ -30,6 +31,8 @@ export function initErrorTracking() {
           },
         });
         sentryInitialized = true;
+      }).catch((err) => {
+        console.warn('Sentry package not installed:', err);
       });
     }
   } catch (error) {
@@ -48,12 +51,15 @@ export function captureError(error: Error, context?: Record<string, any>) {
 
   try {
     // Dynamic import
+    // @ts-ignore - Sentry is an optional dependency
     import('@sentry/nextjs').then((Sentry) => {
       Sentry.captureException(error, {
         contexts: {
           custom: context || {},
         },
       });
+    }).catch(() => {
+      console.error('Sentry not available:', error, context);
     });
   } catch (e) {
     console.error('Failed to capture error:', e);
@@ -70,8 +76,11 @@ export function captureMessage(message: string, level: 'info' | 'warning' | 'err
   }
 
   try {
+    // @ts-ignore - Sentry is an optional dependency
     import('@sentry/nextjs').then((Sentry) => {
       Sentry.captureMessage(message, level);
+    }).catch(() => {
+      console.log(`[${level.toUpperCase()}] Sentry not available:`, message);
     });
   } catch (e) {
     console.error('Failed to capture message:', e);
@@ -85,11 +94,14 @@ export function setUserContext(userId: string, email?: string) {
   if (!sentryInitialized) return;
 
   try {
+    // @ts-ignore - Sentry is an optional dependency
     import('@sentry/nextjs').then((Sentry) => {
       Sentry.setUser({
         id: userId,
         email: email,
       });
+    }).catch(() => {
+      // Silently fail if Sentry not available
     });
   } catch (e) {
     console.error('Failed to set user context:', e);
@@ -103,6 +115,7 @@ export function addBreadcrumb(message: string, category?: string, data?: Record<
   if (!sentryInitialized) return;
 
   try {
+    // @ts-ignore - Sentry is an optional dependency
     import('@sentry/nextjs').then((Sentry) => {
       Sentry.addBreadcrumb({
         message,
@@ -110,6 +123,8 @@ export function addBreadcrumb(message: string, category?: string, data?: Record<
         data,
         level: 'info',
       });
+    }).catch(() => {
+      // Silently fail if Sentry not available
     });
   } catch (e) {
     // Silently fail

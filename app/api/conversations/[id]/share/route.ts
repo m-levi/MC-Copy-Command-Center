@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import {
   validationError,
@@ -20,10 +20,10 @@ function generateShareToken(): string {
 
 // POST: Create a share
 export const POST = withErrorHandling(async (
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  req: Request,
+  context?: { params: Promise<{ id: string }> }
 ) => {
-  const { id: conversationId } = await params;
+  const { id: conversationId } = await context!.params;
   const body = await req.json();
   const { shareType, permissionLevel, shareContent, sharedWithUserId, expiresInDays } = body;
 
@@ -175,10 +175,10 @@ export const POST = withErrorHandling(async (
 
 // GET: List all shares for a conversation
 export const GET = withErrorHandling(async (
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  req: Request,
+  context?: { params: Promise<{ id: string }> }
 ) => {
-  const { id: conversationId } = await params;
+  const { id: conversationId } = await context!.params;
 
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();

@@ -26,6 +26,26 @@ export const FLOW_BEST_PRACTICES = {
 - 69% of carts are abandoned on average - huge opportunity
 - Mobile optimization critical (55% of carts abandoned on mobile)`,
   
+  browse_abandonment: `
+**Research-Backed Best Practices:**
+- Email 1: Remind them of viewed products (2-4 hours - 35-40% open rate)
+- Email 2: Show social proof and reviews for viewed items (24 hours)
+- Email 3: Offer incentive to complete purchase (48 hours)
+- Include product images and descriptions they viewed
+- Cross-sell related items based on browsing behavior
+- Personalization based on viewed categories increases conversion by 30%
+- Target users who viewed 3+ products but didn't add to cart`,
+  
+  site_abandonment: `
+**Research-Backed Best Practices:**
+- Email 1: General reminder with top products (4-6 hours)
+- Email 2: Personalized recommendations based on site behavior (24 hours)
+- Email 3: Special offer to encourage return (48 hours)
+- Less aggressive than cart abandonment
+- Focus on re-engagement rather than specific products
+- Include curated product selections
+- Highlight new arrivals or popular items`,
+  
   post_purchase: `
 **Research-Backed Best Practices:**
 - Email 1: Thank you + order confirmation (Immediate - 70%+ open rate)
@@ -70,7 +90,17 @@ export const FLOW_BEST_PRACTICES = {
 - Spacing: Weekly works best (2x engagement vs daily sends)
 - Educational emails have 25% higher open rates than promotional
 - 7-10 email series optimal for building expert status
-- Include actionable takeaways in every email`
+- Include actionable takeaways in every email`,
+  
+  do_your_research: `
+**Custom Flow - Research-Backed Approach:**
+- Conduct thorough research on the specific use case
+- Apply proven email marketing principles
+- Consider industry benchmarks and best practices
+- Focus on customer journey and touchpoints
+- Optimize for engagement and conversion metrics
+- Test and iterate based on performance data
+- Personalize content based on audience segments`
 };
 
 

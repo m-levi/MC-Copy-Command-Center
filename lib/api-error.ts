@@ -191,11 +191,12 @@ export function databaseError(operation: string, details?: string): Response {
 /**
  * Wrap async route handlers with error handling
  * Supports both single-param and two-param (with params) handlers
+ * Accepts both Request and NextRequest types
  */
-export function withErrorHandling<T = any>(
-  handler: (req: Request, context?: T) => Promise<Response>
-): (req: Request, context?: T) => Promise<Response> {
-  return async (req: Request, context?: T) => {
+export function withErrorHandling<T = any, R extends Request = Request>(
+  handler: (req: R, context?: T) => Promise<Response>
+): (req: R, context?: T) => Promise<Response> {
+  return async (req: R, context?: T) => {
     const requestId = generateRequestId();
     console.log(`[${requestId}] ${req.method} ${req.url}`);
 
