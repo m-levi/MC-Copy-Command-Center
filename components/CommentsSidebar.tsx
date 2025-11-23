@@ -65,6 +65,30 @@ export default function CommentsSidebar({
   const supabase = createClient();
 
   useEffect(() => {
+    if (!conversationId) return;
+
+    const channel = supabase
+      .channel(`comments-${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversation_comments',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          loadComments();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId, supabase]);
+
+  useEffect(() => {
     getCurrentUser();
     loadComments();
     if (initialTeamMembers.length === 0) {
@@ -437,12 +461,24 @@ export default function CommentsSidebar({
                   key={comment.id}
                   className="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-700 transition-all duration-200"
                 >
-                  {/* Quoted Text - Integrated with Card */}
+                    {/* Quoted Text - Integrated with Card */}
                   {comment.quoted_text && (
-                    <div className="mb-3 pb-3 border-b border-gray-100 dark:border-gray-800">
+                    <div className="mb-3 pb-3 border-b border-gray-100 dark:border-gray-800 group/quote relative">
                       <div className="flex items-start gap-2 text-xs text-gray-500 dark:text-gray-400 italic bg-yellow-50/50 dark:bg-yellow-900/10 p-2 rounded border-l-2 border-yellow-400">
                         <span className="line-clamp-3">"{comment.quoted_text}"</span>
                       </div>
+                      {onSendToChat && (
+                        <button
+                          onClick={() => onSendToChat(comment.quoted_text!)}
+                          className="absolute top-2 right-2 opacity-0 group-hover/quote:opacity-100 p-1 bg-white dark:bg-gray-800 rounded shadow-sm border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-blue-600 transition-all transform hover:scale-105"
+                          title="Send quote to chat"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -526,6 +562,17 @@ export default function CommentsSidebar({
                             >
                               Resolve
                             </button>
+
+                            {/* Send to Chat Action */}
+                            {onSendToChat && (
+                              <button
+                                onClick={() => onSendToChat(comment.content)}
+                                className="text-xs font-medium text-gray-500 hover:text-purple-600 dark:text-gray-400 dark:hover:text-purple-400 transition-colors flex items-center gap-1"
+                                title="Send content to chat input"
+                              >
+                                Use in Chat
+                              </button>
+                            )}
 
                             {currentUserId === comment.user.id && (
                               <>
