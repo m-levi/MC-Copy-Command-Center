@@ -59,27 +59,38 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
       onClick={handleCardClick}
       onMouseEnter={handleMouseEnter}
       className={`relative bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer p-6 border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 hover:-translate-y-1 group ${
-        isNavigating ? 'opacity-50 scale-95 pointer-events-none' : ''
+        isNavigating ? 'opacity-90 pointer-events-none' : ''
       }`}
     >
-      {/* Three-dot menu button - only show if user can manage brands */}
-      {canManage && (
-        <button
-          onClick={handleMenuClick}
-          className="absolute top-4 right-4 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 focus:ring-2 focus:ring-blue-500"
-          aria-label="Brand menu"
-        >
-          <svg
-            className="w-5 h-5 text-gray-600 dark:text-gray-400"
-            fill="currentColor"
-            viewBox="0 0 16 16"
+      {/* Active Pulse Indicator (Simulated for active projects) */}
+      <div className="absolute top-6 right-6 flex items-center gap-2">
+        
+        {/* Loading indicator - Top right, subtle */}
+        {isNavigating && (
+          <div className="flex items-center gap-2 animate-in fade-in duration-200">
+             <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent dark:border-blue-400 dark:border-t-transparent"></div>
+          </div>
+        )}
+
+        {/* Three-dot menu button - only show if user can manage brands and not loading */}
+        {canManage && !isNavigating && (
+          <button
+            onClick={handleMenuClick}
+            className="p-1.5 -mr-2 -mt-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors cursor-pointer text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100 focus:ring-2 focus:ring-blue-500"
+            aria-label="Brand menu"
           >
-            <circle cx="8" cy="2" r="1.5" />
-            <circle cx="8" cy="8" r="1.5" />
-            <circle cx="8" cy="14" r="1.5" />
-          </svg>
-        </button>
-      )}
+            <svg
+              className="w-5 h-5"
+              fill="currentColor"
+              viewBox="0 0 16 16"
+            >
+              <circle cx="8" cy="2" r="1.5" />
+              <circle cx="8" cy="8" r="1.5" />
+              <circle cx="8" cy="14" r="1.5" />
+            </svg>
+          </button>
+        )}
+      </div>
 
       {/* Dropdown menu */}
       {showMenu && canManage && (
@@ -99,31 +110,21 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
         </div>
       )}
 
-      {/* Loading indicator */}
-      {isNavigating && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-gray-800/80 rounded-lg">
-          <div className="flex items-center gap-2">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 dark:border-blue-400"></div>
-            <span className="text-sm text-gray-600 dark:text-gray-400 font-medium">Loading...</span>
-          </div>
-        </div>
-      )}
-
-      {/* Brand content */}
-      <div className="mb-4">
-        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-2 pr-8 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+      {/* Footer with metadata */}
+      <div className="mb-4 pr-6">
+        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-50 mb-1.5 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
           {brand.name}
         </h3>
-        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-3">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
+        <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 mb-3">
+          <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 dark:bg-gray-700 text-[10px] text-gray-600 dark:text-gray-300">
+            {creatorName.charAt(0).toUpperCase()}
+          </div>
           <span>{creatorName}</span>
         </div>
       </div>
       
-      <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3 leading-relaxed mb-4">
-        {truncateText(brand.brand_details || 'No details provided', 150)}
+      <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 leading-relaxed mb-5 h-10">
+        {truncateText(brand.brand_details || 'No description provided for this brand.', 120)}
       </p>
       
       {/* Footer with metadata */}

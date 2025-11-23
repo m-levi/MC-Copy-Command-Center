@@ -497,18 +497,18 @@ export default function ChatInput({
           {/* Bottom Controls Bar */}
           <div className="flex items-center justify-between px-4 sm:px-6 pb-3 sm:pb-4">
             {/* Left: Mode Toggle & Dropdowns */}
-            <div className="flex items-center gap-1 sm:gap-1.5">
-              <div className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full p-0.5 flex items-center gap-0.5">
+            <div className="flex items-center gap-2">
+              <div className="bg-gray-50 dark:bg-gray-800/50 p-0.5 rounded-md flex items-center gap-0.5">
                 <button
                   onClick={() => onModeChange?.('planning')}
                   disabled={hasMessages}
                   className={`
-                    px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-semibold transition-all duration-150
+                    px-2.5 py-1 rounded text-[11px] font-semibold transition-all duration-150
                     ${mode === 'planning'
-                      ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105 cursor-pointer'
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                       : hasMessages
                       ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105 cursor-pointer'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                     }
                   `}
                   title={hasMessages ? "Can't switch modes after starting conversation" : "Planning mode - brainstorm and strategize"}
@@ -519,12 +519,12 @@ export default function ChatInput({
                   onClick={() => onModeChange?.('email_copy')}
                   disabled={hasMessages}
                   className={`
-                    px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-semibold transition-all duration-150 cursor-pointer
+                    px-2.5 py-1 rounded text-[11px] font-semibold transition-all duration-150
                     ${mode === 'email_copy'
-                      ? 'bg-white dark:bg-gray-600 text-black dark:text-white shadow-sm scale-105'
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                       : hasMessages
                       ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-600/60 hover:scale-105'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                     }
                   `}
                   title={hasMessages ? "Can't switch modes after starting conversation" : "Email copy mode - generate email content"}
@@ -538,13 +538,13 @@ export default function ChatInput({
                 <div className="relative hidden sm:block" ref={modelPickerRef}>
                   <button
                     onClick={() => setShowModelPicker(!showModelPicker)}
-                    className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-2.5 py-1 flex items-center gap-1 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                    className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2.5 py-1 flex items-center gap-1.5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors duration-150"
                   >
-                    <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                    <span className="text-[11px] font-medium text-gray-700 dark:text-gray-300">
                       {getModelName(selectedModel)}
                     </span>
                     <svg 
-                      className={`w-2 h-2 text-gray-600 dark:text-gray-400 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} 
+                      className={`w-2 h-2 text-gray-500 dark:text-gray-400 transition-transform duration-150 ${showModelPicker ? 'rotate-180' : ''}`} 
                       fill="currentColor" 
                       viewBox="0 0 10 5"
                     >
@@ -554,7 +554,7 @@ export default function ChatInput({
                   
                   {/* Dropdown Menu */}
                   {showModelPicker && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[140px] z-50">
+                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden min-w-[120px] z-50">
                       {models.map((model) => (
                         <button
                           key={model.id}
@@ -563,7 +563,7 @@ export default function ChatInput({
                             setShowModelPicker(false);
                           }}
                           className={`
-                            w-full px-3 py-2 text-left text-[10px] font-semibold transition-colors duration-150 cursor-pointer
+                            w-full px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors duration-150 cursor-pointer
                             ${selectedModel === model.id
                               ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
                               : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
@@ -583,13 +583,13 @@ export default function ChatInput({
                 <div className="relative hidden sm:block" ref={emailTypePickerRef}>
                   <button
                     onClick={() => setShowEmailTypePicker(!showEmailTypePicker)}
-                    className="bg-[#f9f8f8] dark:bg-gray-700/50 border border-[rgba(0,0,0,0.02)] dark:border-gray-600 rounded-full px-2.5 py-1 flex items-center gap-1 hover:bg-[#f0f0f0] dark:hover:bg-gray-700 transition-colors duration-150 cursor-pointer"
+                    className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2.5 py-1 flex items-center gap-1.5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors duration-150 cursor-pointer"
                   >
-                    <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                    <span className="text-[11px] font-medium text-gray-700 dark:text-gray-300">
                       {getEmailTypeName(emailType)}
                     </span>
                     <svg 
-                      className={`w-2 h-2 text-gray-600 dark:text-gray-400 transition-transform duration-200 ${showEmailTypePicker ? 'rotate-180' : ''}`} 
+                      className={`w-2 h-2 text-gray-500 dark:text-gray-400 transition-transform duration-150 ${showEmailTypePicker ? 'rotate-180' : ''}`} 
                       fill="currentColor" 
                       viewBox="0 0 10 5"
                     >
@@ -599,7 +599,7 @@ export default function ChatInput({
                   
                   {/* Dropdown Menu */}
                   {showEmailTypePicker && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[160px] z-50">
+                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden min-w-[140px] z-50">
                       {emailTypes.map((type) => (
                         <button
                           key={type.id}
@@ -608,15 +608,15 @@ export default function ChatInput({
                             setShowEmailTypePicker(false);
                           }}
                           className={`
-                            w-full px-3 py-2 text-left transition-colors duration-150 cursor-pointer
+                            w-full px-2.5 py-1.5 text-left transition-colors duration-150 cursor-pointer
                             ${emailType === type.id
                               ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
                               : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                             }
                           `}
                         >
-                          <div className="text-[10px] font-semibold">{type.name}</div>
-                          <div className="text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">{type.description}</div>
+                          <div className="text-[11px] font-medium">{type.name}</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">{type.description}</div>
                         </button>
                       ))}
                     </div>
@@ -669,13 +669,6 @@ export default function ChatInput({
               )}
             </div>
           </div>
-        </div>
-        
-        {/* Helper text - desktop only */}
-        <div className="hidden sm:flex items-center justify-between mt-2 px-2">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Press <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded text-xs">Enter</kbd> to send · <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded text-xs">Shift+Enter</kbd> for new line
-          </p>
         </div>
       </div>
     </div>

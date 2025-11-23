@@ -669,7 +669,7 @@ const ChatMessage = memo(function ChatMessage({
           className={`
             transition-all
             ${isUser 
-              ? 'bg-white dark:bg-gray-800 border border-[#ececec] dark:border-gray-700 rounded-2xl px-5 py-3.5 shadow-sm' 
+              ? 'bg-gray-50 dark:bg-gray-800/50 rounded-2xl px-5 py-3.5' 
               : 'w-full'
             }
           `}
@@ -694,7 +694,7 @@ const ChatMessage = memo(function ChatMessage({
             <div onMouseUp={handleTextSelection}>
               {/* Thought Process - Show if available (includes strategy and all non-email content) */}
               {(message.thinking || isStreaming) && (
-                <div className="px-10 sm:px-16">
+                <div className="px-4 sm:px-6 mb-4">
                   <ThoughtProcess 
                     thinking={message.thinking} 
                     isStreaming={isStreaming}
@@ -705,7 +705,7 @@ const ChatMessage = memo(function ChatMessage({
 
               {/* Message Content - Unified Markdown Rendering */}
               {isStreaming && !messageContent ? (
-                <div className="px-10 sm:px-16">
+                <div className="px-4 sm:px-6">
                   <div className="space-y-3 animate-pulse">
                     <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
                     <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
@@ -713,12 +713,52 @@ const ChatMessage = memo(function ChatMessage({
                   </div>
                 </div>
               ) : (
-                <div className="px-10 sm:px-16">
-                  <div className={`${
-                    messageContent.includes('```') 
-                      ? `bg-white dark:bg-gray-800 rounded-xl border shadow-sm overflow-hidden ${isStarred ? 'border-yellow-400 dark:border-yellow-500 ring-1 ring-yellow-200 dark:ring-yellow-900/30' : 'border-gray-200 dark:border-gray-700'}`
-                      : 'bg-transparent border-0 shadow-none p-0'
-                  } text-gray-900 dark:text-gray-100 transition-colors`}>
+                <div className="px-4 sm:px-6">
+                  <div className="relative group/content">
+                    {/* Floating Action Bar (Desktop: Hover, Mobile: Always visible) */}
+                    {!isUser && messageContent && !isStreaming && (
+                      <div className="absolute top-2 right-2 z-10 opacity-0 group-hover/content:opacity-100 transition-opacity duration-200 flex items-center gap-1 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-1">
+                        <button
+                          onClick={handleCopy}
+                          className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                          title="Copy"
+                        >
+                          {copied ? (
+                            <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                          )}
+                        </button>
+                        {onRegenerate && (
+                          <button
+                            onClick={onRegenerate}
+                            disabled={isRegenerating}
+                            className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Regenerate"
+                          >
+                            <svg 
+                              className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} 
+                              fill="none" 
+                              stroke="currentColor" 
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className={`${
+                      messageContent.includes('```') 
+                        ? `bg-white dark:bg-gray-800 rounded-xl border shadow-sm overflow-hidden ${isStarred ? 'border-yellow-400 dark:border-yellow-500 ring-1 ring-yellow-200 dark:ring-yellow-900/30' : 'border-gray-200 dark:border-gray-700'}`
+                        : 'bg-transparent border-0 shadow-none p-0'
+                    } text-gray-900 dark:text-gray-100 transition-colors relative`}>
+
                   {/* Detect if content is email copy (contains code blocks) */}
                   {messageContent.includes('```') && (
                     <div className="bg-gray-50 dark:bg-gray-800/50 px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
@@ -856,48 +896,18 @@ const ChatMessage = memo(function ChatMessage({
                     </div>
                   )}
                   </div>
+                  </div>
                 </div>
               )}
 
-              {/* Action Bar - Clean & Simple */}
-              <div className="px-10 sm:px-16">
+              {/* Action Bar - Removed (Replaced by floating actions) */}
+              <div className="px-4 sm:px-6">
                 <div className={`flex items-center justify-between mt-1 pt-2`}>
                 <span className="text-xs text-gray-400 dark:text-gray-500">
                   {formattedTimestamp}
                 </span>
+                {/* Feedback only at bottom now */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                  <button
-                    onClick={handleCopy}
-                    className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-                    title="Copy"
-                  >
-                    {copied ? (
-                      <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    )}
-                  </button>
-                  {onRegenerate && (
-                    <button
-                      onClick={onRegenerate}
-                      disabled={isRegenerating}
-                      className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                      title="Regenerate"
-                    >
-                      <svg
-                        className={`w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 ${isRegenerating ? 'animate-spin' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                    </button>
-                  )}
                   {onReaction && (
                     <>
                       <button

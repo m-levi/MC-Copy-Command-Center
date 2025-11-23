@@ -394,48 +394,69 @@ export default function ChatSidebarEnhanced({
         )}
 
         {!isCollapsed ? (
-          <div className="px-3 pt-3 pb-2 space-y-3 border-b border-gray-100 dark:border-gray-800">
-            {/* Filter and Search - Integrated Row */}
-            <div className="flex items-stretch gap-2">
-              <div className="flex-1 min-w-0">
-                <ConversationSearch
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  onClear={() => setSearchQuery('')}
-                />
-              </div>
-              
-              {/* Filter Button - Compact */}
-              <div className="flex-shrink-0">
-                <ConversationFilterDropdown
-                   currentFilter={currentFilter}
-                   selectedPersonId={selectedPersonId}
-                   teamMembers={teamMembers}
-                   onFilterChange={onFilterChange}
-                   compact={true} 
-                />
-              </div>
-
-              {/* Bulk Select Toggle */}
+          <>
+            <div className="px-3 pb-3 border-b border-gray-100 dark:border-gray-800/50 space-y-3">
+              {/* Prominent New Chat Button */}
               <button
-                onClick={handleToggleBulkSelect}
-                className={`p-2 rounded-lg transition-colors cursor-pointer flex-shrink-0 border ${
-                  bulkSelectMode
-                    ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-400'
-                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
-                title={bulkSelectMode ? 'Exit selection mode' : 'Select multiple'}
+                onClick={handleMobileNewConversation}
+                disabled={isCreatingEmail || isCreatingFlow}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  {bulkSelectMode ? (
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  ) : (
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  )}
-                </svg>
+                {isCreatingEmail || isCreatingFlow ? (
+                  <div className="flex items-center gap-2">
+                    <LoadingDots size="sm" color="white" />
+                    <span>Creating...</span>
+                  </div>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>New Chat</span>
+                  </>
+                )}
               </button>
+
+              {/* Search and Filter Row */}
+              <div className="flex items-stretch gap-2">
+                <div className="flex-1 min-w-0">
+                  <ConversationSearch
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    onClear={() => setSearchQuery('')}
+                  />
+                </div>
+                
+                <div className="flex-shrink-0">
+                  <ConversationFilterDropdown
+                     currentFilter={currentFilter}
+                     selectedPersonId={selectedPersonId}
+                     teamMembers={teamMembers}
+                     onFilterChange={onFilterChange}
+                     compact={true} 
+                  />
+                </div>
+
+                <button
+                  onClick={handleToggleBulkSelect}
+                  className={`p-2 rounded-lg transition-colors cursor-pointer flex-shrink-0 border ${
+                    bulkSelectMode
+                      ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-400'
+                      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
+                  title={bulkSelectMode ? 'Exit selection mode' : 'Select multiple'}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    {bulkSelectMode ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    )}
+                  </svg>
+                </button>
+              </div>
             </div>
-          </div>
+          </>
         ) : (
           /* Collapsed: Icon-only view */
           <div className="hidden lg:flex flex-col items-center py-3 px-2 gap-2">
@@ -634,73 +655,7 @@ export default function ChatSidebarEnhanced({
         </div>
 
         {/* Floating Action Button - Only show when not collapsed */}
-        {!isCollapsed && (
-          <div className="absolute bottom-4 right-4 z-30">
-            {/* FAB Menu */}
-            {showFabMenu && (
-              <div className="absolute bottom-full right-0 mb-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[160px]">
-                <button
-                  onClick={() => {
-                    handleMobileNewConversation();
-                    setShowFabMenu(false);
-                  }}
-                  disabled={isCreatingEmail || isCreatingFlow}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left disabled:opacity-50"
-                >
-                  <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">New Email</span>
-                </button>
-                <button
-                  onClick={() => {
-                    handleMobileNewFlow();
-                    setShowFabMenu(false);
-                  }}
-                  disabled={isCreatingEmail || isCreatingFlow}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left disabled:opacity-50 border-t border-gray-100 dark:border-gray-700"
-                >
-                  <div className="w-8 h-8 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  </div>
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">New Flow</span>
-                </button>
-              </div>
-            )}
-
-            {/* FAB Button */}
-            <button
-              onClick={() => setShowFabMenu(!showFabMenu)}
-              disabled={isCreatingEmail || isCreatingFlow}
-              className={`
-                w-14 h-14 rounded-full
-                bg-white dark:bg-gray-800
-                border border-gray-300 dark:border-gray-600
-                shadow-md hover:shadow-lg
-                text-blue-600 dark:text-blue-400
-                flex items-center justify-center
-                transition-all duration-200
-                disabled:opacity-50 disabled:cursor-not-allowed
-                hover:border-blue-500 dark:hover:border-blue-500
-                hover:scale-105 active:scale-95
-                ${showFabMenu ? 'rotate-45 border-blue-500 dark:border-blue-500 scale-105' : ''}
-              `}
-              title="New Conversation"
-            >
-              {isCreatingEmail || isCreatingFlow ? (
-                <LoadingDots size="md" color="blue" />
-              ) : (
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-              )}
-            </button>
-          </div>
-        )}
+        {/* Removed FAB in favor of prominent top button */}
       </aside>
 
       {/* Full-screen explorer */}

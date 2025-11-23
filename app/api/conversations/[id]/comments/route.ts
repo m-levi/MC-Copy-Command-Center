@@ -17,7 +17,7 @@ export const POST = withErrorHandling(async (
 ) => {
   if (!context) throw new Error('Missing params');
   const { id: conversationId } = await context.params;
-  const { content, messageId, parentCommentId, quotedText } = await req.json();
+  const { content, messageId, parentCommentId, quotedText, assignedTo } = await req.json();
 
   if (!content || typeof content !== 'string' || content.trim().length === 0) {
     return validationError('Comment content is required');
@@ -67,6 +67,15 @@ export const POST = withErrorHandling(async (
 
   if (quotedText) {
     commentData.quoted_text = quotedText;
+  }
+
+  if (assignedTo) {
+    // Validate assigned user is a member of the organization
+    const isMember = await checkOrgMembership(supabase, conversation.brand_id, assignedTo);
+    if (!isMember) {
+      return validationError('Assigned user is not a member of this organization');
+    }
+    commentData.assigned_to = assignedTo;
   }
 
   const { data: comment, error: commentError } = await supabase
@@ -155,16 +164,32 @@ export const GET = withErrorHandling(async (
   // Fetch user profiles separately to avoid RLS issues
   if (comments && comments.length > 0) {
     const userIds = [...new Set(comments.map(c => c.user_id))];
+    // Also fetch assigned users
+    const assignedIds = [...new Set(comments.filter(c => c.assigned_to).map(c => c.assigned_to))];
+    const allUserIds = [...new Set([...userIds, ...assignedIds])];
+
     const { data: profiles } = await supabase
       .from('profiles')
       .select('user_id, email, full_name')
-      .in('user_id', userIds);
+      .in('user_id', allUserIds);
 
     // Map profiles to comments
-    const commentsWithUsers = comments.map(comment => ({
-      ...comment,
-      user: profiles?.find(p => p.user_id === comment.user_id) || { id: comment.user_id, email: 'Unknown' }
-    }));
+    const commentsWithUsers = comments.map(comment => {
+      const userProfile = profiles?.find(p => p.user_id === comment.user_id);
+      const assigneeProfile = comment.assigned_to ? profiles?.find(p => p.user_id === comment.assigned_to) : null;
+
+      return {
+        ...comment,
+        user: userProfile 
+          ? { ...userProfile, id: userProfile.user_id } 
+          : { id: comment.user_id, email: 'Unknown' },
+        assignee: comment.assigned_to 
+          ? (assigneeProfile 
+              ? { ...assigneeProfile, id: assigneeProfile.user_id } 
+              : { id: comment.assigned_to, email: 'Unknown' }) 
+          : null
+      };
+    });
 
     return NextResponse.json({ comments: commentsWithUsers });
   }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { logger } from '@/lib/logger';
 import toast from 'react-hot-toast';
 import { createClient } from '@/lib/supabase/client';
@@ -9,6 +9,7 @@ interface Comment {
   id: string;
   content: string;
   user: { id: string; email: string; full_name?: string };
+  assignee?: { id: string; email: string; full_name?: string } | null;
   parent_comment_id: string | null;
   message_id: string | null;
   created_at: string;
@@ -17,12 +18,21 @@ interface Comment {
   replies?: Comment[];
 }
 
+interface OrganizationMember {
+  user_id: string;
+  profile: {
+    email: string;
+    full_name?: string;
+  };
+}
+
 interface CommentsSidebarProps {
   conversationId: string;
   focusedMessageId?: string | null;
   highlightedText?: string | null;
   onHighlightedTextUsed?: () => void;
   onSendToChat?: (text: string) => void;
+  teamMembers?: OrganizationMember[];
 }
 
 export default function CommentsSidebar({ 
@@ -30,10 +40,19 @@ export default function CommentsSidebar({
   focusedMessageId,
   highlightedText,
   onHighlightedTextUsed,
-  onSendToChat
+  onSendToChat,
+  teamMembers: initialTeamMembers = []
 }: CommentsSidebarProps) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [teamMembers, setTeamMembers] = useState<OrganizationMember[]>(initialTeamMembers);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState<{ start: number; end: number } | null>(null);
+  const [showMentionList, setShowMentionList] = useState(false);
+  const [assignedUser, setAssignedUser] = useState<string | null>(null);
+  const [isAssignDropdownOpen, setIsAssignDropdownOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  
   const [isLoading, setIsLoading] = useState(true); // Start as true
   const [isPosting, setIsPosting] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -48,7 +67,43 @@ export default function CommentsSidebar({
   useEffect(() => {
     getCurrentUser();
     loadComments();
+    if (initialTeamMembers.length === 0) {
+      loadTeamMembers();
+    }
   }, [conversationId]);
+
+  const loadTeamMembers = async () => {
+    // Simple fetch for team members if not provided
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Get org id
+      const { data: membership } = await supabase
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (membership) {
+        const { data: members } = await supabase
+          .from('organization_members')
+          .select('user_id, profile:profiles(email, full_name)')
+          .eq('organization_id', membership.organization_id);
+        
+        if (members) {
+          // Fix types for the query result
+          const formattedMembers = members.map((m: any) => ({
+            user_id: m.user_id,
+            profile: m.profile || { email: 'Unknown' }
+          }));
+          setTeamMembers(formattedMembers);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load team members', e);
+    }
+  };
 
   const getCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -85,6 +140,7 @@ export default function CommentsSidebar({
       id: `temp-${Date.now()}`,
       content: newComment,
       user: { id: currentUserId || '', email: '', full_name: 'You' },
+      assignee: assignedUser ? teamMembers.find(m => m.user_id === assignedUser)?.profile as any : null,
       parent_comment_id: null,
       message_id: focusedMessageId || null,
       created_at: new Date().toISOString(),
@@ -92,9 +148,15 @@ export default function CommentsSidebar({
       quoted_text: highlightedText || undefined,
     };
 
+    // Store values before clearing for potential restoration
+    const savedComment = newComment;
+    const savedAssignedUser = assignedUser;
+
     // Optimistic update
     setOptimisticComments([tempComment]);
     setNewComment('');
+    setAssignedUser(null);
+    setIsAssignDropdownOpen(false);
     setIsPosting(true);
 
     try {
@@ -105,6 +167,7 @@ export default function CommentsSidebar({
           content: tempComment.content,
           messageId: focusedMessageId,
           quotedText: highlightedText,
+          assignedTo: savedAssignedUser
         }),
       });
 
@@ -115,7 +178,8 @@ export default function CommentsSidebar({
       // Removed toast notification
     } catch (error) {
       setOptimisticComments([]);
-      setNewComment(tempComment.content);
+      setNewComment(savedComment);
+      setAssignedUser(savedAssignedUser);
       toast.error('Failed to add comment');
     } finally {
       setIsPosting(false);
@@ -257,6 +321,69 @@ export default function CommentsSidebar({
     return email.substring(0, 2).toUpperCase();
   };
 
+  // Mention Logic
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setNewComment(val);
+
+    // Check for @ mention
+    const cursor = e.target.selectionStart;
+    const textBeforeCursor = val.substring(0, cursor);
+    const atIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (atIndex !== -1) {
+      // Check if there's a space before @ or if it's the start of the string
+      if (atIndex === 0 || textBeforeCursor[atIndex - 1] === ' ' || textBeforeCursor[atIndex - 1] === '\n') {
+        const query = textBeforeCursor.substring(atIndex + 1);
+        // Stop if query contains space (end of mention)
+        if (!query.includes(' ')) {
+          setMentionQuery(query);
+          setMentionIndex({ start: atIndex, end: cursor });
+          setShowMentionList(true);
+          return;
+        }
+      }
+    }
+    
+    // Only close if we're sure it's not a valid mention
+    if (showMentionList && (atIndex === -1 || (textBeforeCursor.lastIndexOf('@') !== -1 && textBeforeCursor.substring(textBeforeCursor.lastIndexOf('@')).includes(' ')))) {
+       setShowMentionList(false);
+       setMentionQuery(null);
+    }
+  };
+
+  const handleSelectMention = (member: OrganizationMember) => {
+    if (!mentionIndex) return;
+    
+    const before = newComment.substring(0, mentionIndex.start);
+    // Keep everything after the cursor, but remove the partial query we just typed
+    const after = newComment.substring(mentionIndex.end);
+    
+    const name = member.profile.full_name || member.profile.email.split('@')[0];
+    
+    // Insert the mention with a space after it
+    const newValue = `${before}@${name} ${after}`;
+    setNewComment(newValue);
+    setShowMentionList(false);
+    setMentionQuery(null);
+    setMentionIndex(null);
+    
+    // Auto-assign if not already assigned
+    if (!assignedUser) {
+      setAssignedUser(member.user_id);
+    }
+    
+    // Reset focus and cursor position
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        // Move cursor to after the inserted mention
+        const newCursorPos = before.length + name.length + 2; // +2 for @ and space
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
+  };
+
   return (
     <div className="h-full flex flex-col bg-white dark:bg-gray-950">
       {/* Header */}
@@ -304,39 +431,41 @@ export default function CommentsSidebar({
         ) : (
           <div className="p-3">
             {/* Active Comments */}
-            <div className="space-y-3">
+            <div className="space-y-4">
               {activeCommentsOrganized.map((comment) => (
                 <div
                   key={comment.id}
-                  className="group p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-all duration-150"
+                  className="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-700 transition-all duration-200"
                 >
-                  {/* Quoted Text */}
+                  {/* Quoted Text - Integrated with Card */}
                   {comment.quoted_text && (
-                    <div className="mb-2 p-2 bg-yellow-50 dark:bg-yellow-900/10 border-l-2 border-yellow-400 rounded-md text-xs text-gray-600 dark:text-gray-400 italic">
-                      "{comment.quoted_text}"
+                    <div className="mb-3 pb-3 border-b border-gray-100 dark:border-gray-800">
+                      <div className="flex items-start gap-2 text-xs text-gray-500 dark:text-gray-400 italic bg-yellow-50/50 dark:bg-yellow-900/10 p-2 rounded border-l-2 border-yellow-400">
+                        <span className="line-clamp-3">"{comment.quoted_text}"</span>
+                      </div>
                     </div>
                   )}
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-3">
                     {/* Avatar */}
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm">
                       {getInitials(comment.user.email, comment.user.full_name)}
                     </div>
 
                     <div className="flex-1 min-w-0">
                       {/* Name & Time */}
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                           {comment.user.full_name || comment.user.email.split('@')[0]}
                         </span>
-                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                        <span className="text-[10px] text-gray-400 dark:text-gray-500">
                           {new Date(comment.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                         </span>
                       </div>
 
                       {/* Content */}
                       {editingId === comment.id ? (
-                        <div className="space-y-2">
+                        <div className="space-y-2 mt-2">
                           <textarea
                             value={editContent}
                             onChange={(e) => setEditContent(e.target.value)}
@@ -344,34 +473,47 @@ export default function CommentsSidebar({
                             rows={2}
                             autoFocus
                           />
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => saveEdit(comment.id)}
-                              className="px-3 py-1 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium transition-colors"
-                            >
-                              Save
-                            </button>
+                          <div className="flex gap-2 justify-end">
                             <button
                               onClick={() => setEditingId(null)}
                               className="px-3 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
                             >
                               Cancel
                             </button>
+                            <button
+                              onClick={() => saveEdit(comment.id)}
+                              className="px-3 py-1 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium transition-colors"
+                            >
+                              Save
+                            </button>
                           </div>
                         </div>
                       ) : (
                         <>
-                          <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed mb-2">{comment.content}</p>
+                          <p className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed mb-3">{comment.content}</p>
+                          
+                          {/* Assignment Badge */}
+                          {comment.assignee && (
+                            <div className="flex items-center gap-1.5 mb-2 text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-2 py-1 rounded-md w-fit">
+                              <span className="font-medium">Assigned to:</span>
+                              <div className="flex items-center gap-1">
+                                <div className="w-4 h-4 rounded-full bg-blue-200 dark:bg-blue-800 flex items-center justify-center text-[9px] font-bold">
+                                  {getInitials(comment.assignee.email, comment.assignee.full_name)}
+                                </div>
+                                <span>{comment.assignee.full_name || comment.assignee.email.split('@')[0]}</span>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Streamlined Actions */}
-                          <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-4 mt-2">
                             {/* Reply button */}
                             <button
                               onClick={() => {
                                 setReplyingTo(comment.id);
                                 setReplyContent('');
                               }}
-                              className="text-xs text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 font-medium transition-colors"
+                              className="text-xs font-medium text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 transition-colors flex items-center gap-1"
                             >
                               Reply
                             </button>
@@ -379,15 +521,10 @@ export default function CommentsSidebar({
                             {/* Resolve Checkbox */}
                             <button
                               onClick={() => toggleResolve(comment.id)}
-                              className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition-colors"
+                              className="text-xs font-medium text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400 transition-colors flex items-center gap-1"
                               title="Mark as resolved"
                             >
-                              <div className="w-4 h-4 rounded border-2 border-gray-300 dark:border-gray-600 hover:border-green-500 dark:hover:border-green-500 flex items-center justify-center transition-colors">
-                                <svg className="w-2.5 h-2.5 text-green-600 opacity-0 hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              </div>
-                              <span className="font-medium">Resolve</span>
+                              Resolve
                             </button>
 
                             {currentUserId === comment.user.id && (
@@ -397,29 +534,11 @@ export default function CommentsSidebar({
                                     setEditingId(comment.id);
                                     setEditContent(comment.content);
                                   }}
-                                  className="text-xs text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 font-medium transition-colors"
+                                  className="text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
                                 >
                                   Edit
                                 </button>
-                                <button
-                                  onClick={() => deleteComment(comment.id)}
-                                  className="text-xs text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 font-medium transition-colors"
-                                >
-                                  Delete
-                                </button>
                               </>
-                            )}
-
-                            {onSendToChat && comment.quoted_text && (
-                              <button
-                                onClick={() => {
-                                  const msg = `Regarding: "${comment.quoted_text}"\n\n${comment.user.full_name || comment.user.email}: ${comment.content}`;
-                                  onSendToChat(msg);
-                                }}
-                                className="ml-auto text-xs text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 font-medium transition-colors"
-                              >
-                                →  Chat
-                              </button>
                             )}
                           </div>
                         </>
@@ -427,56 +546,62 @@ export default function CommentsSidebar({
                     </div>
                   </div>
 
-                  {/* Reply Input */}
+                  {/* Reply Input - Integrated styling */}
                   {replyingTo === comment.id && (
-                    <div className="ml-9 mt-2 space-y-2 animate-in slide-in-from-top-2 duration-200">
-                      <textarea
-                        value={replyContent}
-                        onChange={(e) => setReplyContent(e.target.value)}
-                        placeholder="Write a reply..."
-                        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                        rows={2}
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                            e.preventDefault();
-                            addReply(comment.id);
-                          }
-                        }}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => addReply(comment.id)}
-                          disabled={!replyContent.trim()}
-                          className="px-3 py-1 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
-                        >
-                          Reply
-                        </button>
-                        <button
-                          onClick={() => setReplyingTo(null)}
-                          className="px-3 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
-                        >
-                          Cancel
-                        </button>
+                    <div className="ml-11 mt-3 pl-3 border-l-2 border-gray-100 dark:border-gray-700 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <div className="flex gap-2 items-start">
+                        <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-500 text-[10px] font-bold flex-shrink-0">
+                          YOU
+                        </div>
+                        <div className="flex-1">
+                          <textarea
+                            value={replyContent}
+                            onChange={(e) => setReplyContent(e.target.value)}
+                            placeholder="Reply..."
+                            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[60px]"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                e.preventDefault();
+                                addReply(comment.id);
+                              }
+                            }}
+                          />
+                          <div className="flex gap-2 justify-end mt-2">
+                            <button
+                              onClick={() => setReplyingTo(null)}
+                              className="px-3 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => addReply(comment.id)}
+                              disabled={!replyContent.trim()}
+                              className="px-3 py-1 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
+                            >
+                              Reply
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Replies */}
+                  {/* Replies - Threaded View */}
                   {comment.replies && comment.replies.length > 0 && (
-                    <div className="ml-9 mt-2 space-y-2 border-l-2 border-gray-200 dark:border-gray-800 pl-3">
+                    <div className="ml-11 mt-3 space-y-3">
                       {comment.replies.map((reply) => (
-                        <div key={reply.id} className="p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900/30 transition-colors group/reply">
+                        <div key={reply.id} className="group/reply relative pl-4 border-l-2 border-gray-100 dark:border-gray-700">
                           <div className="flex gap-2">
-                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                            <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 text-[10px] font-bold flex-shrink-0">
                               {getInitials(reply.user.email, reply.user.full_name)}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
+                              <div className="flex items-center gap-2 mb-0.5">
                                 <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
                                   {reply.user.full_name || reply.user.email.split('@')[0]}
                                 </span>
-                                <span className="text-xs text-gray-400 dark:text-gray-500">
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500">
                                   {new Date(reply.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                 </span>
                               </div>
@@ -487,7 +612,7 @@ export default function CommentsSidebar({
                                 <div className="flex gap-2 mt-1 opacity-0 group-hover/reply:opacity-100 transition-opacity">
                                   <button
                                     onClick={() => deleteComment(reply.id)}
-                                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 font-medium"
+                                    className="text-[10px] text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                                   >
                                     Delete
                                   </button>
@@ -581,7 +706,37 @@ export default function CommentsSidebar({
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-950">
+      <div className="border-t border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-950 relative">
+        {/* Mention List Dropdown */}
+        {showMentionList && mentionQuery !== null && (
+          <div className="absolute bottom-full left-3 right-3 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden z-50 max-h-48 overflow-y-auto">
+            {teamMembers
+              .filter(m => 
+                (m.profile.full_name || '').toLowerCase().includes(mentionQuery.toLowerCase()) || 
+                m.profile.email.toLowerCase().includes(mentionQuery.toLowerCase())
+              )
+              .map((member) => (
+                <button
+                  key={member.user_id}
+                  onClick={() => handleSelectMention(member)}
+                  className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                >
+                  <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-xs font-bold text-blue-700 dark:text-blue-300">
+                    {getInitials(member.profile.email, member.profile.full_name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                      {member.profile.full_name || member.profile.email.split('@')[0]}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      {member.profile.email}
+                    </div>
+                  </div>
+                </button>
+              ))}
+          </div>
+        )}
+
         {highlightedText && (
           <div className="mb-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded-md flex items-start gap-2 border border-blue-200 dark:border-blue-800">
             <svg className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -593,23 +748,81 @@ export default function CommentsSidebar({
             <button onClick={onHighlightedTextUsed} className="text-gray-400 hover:text-gray-600 text-sm">×</button>
           </div>
         )}
-        <textarea
-          value={newComment}
-          onChange={(e) => setNewComment(e.target.value)}
-          placeholder="Add a comment..."
-          className="w-full text-sm border border-gray-300 dark:border-gray-700 rounded-lg p-3 mb-2 resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
-          rows={3}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              addComment();
-            }
-          }}
-        />
-        <div className="flex justify-between items-center">
-          <span className="text-xs text-gray-400">
-            {newComment.length > 0 && `${newComment.length}`}
-          </span>
+        
+        <div className="relative">
+          <textarea
+            ref={textareaRef}
+            value={newComment}
+            onChange={handleInput}
+            placeholder="Add a comment... (Type @ to mention)"
+            className="w-full text-sm border border-gray-300 dark:border-gray-700 rounded-lg p-3 pb-10 mb-2 resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
+            rows={3}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                addComment();
+              }
+              if (showMentionList && (e.key === 'Escape')) {
+                setShowMentionList(false);
+              }
+            }}
+          />
+          
+          {/* Assign Dropdown - positioned inside input area */}
+          <div className="absolute bottom-4 left-3">
+            <div className="relative">
+              <button
+                onClick={() => setIsAssignDropdownOpen(!isAssignDropdownOpen)}
+                className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
+                  assignedUser 
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' 
+                    : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                {assignedUser 
+                  ? teamMembers.find(m => m.user_id === assignedUser)?.profile.full_name?.split(' ')[0] || 'Assigned'
+                  : 'Assign'
+                }
+                {assignedUser && (
+                  <span 
+                    onClick={(e) => { e.stopPropagation(); setAssignedUser(null); }}
+                    className="hover:text-red-500"
+                  >
+                    ×
+                  </span>
+                )}
+              </button>
+
+              {/* User List for Assignment */}
+              {isAssignDropdownOpen && (
+                <div className="absolute bottom-full left-0 mb-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto">
+                  {teamMembers.map((member) => (
+                    <button
+                      key={member.user_id}
+                      onClick={() => {
+                        setAssignedUser(member.user_id);
+                        setIsAssignDropdownOpen(false);
+                      }}
+                      className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-xs flex items-center gap-2"
+                    >
+                      <div className="w-5 h-5 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[10px]">
+                        {getInitials(member.profile.email, member.profile.full_name)}
+                      </div>
+                      <span className="truncate text-gray-700 dark:text-gray-300">
+                        {member.profile.full_name || member.profile.email.split('@')[0]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end items-center">
           <button
             onClick={addComment}
             disabled={!newComment.trim() || isPosting}

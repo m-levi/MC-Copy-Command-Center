@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Brand } from '@/types';
 import BrandDetailsTab from './BrandDetailsTab';
 import BrandStyleGuideTab from './BrandStyleGuideTab';
@@ -24,7 +25,9 @@ interface Tab {
 }
 
 export default function BrandSettingsTabs({ brand, onUpdate, saveStatus }: BrandSettingsTabsProps) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabId>('details');
+  // const [showWizard, setShowWizard] = useState(false); // Wizard is now a page
 
   const tabs: Tab[] = [
     {
@@ -95,7 +98,7 @@ export default function BrandSettingsTabs({ brand, onUpdate, saveStatus }: Brand
     <div className="flex flex-col h-full">
       {/* Tab Navigation */}
       <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6">
+        <div className="max-w-6xl mx-auto px-6 flex items-center justify-between">
           <div className="flex gap-1 overflow-x-auto scrollbar-hide">
             {tabs.map((tab) => (
               <button
@@ -123,6 +126,13 @@ export default function BrandSettingsTabs({ brand, onUpdate, saveStatus }: Brand
               </button>
             ))}
           </div>
+          <button
+            onClick={() => router.push(`/brands/${brand.id}/architect`)}
+            className="ml-4 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-purple-700 hover:to-blue-700 shadow-sm transition-all hover:scale-105 flex items-center gap-2"
+          >
+            <span className="text-lg">🏗️</span>
+            Brand Architect
+          </button>
         </div>
       </div>
 

@@ -101,49 +101,44 @@ export default function SidebarHeader({
   if (!isCollapsed) {
     return (
       <div className="p-3">
-        {/* Single Row: Everything on one line */}
+        {/* Single Row: Brand Name and Switcher */}
         <div className="flex items-center justify-between gap-2">
-          {/* Left: Back button + Brand Name */}
-          <div className="flex items-center gap-2 flex-1 min-w-0">
+          {/* Brand Switcher */}
+          <div className="relative flex-1 min-w-0">
             <button
-              onClick={onNavigateHome}
-              className="flex-shrink-0 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-              title="All Brands"
+              ref={brandSwitcherRef}
+              onClick={handleOpenBrandSwitcher}
+              onKeyDown={handleBrandKeyDown}
+              className="flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 px-3 py-2 rounded-lg transition-all cursor-pointer w-full group"
             >
-              <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
+              <div className="flex-1 min-w-0 text-left">
+                <h2 className="text-sm font-bold truncate text-gray-900 dark:text-white tracking-tight">{brandName}</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">Switch brand</p>
+              </div>
+              {allBrands.length > 1 && (
+                <svg 
+                  className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform duration-200 ${showBrandSwitcher ? 'rotate-180' : ''} group-hover:text-gray-600 dark:group-hover:text-gray-300`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              )}
             </button>
 
-            {/* Brand Switcher */}
-            <div className="relative flex-1 min-w-0">
-              <button
-                ref={brandSwitcherRef}
-                onClick={handleOpenBrandSwitcher}
+            {/* Brand Switcher Dropdown with Keyboard Navigation */}
+            {showBrandSwitcher && allBrands.length > 1 && (
+              <div 
+                ref={brandDropdownRef}
+                className="absolute top-full left-0 right-0 mt-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150 origin-top"
                 onKeyDown={handleBrandKeyDown}
-                className="flex items-center gap-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 px-2 py-1.5 -mx-2 rounded transition-colors cursor-pointer w-full"
               >
-                <h2 className="text-base font-semibold truncate text-gray-900 dark:text-white">{brandName}</h2>
-                {allBrands.length > 1 && (
-                  <svg 
-                    className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform ${showBrandSwitcher ? 'rotate-180' : ''}`} 
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                )}
-              </button>
-
-              {/* Brand Switcher Dropdown with Keyboard Navigation */}
-              {showBrandSwitcher && allBrands.length > 1 && (
-                <div 
-                  ref={brandDropdownRef}
-                  className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden z-50"
-                  onKeyDown={handleBrandKeyDown}
-                >
-                  <div className="max-h-[300px] overflow-y-auto py-1">
+                <div className="p-1.5">
+                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Your Brands
+                  </div>
+                  <div className="max-h-[280px] overflow-y-auto space-y-0.5">
                     {allBrands.map((b, index) => (
                       <button
                         key={b.id}
@@ -153,72 +148,71 @@ export default function SidebarHeader({
                           setFocusedBrandIndex(-1);
                         }}
                         className={`
-                          w-full px-3 py-2 text-sm text-left transition-colors cursor-pointer flex items-center justify-between
+                          w-full px-3 py-2.5 text-sm text-left transition-all cursor-pointer flex items-center justify-between rounded-lg
                           ${index === focusedBrandIndex
-                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-200'
+                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                             : b.id === brandId
-                              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                              ? 'bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white font-medium'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                           }
                         `}
                       >
                         <span className="truncate">{b.name}</span>
                         {b.id === brandId && (
-                          <svg className="w-4 h-4 ml-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          <svg className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
                         )}
                       </button>
                     ))}
                   </div>
+                  <div className="mt-1 pt-1 border-t border-gray-100 dark:border-gray-700/50">
+                    <button
+                      onClick={onNavigateHome}
+                      className="w-full px-3 py-2.5 text-sm text-left text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                      </svg>
+                      All Brands
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
-          {/* Right: Action Icons */}
-          <div className="flex items-center gap-0.5 flex-shrink-0">
+          {/* Right: Simplified Actions */}
+          <div className="flex items-center">
             {brandId && (
               <button
                 onClick={() => router.push(`/brands/${brandId}`)}
-                className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
+                className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all"
                 title="Brand Settings"
               >
-                <svg className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
               </button>
             )}
-            <button
-              onClick={onOpenExplorer}
-              className="hidden lg:block p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-              title="Expand View"
-            >
-              <svg className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-            </button>
             {toggleCollapse && (
               <button
                 onClick={toggleCollapse}
-                className="hidden lg:block p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-                title="Collapse sidebar"
+                className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all hidden lg:block"
+                title="Collapse Sidebar"
               >
-                <svg className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
                 </svg>
               </button>
             )}
-
-            {/* Mobile close button */}
             {isMobile && (
               <button
                 onClick={() => onMobileToggle?.(false)}
-                className="lg:hidden p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer"
-                aria-label="Close sidebar"
+                className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all lg:hidden"
               >
-                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
