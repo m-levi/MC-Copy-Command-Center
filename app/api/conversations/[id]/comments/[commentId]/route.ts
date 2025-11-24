@@ -27,10 +27,10 @@ export const PATCH = withErrorHandling(async (
     return authenticationError('Please log in');
   }
 
-  // Get the comment to verify ownership
+  // Get the comment with additional info
   const { data: comment } = await supabase
     .from('conversation_comments')
-    .select('id, user_id, conversation_id')
+    .select('id, user_id, conversation_id, assigned_to, resolved')
     .eq('id', commentId)
     .single();
 
@@ -38,8 +38,17 @@ export const PATCH = withErrorHandling(async (
     return notFoundError('Comment');
   }
 
-  // Only comment owner can edit
-  if (comment.user_id !== user.id) {
+  // Get conversation for brand info
+  const { data: conversation } = await supabase
+    .from('conversations')
+    .select('brand_id')
+    .eq('id', conversationId)
+    .single();
+
+  // Permission check: 
+  // - Only comment owner can edit content
+  // - Anyone in the organization can resolve/unresolve
+  if (content !== undefined && comment.user_id !== user.id) {
     return authorizationError('You can only edit your own comments');
   }
 
@@ -56,6 +65,51 @@ export const PATCH = withErrorHandling(async (
     .single();
 
   if (error) throw error;
+
+  // Send notification when comment is resolved (if assigned to someone)
+  if (resolved === true && !comment.resolved && comment.assigned_to && comment.assigned_to !== user.id) {
+    // Get resolver's profile
+    const { data: resolverProfile } = await supabase
+      .from('profiles')
+      .select('full_name, email')
+      .eq('user_id', user.id)
+      .single();
+
+    await supabase.from('notifications').insert({
+      user_id: comment.assigned_to,
+      type: 'comment_resolved',
+      title: 'Comment Resolved',
+      message: `${resolverProfile?.full_name || resolverProfile?.email || 'Someone'} resolved a comment assigned to you`,
+      link: `/brands/${conversation?.brand_id}/chat?conversation=${conversationId}`,
+      metadata: {
+        conversation_id: conversationId,
+        comment_id: commentId,
+        resolver_id: user.id,
+      },
+    });
+  }
+
+  // Notify comment owner when their comment is resolved by someone else
+  if (resolved === true && !comment.resolved && comment.user_id !== user.id && comment.user_id !== comment.assigned_to) {
+    const { data: resolverProfile } = await supabase
+      .from('profiles')
+      .select('full_name, email')
+      .eq('user_id', user.id)
+      .single();
+
+    await supabase.from('notifications').insert({
+      user_id: comment.user_id,
+      type: 'comment_resolved',
+      title: 'Your Comment Was Resolved',
+      message: `${resolverProfile?.full_name || resolverProfile?.email || 'Someone'} resolved your comment`,
+      link: `/brands/${conversation?.brand_id}/chat?conversation=${conversationId}`,
+      metadata: {
+        conversation_id: conversationId,
+        comment_id: commentId,
+        resolver_id: user.id,
+      },
+    });
+  }
 
   return NextResponse.json({ comment: updatedComment });
 });

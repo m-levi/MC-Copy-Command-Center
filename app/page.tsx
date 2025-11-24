@@ -93,10 +93,10 @@ export default function HomePage() {
           return;
         }
 
-        // Get organization details separately
+        // Get organization details separately (only need basic info)
         const { data: orgData, error: orgError } = await supabase
           .from('organizations')
-          .select('*')
+          .select('id, name, slug')
           .eq('id', memberData.organization_id)
           .single();
 

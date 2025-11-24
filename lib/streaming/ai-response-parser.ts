@@ -1,4 +1,6 @@
 import { AIStatus, ProductLink } from '@/types';
+import { logger } from '@/lib/logger';
+import { stripControlMarkers, normalizeWhitespace } from '@/lib/sanitize';
 
 export type ParsedResponseType = 'email_copy' | 'clarification' | 'other';
 
@@ -34,32 +36,6 @@ const CLARIFICATION_FIELDS = [
     patterns: [/timing/i, /urgency/i, /deadline/i, /season/i, /campaign (?:end|expires)/i],
   },
 ];
-
-function normalizeWhitespace(value: string): string {
-  return value
-    .replace(/\r/g, '')
-    .replace(/\u2028|\u2029/g, '\n')
-    .replace(/\t/g, '  ');
-}
-
-function stripControlMarkers(value: string): string {
-  // Step 1: Remove thinking chunks more carefully
-  // Only match from [THINKING:CHUNK] to the next [ marker (not to end of string!)
-  let result = value.replace(/\[THINKING:CHUNK\][^\[]*(?=\[)/g, '');
-  
-  // Step 2: Handle any remaining THINKING:CHUNK at the end (edge case)
-  result = result.replace(/\[THINKING:CHUNK\][^\[]*$/g, '');
-  
-  // Step 3: Remove other control markers
-  result = result
-    .replace(/\[THINKING:(?:START|END)\]/g, '')
-    .replace(/\[STATUS:\w+\]/g, '')
-    .replace(/\[TOOL:\w+:(?:START|END)\]/g, '')
-    .replace(/\[PRODUCTS:[\s\S]*?\]\]/g, '') // Changed: Match double closing brackets
-    .replace(/\[REMEMBER:[^\]]+\]/g, '');
-  
-  return result;
-}
 
 function extractProductLinks(raw: string): ProductLink[] {
   const markerIndex = raw.indexOf('[PRODUCTS:');
@@ -99,7 +75,7 @@ function extractProductLinks(raw: string): ProductLink[] {
         .filter((item) => item.name && item.url);
     }
   } catch (error) {
-    console.warn('[StreamParser] Failed to parse product links JSON:', error);
+    logger.warn('[StreamParser] Failed to parse product links JSON:', error);
   }
 
   return [];
@@ -204,16 +180,16 @@ function sanitizeOther(content: string | undefined): string | undefined {
 }
 
 export function parseAIResponse(raw: string): ParsedAIResponse {
-  console.log('═'.repeat(70));
-  console.log('🔍 [PARSER] parseAIResponse called');
-  console.log('═'.repeat(70));
-  console.log('[PARSER] Raw input length:', raw.length);
-  console.log('[PARSER] Raw input preview (first 500 chars):', raw.substring(0, 500));
-  console.log('═'.repeat(70));
+  logger.debug('═'.repeat(70));
+  logger.debug('🔍 [PARSER] parseAIResponse called');
+  logger.debug('═'.repeat(70));
+  logger.debug('[PARSER] Raw input length:', raw.length);
+  logger.debug('[PARSER] Raw input preview (first 500 chars):', raw.substring(0, 500));
+  logger.debug('═'.repeat(70));
   
   // Handle empty or invalid input
   if (!raw || raw.trim().length === 0) {
-    console.warn('[PARSER] Empty or invalid raw input received');
+    logger.warn('[PARSER] Empty or invalid raw input received');
     return {
       emailCopy: undefined,
       clarification: undefined,
@@ -228,13 +204,13 @@ export function parseAIResponse(raw: string): ParsedAIResponse {
   const normalized = normalizeWhitespace(raw);
   const cleaned = stripControlMarkers(normalized);
 
-  console.log('[PARSER] After normalization and cleaning:', cleaned.substring(0, 300));
+  logger.debug('[PARSER] After normalization and cleaning:', cleaned.substring(0, 300));
   
   const emailMatch = normalized.match(/<email_copy>([\s\S]*?)<\/email_copy>/i);
   const clarificationMatch = normalized.match(/<clarification_request>([\s\S]*?)<\/clarification_request>/i);
   const otherMatch = normalized.match(/<non_copy_response>([\s\S]*?)<\/non_copy_response>/i);
 
-  console.log('[PARSER] Tag matches:', {
+  logger.debug('[PARSER] Tag matches:', {
     hasEmailCopyTag: !!emailMatch,
     hasClarificationTag: !!clarificationMatch,
     hasOtherTag: !!otherMatch
@@ -253,25 +229,25 @@ export function parseAIResponse(raw: string): ParsedAIResponse {
     
     // Check if this is a flow outline (should be treated as 'other', not email)
     if (isFlowOutlineContent(trimmedCleaned)) {
-      console.log('[PARSER] Detected flow outline content');
+      logger.debug('[PARSER] Detected flow outline content');
       other = trimmedCleaned;
     }
     // Check if structure looks like email copy
     else if (hasEmailStructure(trimmedCleaned)) {
-      console.log('[PARSER] Detected email structure');
+      logger.debug('[PARSER] Detected email structure');
       emailCopy = trimmedCleaned;
     }
     // Check for clarification signals
     else if (containsClarificationSignals(trimmedCleaned)) {
-      console.log('[PARSER] Detected clarification signals');
+      logger.debug('[PARSER] Detected clarification signals');
       clarification = sanitizeClarification(trimmedCleaned);
     }
     // Default: treat as general response (other)
     else if (trimmedCleaned.length > 0) {
-      console.log('[PARSER] Defaulting to other content type');
+      logger.debug('[PARSER] Defaulting to other content type');
       other = trimmedCleaned;
     } else {
-      console.warn('[PARSER] No content detected after cleaning and pattern matching');
+      logger.warn('[PARSER] No content detected after cleaning and pattern matching');
     }
   }
 
@@ -284,17 +260,17 @@ export function parseAIResponse(raw: string): ParsedAIResponse {
     responseType = 'other';
   }
 
-  console.log('═'.repeat(70));
-  console.log('📤 [PARSER] Returning parsed response:');
-  console.log('═'.repeat(70));
-  console.log('[PARSER] Response type:', responseType);
-  console.log('[PARSER] Email copy length:', emailCopy?.length || 0);
-  console.log('[PARSER] Email copy preview:', emailCopy?.substring(0, 300) || 'None');
-  console.log('[PARSER] Clarification length:', clarification?.length || 0);
-  console.log('[PARSER] Other length:', other?.length || 0);
-  console.log('[PARSER] Thinking length:', thinking?.length || 0);
-  console.log('[PARSER] Product links:', productLinks.length);
-  console.log('═'.repeat(70));
+  logger.debug('═'.repeat(70));
+  logger.debug('📤 [PARSER] Returning parsed response:');
+  logger.debug('═'.repeat(70));
+  logger.debug('[PARSER] Response type:', responseType);
+  logger.debug('[PARSER] Email copy length:', emailCopy?.length || 0);
+  logger.debug('[PARSER] Email copy preview:', emailCopy?.substring(0, 300) || 'None');
+  logger.debug('[PARSER] Clarification length:', clarification?.length || 0);
+  logger.debug('[PARSER] Other length:', other?.length || 0);
+  logger.debug('[PARSER] Thinking length:', thinking?.length || 0);
+  logger.debug('[PARSER] Product links:', productLinks.length);
+  logger.debug('═'.repeat(70));
 
   return {
     emailCopy,

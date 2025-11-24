@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import mermaid from 'mermaid';
 import { exportChartToPDF } from '@/lib/pdf-generator';
 import toast from 'react-hot-toast';
+
+// Mermaid instance - loaded dynamically
+let mermaidInstance: typeof import('mermaid').default | null = null;
+let mermaidInitialized = false;
 
 interface FlowchartViewerProps {
   mermaidChart: string;
@@ -24,32 +27,42 @@ export default function FlowchartViewer({
   const [isExporting, setIsExporting] = useState(false);
   const chartIdRef = useRef(`mermaid-chart-${Date.now()}`);
 
-  // Initialize Mermaid
-  useEffect(() => {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'base',
-      themeVariables: {
-        primaryColor: '#3b82f6',
-        primaryTextColor: '#fff',
-        primaryBorderColor: '#2563eb',
-        lineColor: '#6b7280',
-        secondaryColor: '#a855f7',
-        tertiaryColor: '#10b981',
-        fontSize: '16px',
-        fontFamily: 'ui-sans-serif, system-ui, sans-serif'
-      },
-      flowchart: {
-        useMaxWidth: false,
-        htmlLabels: false,
-        curve: 'linear',
-        padding: 15,
-        nodeSpacing: 50,
-        rankSpacing: 50
-      },
-      fontSize: 14
-    });
-  }, []);
+  // Load and initialize Mermaid dynamically
+  const loadMermaid = async () => {
+    if (mermaidInstance && mermaidInitialized) return mermaidInstance;
+    
+    const mermaid = (await import('mermaid')).default;
+    mermaidInstance = mermaid;
+    
+    if (!mermaidInitialized) {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'base',
+        themeVariables: {
+          primaryColor: '#3b82f6',
+          primaryTextColor: '#fff',
+          primaryBorderColor: '#2563eb',
+          lineColor: '#6b7280',
+          secondaryColor: '#a855f7',
+          tertiaryColor: '#10b981',
+          fontSize: '16px',
+          fontFamily: 'ui-sans-serif, system-ui, sans-serif'
+        },
+        flowchart: {
+          useMaxWidth: false,
+          htmlLabels: false,
+          curve: 'linear',
+          padding: 15,
+          nodeSpacing: 50,
+          rankSpacing: 50
+        },
+        fontSize: 14
+      });
+      mermaidInitialized = true;
+    }
+    
+    return mermaid;
+  };
 
   // Render chart when visible and chart data is available
   useEffect(() => {
@@ -73,6 +86,9 @@ export default function FlowchartViewer({
         // Clear previous content completely
         chartRef.current.innerHTML = '';
         containerRef.current = null;
+
+        // Load mermaid dynamically
+        const mermaid = await loadMermaid();
 
         // Generate unique ID for this render
         const chartId = `${chartIdRef.current}-${Date.now()}`;

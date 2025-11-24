@@ -3,6 +3,8 @@
  * Removes web search announcements and research process text from AI responses
  */
 
+import { logger } from '@/lib/logger';
+
 /**
  * Patterns that indicate web search/research process that should be removed
  */
@@ -78,15 +80,15 @@ export function cleanWithLogging(content: string, conversationId?: string): stri
   
   if (original !== cleaned) {
     const removed = original.length - cleaned.length;
-    console.log(`[ContentCleaner] Removed ${removed} characters of research text from response`);
+    logger.debug(`[ContentCleaner] Removed ${removed} characters of research text from response`);
     
     if (conversationId) {
-      console.log(`[ContentCleaner] Conversation: ${conversationId}`);
+      logger.debug(`[ContentCleaner] Conversation: ${conversationId}`);
     }
     
     // Log what was removed (first 100 chars)
     const diff = original.substring(0, Math.min(100, original.length - cleaned.length));
-    console.log(`[ContentCleaner] Removed text preview: "${diff}..."`);
+    logger.debug(`[ContentCleaner] Removed text preview: "${diff}..."`);
   }
   
   return cleaned;
@@ -111,7 +113,7 @@ export function cleanEmailContent(content: string): string {
       // Only remove if it's a reasonable preamble (< 500 chars)
       // and doesn't contain the actual email structure
       if (!match[0].includes('Headline:') && !match[0].includes('Content:')) {
-        console.log(`[ContentCleaner] Removing email preamble: "${match[0].substring(0, 100)}..."`);
+        logger.debug(`[ContentCleaner] Removing email preamble: "${match[0].substring(0, 100)}..."`);
         cleaned = cleaned.replace(pattern, '');
       }
     }

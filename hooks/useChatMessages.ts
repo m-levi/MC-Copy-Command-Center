@@ -46,10 +46,10 @@ export function useChatMessages(conversationId: string | null) {
             return;
           }
 
-          // Load from database
+          // Load from database with selective fields
           const { data: messagesData, error } = await supabase
             .from('messages')
-            .select('*')
+            .select('id, conversation_id, role, content, thinking, created_at, metadata, edited_at, parent_message_id, user_id')
             .eq('conversation_id', conversationId)
             .order('created_at', { ascending: true });
 
@@ -66,7 +66,7 @@ export function useChatMessages(conversationId: string | null) {
             if (userIds.length > 0) {
               const { data: profiles } = await supabase
                 .from('profiles')
-                .select('*')
+                .select('user_id, email, full_name, avatar_url')
                 .in('user_id', userIds);
                 
               if (profiles) {

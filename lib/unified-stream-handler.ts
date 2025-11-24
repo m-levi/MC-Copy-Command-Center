@@ -11,6 +11,7 @@ import { parseMemoryInstructions, saveMemory } from '@/lib/conversation-memory-s
 import { extractProductMentions, constructProductUrl } from '@/lib/web-search';
 import { smartExtractProductLinks, extractURLsFromSearchContext, convertToProductLinks } from '@/lib/url-extractor';
 import { cleanWithLogging } from '@/lib/content-cleaner';
+import { logger } from '@/lib/logger';
 
 export type AIProvider = 'openai' | 'anthropic';
 
@@ -285,7 +286,7 @@ async function createStream(
       tool_choice: 'auto',
     };
     
-    console.log(`[${provider.toUpperCase()}] Web search tool enabled:`, { 
+    logger.log(`[${provider.toUpperCase()}] Web search tool enabled:`, { 
       type: 'web_search',
       websiteContext: websiteUrl ? `Searching ${new URL(websiteUrl).hostname}` : 'No website URL' 
     });
@@ -311,12 +312,12 @@ async function createStream(
           'yelp.com',
           'trustpilot.com',
         ];
-        console.log(`[${provider.toUpperCase()}] Web search tool enabled with allowed domains:`, searchTool.allowed_domains);
+        logger.log(`[${provider.toUpperCase()}] Web search tool enabled with allowed domains:`, searchTool.allowed_domains);
       } catch (err) {
-        console.warn(`[${provider.toUpperCase()}] Invalid website URL, web search enabled without domain filtering`);
+        logger.warn(`[${provider.toUpperCase()}] Invalid website URL, web search enabled without domain filtering`);
       }
     } else {
-      console.log(`[${provider.toUpperCase()}] Web search tool enabled (no domain filtering - no website URL provided)`);
+      logger.log(`[${provider.toUpperCase()}] Web search tool enabled (no domain filtering - no website URL provided)`);
     }
     
     tools.push(searchTool);
@@ -328,7 +329,7 @@ async function createStream(
     //   name: 'memory',
     // };
     // tools.push(memoryTool);
-    // console.log(`[${provider.toUpperCase()}] Native memory tool enabled`);
+    // logger.log(`[${provider.toUpperCase()}] Native memory tool enabled`);
     
     return await client.messages.create({
       model: providerModel,
@@ -410,8 +411,8 @@ function parseChunk(chunk: any, provider: AIProvider): {
           .join('\n');
         
         if (urls) {
-          console.log('[Anthropic] Extracted URLs from search results:', content.length, 'results');
-          console.log('[Anthropic] URLs preview:', urls.substring(0, 200));
+          logger.log('[Anthropic] Extracted URLs from search results:', content.length, 'results');
+          logger.log('[Anthropic] URLs preview:', urls.substring(0, 200));
           return { toolResult: 'web_search', toolResultContent: urls };
         }
       }
@@ -453,7 +454,7 @@ async function extractProductLinks(
       webSearchContent || '', // Direct web search results if captured
     ].filter(Boolean).join('\n\n');
     
-    console.log('[ProductLinks] Extracting from:', {
+    logger.log('[ProductLinks] Extracting from:', {
       mainResponse: content.length,
       thinking: thinkingContent?.length || 0,
       webSearch: webSearchContent?.length || 0,
@@ -462,13 +463,13 @@ async function extractProductLinks(
     
     // Debug: Log first 500 chars of thinking to see what's there
     if (thinkingContent && thinkingContent.length > 0) {
-      console.log('[ProductLinks] Thinking content preview:', thinkingContent.substring(0, 500));
-      console.log('[ProductLinks] Thinking has URLs?', /https?:\/\//.test(thinkingContent));
+      logger.log('[ProductLinks] Thinking content preview:', thinkingContent.substring(0, 500));
+      logger.log('[ProductLinks] Thinking has URLs?', /https?:\/\//.test(thinkingContent));
     }
     
     // Debug: Log first 500 chars of response
-    console.log('[ProductLinks] Response preview:', content.substring(0, 500));
-    console.log('[ProductLinks] Response has URLs?', /https?:\/\//.test(content));
+    logger.log('[ProductLinks] Response preview:', content.substring(0, 500));
+    logger.log('[ProductLinks] Response has URLs?', /https?:\/\//.test(content));
     
     // Use smart extraction to find real URLs only
     const links = smartExtractProductLinks(allContent, userMessageTexts, websiteUrl);
@@ -485,15 +486,15 @@ async function extractProductLinks(
             links.push(link);
           }
         });
-        console.log('[ProductLinks] Added', searchLinks.length, 'links from web search context');
+        logger.log('[ProductLinks] Added', searchLinks.length, 'links from web search context');
       }
     }
     
-    console.log('[ProductLinks] Smart extraction found', links.length, 'real product links');
+    logger.log('[ProductLinks] Smart extraction found', links.length, 'real product links');
     
     return links;
   } catch (error) {
-    console.error('[ProductLinks] Error extracting:', error);
+    logger.error('[ProductLinks] Error extracting:', error);
     return [];
   }
 }
@@ -509,7 +510,7 @@ async function saveMemoryInstructions(
     const instructions = parseMemoryInstructions(content);
     if (instructions.length === 0) return;
     
-    console.log(`[Memory] Found ${instructions.length} instructions`);
+    logger.log(`[Memory] Found ${instructions.length} instructions`);
     
     for (const instruction of instructions) {
       try {
@@ -519,13 +520,13 @@ async function saveMemoryInstructions(
           instruction.value,
           instruction.category
         );
-        console.log(`[Memory] Saved: ${instruction.key} = ${instruction.value}`);
+        logger.log(`[Memory] Saved: ${instruction.key} = ${instruction.value}`);
       } catch (error) {
-        console.error('[Memory] Error saving:', error);
+        logger.error('[Memory] Error saving:', error);
       }
     }
   } catch (error) {
-    console.error('[Memory] Error processing instructions:', error);
+    logger.error('[Memory] Error processing instructions:', error);
   }
 }
 
@@ -535,13 +536,13 @@ async function saveMemoryInstructions(
 export async function handleUnifiedStream(options: StreamOptions): Promise<Response> {
   const { messages, modelId, systemPrompt, provider, websiteUrl, conversationId } = options;
   
-  console.log(`[${provider.toUpperCase()}] Starting unified stream with model:`, modelId);
+  logger.log(`[${provider.toUpperCase()}] Starting unified stream with model:`, modelId);
   
   const client = await getClient(provider);
   const { formatted, system } = formatMessages(messages, systemPrompt, modelId, provider);
   const stream = await createStream(client, provider, modelId, formatted, system, websiteUrl);
   
-  console.log(`[${provider.toUpperCase()}] Stream received, starting to read...`);
+  logger.log(`[${provider.toUpperCase()}] Stream received, starting to read...`);
   
   const encoder = new TextEncoder();
   const readable = new ReadableStream({
@@ -573,7 +574,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           // Log chunk type for debugging (Anthropic only)
           if (provider === 'anthropic' && chunk.type) {
             if (chunk.type !== 'content_block_delta' && chunk.type !== 'message_delta') {
-              console.log(`[${provider.toUpperCase()}] Chunk type: ${chunk.type}${chunk.content_block?.type ? ` | content_block.type: ${chunk.content_block.type}` : ''}`);
+              logger.log(`[${provider.toUpperCase()}] Chunk type: ${chunk.type}${chunk.content_block?.type ? ` | content_block.type: ${chunk.content_block.type}` : ''}`);
             }
           }
           
@@ -589,7 +590,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           
           // Handle tool usage
           if (parsed.toolUse) {
-            console.log(`[${provider.toUpperCase()}] Tool use started: ${parsed.toolUse}`);
+            logger.log(`[${provider.toUpperCase()}] Tool use started: ${parsed.toolUse}`);
             
             sendMessage('tool_use', { tool: parsed.toolUse, status: 'start' });
             
@@ -603,18 +604,18 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           // Capture web search tool result content FIRST (before handling toolResult)
           if (parsed.toolResultContent) {
             webSearchContent += parsed.toolResultContent + '\n\n';
-            console.log(`[${provider.toUpperCase()}] Captured web search content (${parsed.toolResultContent.length} chars)`);
+            logger.log(`[${provider.toUpperCase()}] Captured web search content (${parsed.toolResultContent.length} chars)`);
             // Don't continue - also need to handle toolResult marker
           }
           
           if (parsed.toolResult) {
-            console.log(`[${provider.toUpperCase()}] Tool result received: ${parsed.toolResult}`);
+            logger.log(`[${provider.toUpperCase()}] Tool result received: ${parsed.toolResult}`);
             
             sendMessage('tool_use', { tool: parsed.toolResult, status: 'end' });
             sendMessage('status', { status: 'analyzing_brand' });
             
             if (parsed.toolResult === 'web_search' && webSearchContent) {
-              console.log(`[${provider.toUpperCase()}] Web search completed - captured ${webSearchContent.length} chars of URLs`);
+              logger.log(`[${provider.toUpperCase()}] Web search completed - captured ${webSearchContent.length} chars of URLs`);
             }
             continue;
           }
@@ -645,7 +646,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
               // CRITICAL FIX: After thinking ends, if buffer is empty, force emailContentStarted
               // so the NEXT content chunk streams immediately without waiting for markers
               if (!emailContentStarted && preEmailBuffer.trim().length === 0) {
-                console.log(`[${provider.toUpperCase()}] Thinking ended - enabling immediate content streaming`);
+                logger.log(`[${provider.toUpperCase()}] Thinking ended - enabling immediate content streaming`);
                 emailContentStarted = true;
                 // Don't open wrapper yet - wait for actual content to arrive
               }
@@ -674,7 +675,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
                 preEmailBuffer = '';
 
                 emailContentStarted = true;
-                console.log(`[${provider.toUpperCase()}] Detected clarification request – streaming without trimming`);
+                logger.log(`[${provider.toUpperCase()}] Detected clarification request – streaming without trimming`);
 
                 if (chunkText) {
                   sendMessage('text', { content: chunkText });
@@ -695,7 +696,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
                 preEmailBuffer = '';
 
                 if (trimmedAnalysisChars > 0) {
-                  console.log(`[${provider.toUpperCase()}] Trimmed ${trimmedAnalysisChars} chars of analysis before email content`);
+                  logger.log(`[${provider.toUpperCase()}] Trimmed ${trimmedAnalysisChars} chars of analysis before email content`);
                 }
               }
             }
@@ -724,7 +725,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
               if (hitThreshold || hasKeywords) {
                 sendMessage('status', { status: nextStatus.status });
                 currentStatusIndex++;
-                console.log(`[${provider.toUpperCase()}] Status: ${nextStatus.status} (chunks: ${chunkCount}, keywords: ${hasKeywords})`);
+                logger.log(`[${provider.toUpperCase()}] Status: ${nextStatus.status} (chunks: ${chunkCount}, keywords: ${hasKeywords})`);
               }
             }
             
@@ -733,23 +734,23 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
             chunkCount++;
             
             if (chunkCount % 10 === 0) {
-              console.log(`[${provider.toUpperCase()}] Processed ${chunkCount} chunks, ${fullResponse.length} chars`);
+              logger.log(`[${provider.toUpperCase()}] Processed ${chunkCount} chunks, ${fullResponse.length} chars`);
             }
           }
         }
         
-        console.log(`[${provider.toUpperCase()}] Stream complete. Total: ${chunkCount} chunks, ${fullResponse.length} chars, ${thinkingContent.length} thinking chars`);
+        logger.log(`[${provider.toUpperCase()}] Stream complete. Total: ${chunkCount} chunks, ${fullResponse.length} chars, ${thinkingContent.length} thinking chars`);
         
-        console.log('═'.repeat(70));
-        console.log(`📤 [${provider.toUpperCase()}] FULL RESPONSE SENT TO CLIENT:`);
-        console.log('═'.repeat(70));
-        console.log('Full Response:', fullResponse);
-        console.log('═'.repeat(70));
-        console.log('Thinking Content:', thinkingContent.substring(0, 300));
-        console.log('═'.repeat(70));
+        logger.log('═'.repeat(70));
+        logger.log(`📤 [${provider.toUpperCase()}] FULL RESPONSE SENT TO CLIENT:`);
+        logger.log('═'.repeat(70));
+        logger.log('Full Response:', fullResponse);
+        logger.log('═'.repeat(70));
+        logger.log('Thinking Content:', thinkingContent.substring(0, 300));
+        logger.log('═'.repeat(70));
 
         if (!emailContentStarted) {
-          console.warn(`[${provider.toUpperCase()}] WARNING: Email markers not detected in streamed content. Applying fallback clean.`);
+          logger.warn(`[${provider.toUpperCase()}] WARNING: Email markers not detected in streamed content. Applying fallback clean.`);
           if (preEmailBuffer && preEmailBuffer.trim().length > 0) {
             let fallbackContent = cleanWithLogging(preEmailBuffer).trim();
             if (fallbackContent) {
@@ -760,22 +761,22 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
               controller.enqueue(encoder.encode(body));
               fullResponse += body;
               emailContentStarted = true;
-              console.log(`[${provider.toUpperCase()}] Fallback content delivered (${body.length} chars, type: ${isClarification ? 'clarification' : 'other'})`);
+              logger.log(`[${provider.toUpperCase()}] Fallback content delivered (${body.length} chars, type: ${isClarification ? 'clarification' : 'other'})`);
             } else {
-              console.error(`[${provider.toUpperCase()}] CRITICAL: fallbackContent empty after cleaning. Buffer length: ${preEmailBuffer.length}`);
-              console.error(`[${provider.toUpperCase()}] Buffer preview:`, preEmailBuffer.substring(0, 500));
+              logger.error(`[${provider.toUpperCase()}] CRITICAL: fallbackContent empty after cleaning. Buffer length: ${preEmailBuffer.length}`);
+              logger.error(`[${provider.toUpperCase()}] Buffer preview:`, preEmailBuffer.substring(0, 500));
             }
           } else {
-            console.error(`[${provider.toUpperCase()}] CRITICAL: No content found - preEmailBuffer is empty. Stream had only thinking, no text content.`);
+            logger.error(`[${provider.toUpperCase()}] CRITICAL: No content found - preEmailBuffer is empty. Stream had only thinking, no text content.`);
           }
         } else if (fullResponse.trim().length === 0) {
-          console.error(`[${provider.toUpperCase()}] CRITICAL: emailContentStarted=true but fullResponse is empty - parser bug`);
+          logger.error(`[${provider.toUpperCase()}] CRITICAL: emailContentStarted=true but fullResponse is empty - parser bug`);
         } else if (containsAnalysisLeak(fullResponse.slice(0, 400))) {
-          console.warn(`[${provider.toUpperCase()}] WARNING: Potential analysis leakage detected in final output (conversation ${conversationId || 'N/A'})`);
+          logger.warn(`[${provider.toUpperCase()}] WARNING: Potential analysis leakage detected in final output (conversation ${conversationId || 'N/A'})`);
         }
         
         // Log final content lengths for debugging
-        console.log(`[${provider.toUpperCase()}] Final content breakdown:`, {
+        logger.log(`[${provider.toUpperCase()}] Final content breakdown:`, {
           textContent: fullResponse.length,
           thinkingContent: thinkingContent.length,
           webSearchContent: webSearchContent.length,
@@ -790,7 +791,7 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
         // Extract and send product links (ONLY real URLs, no fake construction)
         // Include thinking content and web search content for better URL extraction
         if (fullResponse || thinkingContent || webSearchContent) {
-          console.log('[Stream] Extracting product links from:', {
+          logger.log('[Stream] Extracting product links from:', {
             response: fullResponse.length,
             thinking: thinkingContent.length,
             webSearch: webSearchContent.length
@@ -805,17 +806,17 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           );
           
           if (productLinks.length > 0) {
-            console.log('[Stream] Sending', productLinks.length, 'product links to client');
+            logger.log('[Stream] Sending', productLinks.length, 'product links to client');
             sendMessage('products', { products: productLinks });
           } else {
-            console.log('[Stream] No product links found - box will be hidden');
+            logger.log('[Stream] No product links found - box will be hidden');
           }
         }
         
         controller.close();
-        console.log(`[${provider.toUpperCase()}] Stream controller closed successfully`);
+        logger.log(`[${provider.toUpperCase()}] Stream controller closed successfully`);
       } catch (error) {
-        console.error(`[${provider.toUpperCase()}] Stream error:`, error);
+        logger.error(`[${provider.toUpperCase()}] Stream error:`, error);
         controller.error(error);
       }
     },

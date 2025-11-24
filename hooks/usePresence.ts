@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { logger } from '@/lib/logger';
 
 export interface PresenceState {
   user_id: string;
@@ -16,11 +17,8 @@ export function usePresence(conversationId: string) {
 
   // Fetch current user details once
   useEffect(() => {
-    console.log('[Presence] usePresence hook initialized');
     const fetchUser = async () => {
-      console.log('[Presence] Fetching current user...');
       const { data: { user } } = await supabaseRef.current.auth.getUser();
-      console.log('[Presence] Got user:', user?.email);
       if (user) {
         // Get profile for better display name
         const { data: profile } = await supabaseRef.current
@@ -28,8 +26,6 @@ export function usePresence(conversationId: string) {
           .select('full_name, avatar_url')
           .eq('user_id', user.id)
           .single();
-
-        console.log('[Presence] Got profile:', profile);
 
         setCurrentUser({
           user_id: user.id,
@@ -45,12 +41,8 @@ export function usePresence(conversationId: string) {
 
   useEffect(() => {
     if (!conversationId || !currentUser) {
-      console.log('[Presence] Skipping setup - missing conversationId or currentUser');
       return;
     }
-
-    console.log('[Presence] Setting up presence for conversation:', conversationId);
-    console.log('[Presence] Current user:', currentUser.email);
 
     // Use public channel for now (no RLS setup needed)
     // For production, switch to private: true and set up RLS policies
@@ -72,41 +64,29 @@ export function usePresence(conversationId: string) {
         // I'll leave deduplication for now, but the UI will show "1 online" if it's just me in 2 tabs.
         const uniqueUsers = Array.from(new Map(users.map(u => [u.user_id, u])).values());
         
-        console.log('[Presence] Sync:', { 
-          conversationId,
-          raw: users.length, 
-          unique: uniqueUsers.length, 
-          users: uniqueUsers.map(u => ({ email: u.email, id: u.user_id }))
-        });
-        
         setActiveUsers(uniqueUsers);
       })
       .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-        console.log('[Presence] User joined:', key, newPresences);
+        logger.debug('[Presence] User joined:', key);
       })
       .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-        console.log('[Presence] User left:', key, leftPresences);
+        logger.debug('[Presence] User left:', key);
       })
       .subscribe(async (status, err) => {
-        console.log('[Presence] Subscription status:', status, err);
         if (status === 'SUBSCRIBED') {
-          console.log('[Presence] Connected as', currentUser.email);
-          const trackStatus = await channel.track(currentUser);
-          console.log('[Presence] Track status:', trackStatus);
+          await channel.track(currentUser);
         }
+        // These are often transient errors that resolve on their own
+        // Downgrade to warn to avoid alarming users
         if (status === 'CHANNEL_ERROR') {
-          console.error('[Presence] Channel error:', err || 'Unknown channel error');
+          logger.warn('[Presence] Channel error (will retry):', err?.message || 'Connection issue');
         }
         if (status === 'TIMED_OUT') {
-          console.error('[Presence] Connection timed out', err || '');
-        }
-        if (status === 'CLOSED') {
-          console.log('[Presence] Channel closed');
+          logger.warn('[Presence] Connection timed out (will retry)');
         }
       });
 
     return () => {
-      console.log('[Presence] Cleaning up channel for conversation:', conversationId);
       // Untrack before removing channel
       channel.untrack();
       supabaseRef.current.removeChannel(channel);
@@ -117,4 +97,3 @@ export function usePresence(conversationId: string) {
 
   return activeUsers;
 }
-

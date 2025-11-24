@@ -150,9 +150,10 @@ export async function prefetchMessages(
   }
   
   try {
+    // Select only needed fields for Message type
     const { data, error } = await supabase
       .from('messages')
-      .select('*')
+      .select('id, conversation_id, role, content, thinking, created_at, metadata, edited_at, parent_message_id, user_id')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
     

@@ -17,10 +17,11 @@ export const POST = withErrorHandling(async (
 ) => {
   if (!context) throw new Error('Missing params');
   const { id: conversationId } = await context.params;
-  const { content, messageId, parentCommentId, quotedText, assignedTo } = await req.json();
+  const { content, messageId, parentCommentId, quotedText, assignedTo, attachments } = await req.json();
 
-  if (!content || typeof content !== 'string' || content.trim().length === 0) {
-    return validationError('Comment content is required');
+  // Allow empty content if there are attachments
+  if ((!content || typeof content !== 'string' || content.trim().length === 0) && (!attachments || attachments.length === 0)) {
+    return validationError('Comment content or attachments required');
   }
 
   const supabase = await createClient();
@@ -54,7 +55,7 @@ export const POST = withErrorHandling(async (
   const commentData: any = {
     conversation_id: conversationId,
     user_id: user.id,
-    content: content.trim(),
+    content: content ? content.trim() : '',
   };
 
   if (messageId) {
@@ -76,6 +77,10 @@ export const POST = withErrorHandling(async (
       return validationError('Assigned user is not a member of this organization');
     }
     commentData.assigned_to = assignedTo;
+  }
+
+  if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+    commentData.attachments = attachments;
   }
 
   const { data: comment, error: commentError } = await supabase
@@ -108,14 +113,89 @@ export const POST = withErrorHandling(async (
       user_id: conversation.user_id,
       type: 'comment_added',
       title: 'New Comment',
-      message: `${user.email || 'Someone'} commented on your conversation`,
-      link: `/brands/${conversationId}/chat?conversation=${conversationId}`,
+      message: `${profile?.full_name || user.email || 'Someone'} commented on your conversation`,
+      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
       metadata: {
         conversation_id: conversationId,
         comment_id: comment.id,
         commenter_id: user.id,
       },
     });
+  }
+
+  // Create notification for assigned user (if different from commenter)
+  if (assignedTo && assignedTo !== user.id) {
+    await supabase.from('notifications').insert({
+      user_id: assignedTo,
+      type: 'comment_assigned',
+      title: 'Comment Assigned to You',
+      message: `${profile?.full_name || user.email || 'Someone'} assigned you a comment`,
+      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+      metadata: {
+        conversation_id: conversationId,
+        comment_id: comment.id,
+        assigner_id: user.id,
+      },
+    });
+  }
+
+  // Parse @mentions from content and create notifications
+  if (content) {
+    const mentionRegex = /@(\w+(?:\s\w+)?)/g;
+    const mentions = content.match(mentionRegex);
+    
+    if (mentions && mentions.length > 0) {
+      // Get organization members to match mentions
+      const { data: brand } = await supabase
+        .from('brands')
+        .select('organization_id')
+        .eq('id', conversation.brand_id)
+        .single();
+
+      if (brand) {
+        const { data: orgMembers } = await supabase
+          .from('organization_members')
+          .select('user_id, profile:profiles(email, full_name)')
+          .eq('organization_id', brand.organization_id);
+
+        if (orgMembers) {
+          const notifiedUserIds = new Set<string>();
+          
+          for (const mention of mentions) {
+            const mentionName = mention.substring(1).toLowerCase(); // Remove @ and lowercase
+            
+            // Find matching member
+            const matchedMember = orgMembers.find((m: any) => {
+              const fullName = m.profile?.full_name?.toLowerCase() || '';
+              const emailPrefix = m.profile?.email?.split('@')[0].toLowerCase() || '';
+              return fullName.includes(mentionName) || emailPrefix === mentionName;
+            });
+
+            if (matchedMember && 
+                matchedMember.user_id !== user.id && 
+                !notifiedUserIds.has(matchedMember.user_id) &&
+                matchedMember.user_id !== conversation.user_id && // Don't double-notify owner
+                matchedMember.user_id !== assignedTo // Don't double-notify assignee
+            ) {
+              notifiedUserIds.add(matchedMember.user_id);
+              
+              await supabase.from('notifications').insert({
+                user_id: matchedMember.user_id,
+                type: 'comment_mention',
+                title: 'You were mentioned',
+                message: `${profile?.full_name || user.email || 'Someone'} mentioned you in a comment`,
+                link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+                metadata: {
+                  conversation_id: conversationId,
+                  comment_id: comment.id,
+                  mentioner_id: user.id,
+                },
+              });
+            }
+          }
+        }
+      }
+    }
   }
 
   return NextResponse.json({ comment: commentWithUser }, { status: 201 });

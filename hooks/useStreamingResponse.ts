@@ -4,30 +4,11 @@ import { createStreamState, processStreamChunk, finalizeStream } from '@/lib/str
 import { saveCheckpoint, loadCheckpoint, clearCheckpoint } from '@/lib/stream-recovery';
 import { generateCacheKey, cacheResponse } from '@/lib/response-cache';
 import { trackEvent } from '@/lib/analytics';
-import DOMPurify from 'dompurify';
+import { logger } from '@/lib/logger';
+import { sanitizeContent, cleanEmailContent } from '@/lib/sanitize';
 import toast from 'react-hot-toast';
 
 const CHECKPOINT_INTERVAL = 100; // Create checkpoint every 100 chunks
-
-/**
- * Sanitize AI-generated content before saving to database
- */
-const sanitizeContent = (content: string): string => {
-  return DOMPurify.sanitize(content, {
-    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote'],
-    ALLOWED_ATTR: ['href', 'title', 'target'],
-    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-  });
-};
-
-/**
- * Clean email content by removing any preamble before the actual email structure
- */
-const cleanEmailContent = (content: string): string => {
-  return content
-    .replace(/<email_strategy>[\s\S]*?<\/email_strategy>/gi, '')
-    .trim();
-};
 
 /**
  * Hook for handling streaming AI responses
@@ -161,7 +142,7 @@ export function useStreamingResponse() {
             }
           }
         } catch (e) {
-          console.error('Failed to parse product links:', e);
+          logger.error('Failed to parse product links:', e);
           productLinks = [];
         }
       }
@@ -178,7 +159,7 @@ export function useStreamingResponse() {
       // Try to recover from last checkpoint
       const recovered = loadCheckpoint(messageId);
       if (recovered) {
-        console.log('Recovered stream from checkpoint:', recovered);
+        logger.log('Recovered stream from checkpoint:', recovered);
         return {
           content: recovered.content,
           thinking: thinkingContent,

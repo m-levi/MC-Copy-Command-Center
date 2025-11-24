@@ -3,9 +3,9 @@
 import { Message, ConversationMode, AIStatus } from '@/types';
 import { useState, useEffect, memo, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import MessageEditor from './MessageEditor';
 import ThoughtProcess from './ThoughtProcess';
 import InlineCommentBox from './InlineCommentBox';
+import { ChatMessageUser, ChatMessageActions, ProductLinksSection } from './chat';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
@@ -46,15 +46,10 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
 
   return () => (tree: any) => {
     if (!normalized.length) {
-      if (typeof window !== 'undefined') {
-        console.log('[Remark Plugin] No highlights to process');
-      }
       return;
     }
 
-    if (typeof window !== 'undefined') {
-      console.log('[Remark Plugin] Processing with', normalized.length, 'highlights:', normalized);
-    }
+    logger.debug('[Remark Plugin] Processing with', normalized.length, 'highlights');
 
     let matchCount = 0;
 
@@ -66,20 +61,12 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
       const newNodes: any[] = [];
       let cursor = 0;
 
-      // Debug: Log every text node being examined
-      if (typeof window !== 'undefined' && originalValue.length > 10) {
-        console.log('[Remark Plugin] Examining text node:', originalValue.substring(0, 80) + '...');
-      }
 
       while (cursor < originalValue.length) {
         let nextMatch: { start: number; highlight: typeof normalized[number] } | null = null;
 
         for (const highlight of normalized) {
           const matchIndex = lowerValue.indexOf(highlight.textLower, cursor);
-          
-          if (typeof window !== 'undefined' && matchIndex !== -1) {
-            console.log('[Remark Plugin] ✅ FOUND MATCH at index', matchIndex, 'in text:', originalValue.substring(0, 80));
-          }
           
           if (matchIndex === -1) continue;
 
@@ -124,9 +111,6 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
       }
     });
 
-    if (typeof window !== 'undefined' && matchCount > 0) {
-      console.log('[Remark Plugin] Created', matchCount, 'commentHighlight nodes');
-    }
   };
 };
 
@@ -149,11 +133,9 @@ const ChatMessage = memo(function ChatMessage({
   commentsData = [],
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
   const [reaction, setReaction] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
   const [isStarred, setIsStarred] = useState(isStarredProp);
   const [isStarring, setIsStarring] = useState(false);
-  const [productLinksExpanded, setProductLinksExpanded] = useState(false);
   const [selectedText, setSelectedText] = useState<string>('');
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null);
   const [showInlineCommentBox, setShowInlineCommentBox] = useState(false);
@@ -227,11 +209,6 @@ const ChatMessage = memo(function ChatMessage({
 
     const highlights = Array.from(highlightMap.values());
     
-    // Debug: Log highlights (remove in production)
-    if (highlights.length > 0 && typeof window !== 'undefined') {
-      console.log('[ChatMessage] Inline highlights (after prefix stripping):', highlights);
-    }
-
     return highlights;
   }, [commentsData]);
 
@@ -260,10 +237,6 @@ const ChatMessage = memo(function ChatMessage({
         return `{{HIGHLIGHT_${idx}_START}}${match}{{HIGHLIGHT_${idx}_END}}`;
       });
     });
-
-    if (typeof window !== 'undefined') {
-      console.log('[Content Highlighting] Processed content with', inlineHighlights.length, 'highlights');
-    }
 
     return content;
   }, [messageContent, inlineHighlights]);
@@ -364,10 +337,6 @@ const ChatMessage = memo(function ChatMessage({
       remaining = remaining.substring(match.index + marker.length);
     }
 
-    if (typeof window !== 'undefined' && parts.length > 0) {
-      console.log('[Render Highlights] Created', parts.length, 'React elements');
-    }
-
     return <>{parts}</>;
   }, [contentWithHighlights, inlineHighlights, messageContent, onCommentClick]);
 
@@ -382,19 +351,6 @@ const ChatMessage = memo(function ChatMessage({
     setCopied(true);
     toast.success('Copied to clipboard!');
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleEdit = () => {
-    setIsEditing(true);
-  };
-
-  const handleSaveEdit = (newContent: string) => {
-    setIsEditing(false);
-    onEdit?.(newContent);
-  };
-
-  const handleCancelEdit = () => {
-    setIsEditing(false);
   };
 
   // Handle text selection for highlighting and commenting
@@ -580,11 +536,6 @@ const ChatMessage = memo(function ChatMessage({
 
   const isUser = message.role === 'user';
 
-  const getInitials = (email: string, fullName?: string) => {
-    if (fullName) return fullName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-    return email?.substring(0, 2).toUpperCase() || '??';
-  };
-
   // Render floating elements via portal to avoid CSS containment clipping
   const floatingElements = isMounted && typeof window !== 'undefined' ? createPortal(
     <>
@@ -608,7 +559,7 @@ const ChatMessage = memo(function ChatMessage({
         />
       )}
 
-      {/* Floating selection menu - only show if inline box not open */}
+      {/* Floating selection menu - Premium pill design */}
       {!showInlineCommentBox && selectionPosition && selectedText && onCommentClick && (
         <div
           className="floating-comment-btn fixed"
@@ -621,34 +572,50 @@ const ChatMessage = memo(function ChatMessage({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="animate-in fade-in slide-in-from-bottom-2 duration-150">
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl flex items-center gap-1 p-1">
-              <button
-                onClick={handleCommentOnHighlight}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 font-medium"
-                title="Add comment"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                </svg>
-                Comment
-              </button>
-              <div className="w-px h-5 bg-gray-200 dark:bg-gray-700"></div>
-              <button
-                onClick={async () => {
-                  await navigator.clipboard.writeText(selectedText);
-                  toast.success('Copied!');
-                  setSelectedText('');
-                  setSelectionPosition(null);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm text-gray-700 dark:text-gray-300 font-medium"
-                title="Copy text"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                Copy
-              </button>
+          {/* Container with spring animation */}
+          <div 
+            className="animate-in fade-in zoom-in-95 slide-in-from-bottom-3 duration-200"
+            style={{ animationTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+          >
+            {/* Pill-shaped menu with glassmorphism */}
+            <div className="relative">
+              {/* Glow effect */}
+              <div className="absolute inset-0 bg-gradient-to-r from-amber-400/20 to-orange-400/20 rounded-full blur-lg"></div>
+              
+              {/* Main pill */}
+              <div className="relative bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl border border-stone-200/80 dark:border-gray-700/80 rounded-full shadow-xl shadow-stone-200/50 dark:shadow-gray-900/50 flex items-center p-1 gap-0.5">
+                {/* Comment button */}
+                <button
+                  onClick={handleCommentOnHighlight}
+                  className="group flex items-center gap-2 pl-3 pr-4 py-2 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 transition-all duration-200 text-white font-medium text-sm shadow-sm hover:shadow-md"
+                  title="Add comment"
+                >
+                  <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                  </svg>
+                  <span>Comment</span>
+                </button>
+                
+                {/* Copy button */}
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(selectedText);
+                    toast.success('Copied!');
+                    setSelectedText('');
+                    setSelectionPosition(null);
+                  }}
+                  className="group flex items-center gap-1.5 px-3 py-2 rounded-full text-stone-600 dark:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-700 transition-all duration-200 text-sm font-medium"
+                  title="Copy text"
+                >
+                  <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  <span>Copy</span>
+                </button>
+              </div>
+              
+              {/* Arrow pointer */}
+              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-3 h-3 bg-white dark:bg-gray-800 border-b border-r border-stone-200/80 dark:border-gray-700/80 rotate-45"></div>
             </div>
           </div>
         </div>
@@ -657,55 +624,26 @@ const ChatMessage = memo(function ChatMessage({
     document.body
   ) : null;
 
+  // For user messages, use the split component
+  if (isUser) {
+    return (
+      <ChatMessageUser 
+        message={message}
+        onEdit={onEdit}
+      />
+    );
+  }
+
   return (
     <>
       {floatingElements}
 
       <div 
-        className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 sm:mb-8 group animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards`}
-        style={{
-          // CSS containment for better scroll performance
-          contain: 'layout style paint',
-          contentVisibility: 'auto',
-        }}
+        className="flex w-full justify-start mb-6 sm:mb-8 group animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards"
       >
-      <div className={`flex flex-col ${isUser ? 'items-end max-w-[85%] sm:max-w-[70%]' : 'w-full'}`}>
-        {isUser && message.user && (
-          <div className="flex items-center gap-2 mb-1.5 px-1 opacity-80">
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-              {message.user.full_name || message.user.email?.split('@')[0]}
-            </span>
-            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[9px] font-bold shadow-sm">
-              {getInitials(message.user.email || '', message.user.full_name)}
-            </div>
-          </div>
-        )}
-        <div
-          className={`
-            transition-all
-            ${isUser 
-              ? 'bg-gray-50 dark:bg-gray-800/50 rounded-2xl px-5 py-3.5' 
-              : 'w-full'
-            }
-          `}
-        >
-          {isUser ? (
-            <div className="w-full">
-              {isEditing ? (
-                <MessageEditor
-                  initialContent={messageContent}
-                  onSave={handleSaveEdit}
-                  onCancel={handleCancelEdit}
-                />
-              ) : (
-                <div>
-                  <p className="whitespace-pre-wrap break-words text-[15px] sm:text-base leading-relaxed font-normal text-gray-800 dark:text-gray-100">
-                    {messageContent}
-                  </p>
-                </div>
-              )}
-            </div>
-          ) : (
+      <div className="flex flex-col w-full">
+        <div className="transition-all w-full">
+          {(
             <div onMouseUp={handleTextSelection}>
               {/* Thought Process - Show if available (includes strategy and all non-email content) */}
               {(message.thinking || isStreaming) && (
@@ -842,74 +780,8 @@ const ChatMessage = memo(function ChatMessage({
                     {/* Commented text snippets removed - now shown inline as highlights */}
                   </div>
                   
-                  {/* Product Links Section - Collapsible */}
-                  {productLinks && productLinks.length > 0 && (
-                    <div className="border-t border-gray-200 dark:border-gray-700">
-                      <button
-                        onClick={() => setProductLinksExpanded(!productLinksExpanded)}
-                        className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center justify-center w-6 h-6 bg-blue-100 dark:bg-blue-900/30 rounded">
-                            <svg className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                            </svg>
-                          </div>
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Product Links ({productLinks.length})
-                          </span>
-                        </div>
-                        <svg 
-                          className={`w-4 h-4 text-gray-500 transition-transform ${productLinksExpanded ? 'rotate-180' : ''}`}
-                          fill="none" 
-                          stroke="currentColor" 
-                          viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </button>
-                      
-                      {productLinksExpanded && (
-                        <div className="px-4 pb-4 space-y-2">
-                          {productLinks.map((product, index) => {
-                            if (!product?.url || !product?.name) return null;
-                            
-                            return (
-                              <a
-                                key={index}
-                                href={product.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all duration-150 group"
-                              >
-                                <div className="flex items-center justify-center w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded flex-shrink-0 group-hover:bg-blue-200 dark:group-hover:bg-blue-800/40 transition-colors">
-                                  <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-                                  </svg>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-sm text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
-                                    {product.name}
-                                  </div>
-                                  {product.description && (
-                                    <div className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1 mt-0.5">
-                                      {product.description}
-                                    </div>
-                                  )}
-                                  <div className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 font-medium mt-1 group-hover:underline">
-                                    <span>View product</span>
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                    </svg>
-                                  </div>
-                                </div>
-                              </a>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* Product Links Section - Using split component */}
+                  <ProductLinksSection productLinks={productLinks} />
                   </div>
                   </div>
                 </div>

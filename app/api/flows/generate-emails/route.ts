@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { FlowOutlineData, AIModel, FlowOutlineEmail } from '@/types';
 import { buildFlowEmailPrompt } from '@/lib/flow-prompts';
+import { getActiveDebugPrompt, determinePromptType } from '@/lib/debug-prompts';
 import { generateMermaidChart } from '@/lib/mermaid-generator';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -127,7 +128,7 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         console.log(`[Flow Generator] Child conversation created: ${childConversation.id}`);
         console.log(`[Flow Generator] Generating email content using ${emailOutline.emailType} format...`);
 
-        const prompt = buildFlowEmailPrompt(
+        let prompt = buildFlowEmailPrompt(
           emailOutline,
           outline,
           brandInfo,
@@ -135,9 +136,34 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           emailOutline.emailType
         );
 
+        // DEBUG MODE: Check for custom prompt overrides
+        // For flows, we use single 'flow_email' type
+        const customPrompt = await getActiveDebugPrompt(supabase, user.id, 'flow_email');
+
+        if (customPrompt && customPrompt.user_prompt) {
+           console.log(`[Flow Generator] 🐛 DEBUG MODE: Overriding flow prompt with custom prompt: ${customPrompt.name}`);
+           // Replace variables manually since we are bypassing the builder
+           prompt = customPrompt.user_prompt
+              .replace(/{{EMAIL_SEQUENCE}}/g, emailOutline.sequence.toString())
+              .replace(/{{TOTAL_EMAILS}}/g, outline.emails.length.toString())
+              .replace(/{{FLOW_NAME}}/g, outline.flowName)
+              .replace(/{{BRAND_INFO}}/g, brandInfo)
+              .replace(/{{RAG_CONTEXT}}/g, '') // RAG context empty for now
+              .replace(/{{FLOW_GOAL}}/g, outline.goal)
+              .replace(/{{TARGET_AUDIENCE}}/g, outline.targetAudience)
+              .replace(/{{EMAIL_TITLE}}/g, emailOutline.title)
+              .replace(/{{EMAIL_TIMING}}/g, emailOutline.timing)
+              .replace(/{{EMAIL_PURPOSE}}/g, emailOutline.purpose)
+              .replace(/{{KEY_POINTS}}/g, emailOutline.keyPoints.map(p => `- ${p}`).join('\n'))
+              .replace(/{{PRIMARY_CTA}}/g, emailOutline.cta)
+              // Specific variables
+              .replace(/{{SUBJECT_LINE_GUIDANCE}}/g, emailOutline.emailType === 'design' ? 'Compelling subject line' : 'Personal subject line')
+              .replace(/{{POSITION_GUIDANCE}}/g, `This is email ${emailOutline.sequence} of ${outline.emails.length}`);
+        }
+
         console.log(
           `[Flow Generator] Using ${
-            emailOutline.emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT'
+            (customPrompt && customPrompt.user_prompt) ? `CUSTOM_DEBUG_PROMPT (${customPrompt.name})` : (emailOutline.emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT')
           } for Email ${emailOutline.sequence}`
         );
 

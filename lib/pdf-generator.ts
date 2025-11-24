@@ -1,5 +1,7 @@
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+/**
+ * PDF Generator for Flow Charts
+ * Uses dynamic imports to avoid loading jsPDF/html2canvas until needed
+ */
 
 /**
  * Exports a rendered Mermaid chart element to PDF
@@ -24,6 +26,12 @@ export async function exportChartToPDF(
     if (!svgElement) {
       throw new Error('Mermaid chart SVG not found. Chart may not be rendered yet.');
     }
+
+    // Dynamically import heavy dependencies only when needed
+    const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+      import('jspdf'),
+      import('html2canvas')
+    ]);
 
     // Calculate dimensions
     const svgRect = svgElement.getBoundingClientRect();
@@ -114,4 +122,3 @@ export async function exportChartToPDF(
     throw error;
   }
 }
-

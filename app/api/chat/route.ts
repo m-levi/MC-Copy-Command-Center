@@ -11,6 +11,7 @@ import {
 import { loadMemoryContext as loadClaudeMemoryContext } from '@/lib/claude-memory-tool';
 import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
 import { buildSystemPrompt, buildStandardEmailPromptV2, buildBrandInfo, buildContextInfo } from '@/lib/chat-prompts';
+import { getActiveDebugPrompt, determinePromptType } from '@/lib/debug-prompts';
 import { handleUnifiedStream } from '@/lib/unified-stream-handler';
 import { messageQueue } from '@/lib/queue/message-queue';
 import { createClient } from '@/lib/supabase/server';
@@ -223,6 +224,68 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
 
     // Extract website URL from brand context
     const websiteUrl = brandContext?.website_url;
+
+    // DEBUG MODE: Check for custom prompt overrides
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (user) {
+      // Determine email type
+      const effectiveEmailType = emailType || (isFlowMode ? 'design' : 'design'); // fallback
+      
+      if (!isFlowMode) {
+        const promptType = determinePromptType(effectiveEmailType as 'design' | 'letter', false);
+        const customPrompt = await getActiveDebugPrompt(supabase, user.id, promptType);
+        
+        if (customPrompt) {
+          console.log(`[Chat API] 🐛 DEBUG MODE: Using custom prompt: ${customPrompt.name} for ${promptType}`);
+          
+          // Override system prompt if provided
+          if (customPrompt.system_prompt) {
+            systemPrompt = customPrompt.system_prompt;
+          }
+          
+          // Override user prompt template if provided
+          if (customPrompt.user_prompt) {
+            const userMessages = messages.filter((m: Message) => m.role === 'user');
+            const isFirstMessage = userMessages.length === 1;
+
+            if (isFirstMessage) {
+              // Get user content (the copy brief)
+              const copyBrief = userMessages[0]?.content || '';
+              
+              // Apply variable replacements to the custom user prompt
+              const brandInfo = buildBrandInfo(brandContext);
+              const contextInfo = buildContextInfo(conversationContext);
+              const brandVoiceGuidelines = brandContext?.copywriting_style_guide || '';
+              
+              // Replace variables in user prompt template
+              let filledUserPrompt = customPrompt.user_prompt
+                .replace(/{{COPY_BRIEF}}/g, copyBrief || 'No copy brief provided.')
+                .replace(/{{BRAND_INFO}}/g, brandInfo)
+                .replace(/{{RAG_CONTEXT}}/g, ragContext)
+                .replace(/{{CONTEXT_INFO}}/g, contextInfo)
+                .replace(/{{MEMORY_CONTEXT}}/g, memoryPrompt)
+                .replace(/{{WEBSITE_URL}}/g, websiteUrl || '')
+                .replace(/{{BRAND_VOICE_GUIDELINES}}/g, brandVoiceGuidelines)
+                .replace(/{{EMAIL_BRIEF}}/g, copyBrief || 'No copy brief provided.');
+
+              // Use the filled prompt as the user message
+              processedMessages = [{ ...userMessages[0], content: filledUserPrompt }];
+            }
+          }
+        }
+      } else if (isFlowMode) {
+        // Flow mode uses 'flow_email' type
+        const customPrompt = await getActiveDebugPrompt(supabase, user.id, 'flow_email');
+        if (customPrompt) {
+          console.log(`[Chat API] 🐛 DEBUG MODE: Using custom flow prompt: ${customPrompt.name}`);
+          if (customPrompt.system_prompt) {
+            systemPrompt = customPrompt.system_prompt;
+          }
+        }
+      }
+    }
 
     // NOTE: Message queue integration is available but currently disabled to maintain real-time streaming UX.
     // To enable queue mode:

@@ -83,9 +83,10 @@ function ConversationListItem({
     
     setLoadingChildren(true);
     try {
+      // Select only needed fields for flow children
       const { data } = await supabase
         .from('conversations')
-        .select('*')
+        .select('id, brand_id, user_id, title, model, conversation_type, mode, created_at, updated_at, is_pinned, is_archived, last_message_preview, last_message_at, parent_conversation_id, is_flow, flow_type, flow_sequence_order, flow_email_title')
         .eq('parent_conversation_id', conversation.id)
         .order('flow_sequence_order', { ascending: true });
 

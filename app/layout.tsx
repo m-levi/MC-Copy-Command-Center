@@ -4,6 +4,7 @@ import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 import GlobalKeyboardShortcuts from "@/components/GlobalKeyboardShortcuts";
 import DebugPanel from "@/components/DebugPanel";
+import DebugPromptSelector from "@/components/DebugPromptSelector";
 import PageTransition from "@/components/PageTransition";
 
 const geistSans = Geist({
@@ -37,6 +38,7 @@ export default function RootLayout({
           </PageTransition>
           <GlobalKeyboardShortcuts />
           <DebugPanel />
+          <DebugPromptSelector />
         </ThemeProvider>
       </body>
     </html>

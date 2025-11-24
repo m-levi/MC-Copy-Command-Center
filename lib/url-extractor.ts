@@ -4,6 +4,7 @@
  */
 
 import { ProductLink } from '@/types';
+import { logger } from '@/lib/logger';
 
 export interface ExtractedURL {
   url: string;
@@ -238,29 +239,29 @@ export function smartExtractProductLinks(
 ): ProductLink[] {
   const allLinks: ProductLink[] = [];
   
-  console.log('[SmartExtract] Starting extraction...');
-  console.log('[SmartExtract] AI response length:', aiResponse.length);
-  console.log('[SmartExtract] User messages:', userMessages.length);
+  logger.debug('[SmartExtract] Starting extraction...');
+  logger.debug('[SmartExtract] AI response length:', aiResponse.length);
+  logger.debug('[SmartExtract] User messages:', userMessages.length);
   
   // Strategy 1: Extract markdown-style links from AI response
   const markdownLinks = extractMarkdownLinks(aiResponse);
-  console.log('[SmartExtract] Markdown links:', markdownLinks.length);
+  logger.debug('[SmartExtract] Markdown links:', markdownLinks.length);
   allLinks.push(...convertToProductLinks(markdownLinks, websiteUrl));
   
   // Strategy 2: Extract product name + URL pairs
   const namedProducts = extractProductMentionsWithURLs(aiResponse);
-  console.log('[SmartExtract] Named products with URLs:', namedProducts.length);
+  logger.debug('[SmartExtract] Named products with URLs:', namedProducts.length);
   allLinks.push(...namedProducts);
   
   // Strategy 3: Extract product URLs from AI response
   const aiUrls = extractProductURLs(aiResponse, websiteUrl);
-  console.log('[SmartExtract] AI response URLs:', aiUrls.length);
+  logger.debug('[SmartExtract] AI response URLs:', aiUrls.length);
   allLinks.push(...convertToProductLinks(aiUrls, websiteUrl));
   
   // Strategy 4: Extract URLs from user messages (they might have pasted product links)
   const userText = userMessages.join(' ');
   const userUrls = extractProductURLs(userText, websiteUrl);
-  console.log('[SmartExtract] User message URLs:', userUrls.length);
+  logger.debug('[SmartExtract] User message URLs:', userUrls.length);
   allLinks.push(...convertToProductLinks(
     userUrls.map(u => ({ ...u, source: 'user_message' as const })),
     websiteUrl
@@ -271,12 +272,12 @@ export function smartExtractProductLinks(
     index === self.findIndex(l => l.url === link.url)
   );
   
-  console.log('[SmartExtract] Final count:', uniqueLinks.length, 'unique product links');
+  logger.debug('[SmartExtract] Final count:', uniqueLinks.length, 'unique product links');
   
   // IMPORTANT: Only return links if we actually found real URLs
   // If no URLs found, return empty array (box will be hidden in UI)
   if (uniqueLinks.length === 0) {
-    console.log('[SmartExtract] No real URLs found - Products Mentioned will be hidden');
+    logger.debug('[SmartExtract] No real URLs found - Products Mentioned will be hidden');
   }
   
   return uniqueLinks;

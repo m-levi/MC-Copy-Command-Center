@@ -1,7 +1,7 @@
 'use client';
 
 import { ConversationWithStatus, ConversationQuickAction } from '@/types';
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo, useCallback } from 'react';
 import ConversationListItem from './ConversationListItem';
 
 interface VirtualizedConversationListProps {
@@ -25,6 +25,15 @@ interface VirtualizedConversationListProps {
   onToggleSelect?: (conversationId: string, event?: React.MouseEvent) => void;
 }
 
+// Group conversations by date
+interface GroupedConversations {
+  pinned: ConversationWithStatus[];
+  today: ConversationWithStatus[];
+  yesterday: ConversationWithStatus[];
+  lastWeek: ConversationWithStatus[];
+  older: ConversationWithStatus[];
+}
+
 export default function VirtualizedConversationList({
   conversations,
   currentConversationId,
@@ -45,33 +54,13 @@ export default function VirtualizedConversationList({
   selectedConversationIds = new Set(),
   onToggleSelect
 }: VirtualizedConversationListProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const activeItemRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to active conversation when it changes
-  useEffect(() => {
-    if (currentConversationId && activeItemRef.current) {
-      activeItemRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [currentConversationId]);
-
-  // Memoize isPinned check for performance - MUST be before early return
+  // Memoize isPinned check for performance
   const pinnedSet = useMemo(() => new Set(pinnedConversationIds), [pinnedConversationIds]);
   
-  // Memoize grouped conversations for performance - MUST be before early return
-  const groupedConversations = useMemo(() => {
-    // Separate pinned and unpinned
-    const pinned = conversations.filter(c => pinnedSet.has(c.id));
-    const unpinned = conversations.filter(c => !pinnedSet.has(c.id));
-    
-    const groups: { label: string; items: ConversationWithStatus[] }[] = [];
-
-    // Pinned Group
-    if (pinned.length > 0) {
-      groups.push({ label: 'Pinned', items: pinned });
-    }
-
-    // Date grouping for unpinned
+  // Group conversations by date
+  const groupedConversations = useMemo((): GroupedConversations => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const yesterday = new Date(today);
@@ -79,41 +68,82 @@ export default function VirtualizedConversationList({
     const lastWeek = new Date(today);
     lastWeek.setDate(lastWeek.getDate() - 7);
 
-    const todayItems: ConversationWithStatus[] = [];
-    const yesterdayItems: ConversationWithStatus[] = [];
-    const lastWeekItems: ConversationWithStatus[] = [];
-    const olderItems: ConversationWithStatus[] = [];
+    const result: GroupedConversations = {
+      pinned: [],
+      today: [],
+      yesterday: [],
+      lastWeek: [],
+      older: []
+    };
 
-    unpinned.forEach(c => {
+    conversations.forEach(c => {
+      if (pinnedSet.has(c.id)) {
+        result.pinned.push(c);
+        return;
+      }
+
       const date = new Date(c.last_message_at || c.created_at);
       if (date >= today) {
-        todayItems.push(c);
+        result.today.push(c);
       } else if (date >= yesterday) {
-        yesterdayItems.push(c);
+        result.yesterday.push(c);
       } else if (date >= lastWeek) {
-        lastWeekItems.push(c);
+        result.lastWeek.push(c);
       } else {
-        olderItems.push(c);
+        result.older.push(c);
       }
     });
 
-    if (todayItems.length > 0) groups.push({ label: 'Today', items: todayItems });
-    if (yesterdayItems.length > 0) groups.push({ label: 'Yesterday', items: yesterdayItems });
-    if (lastWeekItems.length > 0) groups.push({ label: 'Previous 7 Days', items: lastWeekItems });
-    if (olderItems.length > 0) groups.push({ label: 'Older', items: olderItems });
-
-    return groups;
+    return result;
   }, [conversations, pinnedSet]);
 
-  const isPinned = (conversationId: string) => pinnedSet.has(conversationId);
+  // Scroll to active conversation when it changes
+  useEffect(() => {
+    if (currentConversationId && listRef.current) {
+      const activeElement = listRef.current.querySelector(`[data-conversation-id="${currentConversationId}"]`);
+      if (activeElement) {
+        activeElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [currentConversationId]);
 
-  const handleQuickAction = (conversationId: string, action: ConversationQuickAction) => {
+  const handleQuickAction = useCallback((conversationId: string, action: ConversationQuickAction) => {
     if (onQuickAction) {
       onQuickAction(conversationId, action);
     }
-  };
+  }, [onQuickAction]);
 
-  if (groupedConversations.length === 0) {
+  // Render a group header
+  const renderHeader = (label: string) => (
+    <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm py-2 pl-3 pr-2 text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2 sticky top-0 z-10">
+      <span>{label}</span>
+      <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800"></div>
+    </div>
+  );
+
+  // Render a conversation item
+  const renderConversation = (conversation: ConversationWithStatus) => (
+    <div 
+      key={conversation.id} 
+      className="pl-2 pr-1 py-0.5"
+      data-conversation-id={conversation.id}
+    >
+      <ConversationListItem
+        conversation={conversation}
+        isActive={conversation.id === currentConversationId}
+        isPinned={pinnedSet.has(conversation.id)}
+        currentConversationId={currentConversationId}
+        onSelect={() => onSelect(conversation.id)}
+        onSelectChild={onSelectChild}
+        onAction={(action) => handleQuickAction(conversation.id, action)}
+        bulkSelectMode={bulkSelectMode}
+        isSelected={selectedConversationIds.has(conversation.id)}
+        onToggleSelect={(event) => onToggleSelect?.(conversation.id, event)}
+      />
+    </div>
+  );
+
+  if (conversations.length === 0) {
     return (
       <div className="px-3 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
         <svg className="w-12 h-12 mx-auto mb-3 text-gray-400 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -127,39 +157,49 @@ export default function VirtualizedConversationList({
 
   return (
     <div 
-      ref={containerRef} 
-      className="w-full h-full overflow-y-auto overflow-x-hidden"
-      style={{ maxHeight: `${height}px` }}
+      ref={listRef}
+      className="overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700"
+      style={{ height }}
     >
-      <div className="pb-2 space-y-4 pr-1">
-        {groupedConversations.map((group) => (
-          <div key={group.label}>
-            <div className="sticky top-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm py-2 pl-3 pr-2 mb-2 text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
-              <span>{group.label}</span>
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800"></div>
-            </div>
-            <div className="space-y-1 pl-2 pr-1">
-              {group.items.map((conversation) => (
-                <div key={conversation.id} ref={conversation.id === currentConversationId ? activeItemRef : null}>
-                  <ConversationListItem
-                    conversation={conversation}
-                    isActive={conversation.id === currentConversationId}
-                    isPinned={isPinned(conversation.id)}
-                    currentConversationId={currentConversationId}
-                    onSelect={() => onSelect(conversation.id)}
-                    onSelectChild={onSelectChild}
-                    onAction={(action) => handleQuickAction(conversation.id, action)}
-                    bulkSelectMode={bulkSelectMode}
-                    isSelected={selectedConversationIds.has(conversation.id)}
-                    onToggleSelect={(event) => onToggleSelect?.(conversation.id, event)}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      {/* Pinned */}
+      {groupedConversations.pinned.length > 0 && (
+        <>
+          {renderHeader('Pinned')}
+          {groupedConversations.pinned.map(renderConversation)}
+        </>
+      )}
+
+      {/* Today */}
+      {groupedConversations.today.length > 0 && (
+        <>
+          {renderHeader('Today')}
+          {groupedConversations.today.map(renderConversation)}
+        </>
+      )}
+
+      {/* Yesterday */}
+      {groupedConversations.yesterday.length > 0 && (
+        <>
+          {renderHeader('Yesterday')}
+          {groupedConversations.yesterday.map(renderConversation)}
+        </>
+      )}
+
+      {/* Previous 7 Days */}
+      {groupedConversations.lastWeek.length > 0 && (
+        <>
+          {renderHeader('Previous 7 Days')}
+          {groupedConversations.lastWeek.map(renderConversation)}
+        </>
+      )}
+
+      {/* Older */}
+      {groupedConversations.older.length > 0 && (
+        <>
+          {renderHeader('Older')}
+          {groupedConversations.older.map(renderConversation)}
+        </>
+      )}
     </div>
   );
 }
-

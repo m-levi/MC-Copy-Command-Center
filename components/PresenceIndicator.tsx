@@ -1,36 +1,22 @@
 'use client';
 
 import { usePresence } from '@/hooks/usePresence';
-import { useEffect } from 'react';
 
 interface PresenceIndicatorProps {
   conversationId: string;
 }
 
 export default function PresenceIndicator({ conversationId }: PresenceIndicatorProps) {
-  console.log('[PresenceIndicator] Component rendering, conversationId:', conversationId);
-  
   const activeUsers = usePresence(conversationId);
-
-  useEffect(() => {
-    console.log('[PresenceIndicator] Component mounted with conversationId:', conversationId);
-    console.log('[PresenceIndicator] Active users:', activeUsers);
-  }, [conversationId, activeUsers]);
-
-  // Always render something for debugging
-  console.log('[PresenceIndicator] Current state - activeUsers.length:', activeUsers.length);
 
   // Show indicator even if just 1 user (me) so we know it's working
   if (activeUsers.length === 0) {
-    console.log('[PresenceIndicator] No active users, rendering placeholder');
     return (
       <div className="text-xs text-gray-400 dark:text-gray-500">
         Connecting...
       </div>
     );
   }
-
-  console.log('[PresenceIndicator] Rendering with', activeUsers.length, 'users');
 
   return (
     <div className="flex items-center gap-2 animate-in fade-in duration-300 mr-2">
@@ -59,4 +45,3 @@ function getInitials(email: string, fullName?: string) {
   if (fullName) return fullName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
   return email.substring(0, 2).toUpperCase();
 }
-

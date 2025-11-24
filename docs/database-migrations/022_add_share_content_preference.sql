@@ -14,3 +14,4 @@ COMMENT ON COLUMN conversation_shares.share_content IS
 'What content to share: last_email (final AI output only) or full_conversation (all messages)';
 
 
+

@@ -359,31 +359,16 @@ body {
 
 /* Performance Enhancements for Lighter UI Feel */
 
-/* Faster, snappier transitions (reduced from 200-300ms to 150ms) */
-.transition-all,
-.transition-colors,
-.transition-opacity,
-.transition-transform {
-  transition-duration: 150ms !important;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-
-/* Ultra-fast micro-interactions (100ms for immediate feedback) */
+/* Fast transition utility class - use explicitly where needed */
 .transition-fast {
-  transition-duration: 100ms !important;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition-duration: 100ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Optimized hover states - instant start, smooth end */
-button:hover,
-a:hover,
-[role="button"]:hover {
-  transition-duration: 100ms !important;
-}
-
-/* Reduce animation duration on all elements */
-* {
-  animation-duration: 0.15s !important;
+/* Snappy transition utility - default for UI elements */
+.transition-snappy {
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Page transition animations using View Transitions API */
@@ -433,7 +418,7 @@ a:hover,
 }
 
 .animate-pulse {
-  animation: pulse-light 2s cubic-bezier(0.4, 0, 0.6, 1) infinite !important;
+  animation: pulse-light 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* Subtle pulse for active conversation cards */
@@ -458,11 +443,13 @@ html {
   scroll-padding-top: 2rem;
 }
 
-/* Reduce motion for users who prefer it */
+/* Reduce motion for users who prefer it - accessibility requirement */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
+    /* These !important are intentional for accessibility - they ensure
+       animations are disabled even if components specify them inline */
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
@@ -482,42 +469,42 @@ html {
   outline: none;
 }
 
-/* Lighter shadows for less visual weight */
-.shadow-sm {
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03) !important;
+/* Custom shadow utilities - lighter feel */
+.shadow-light-sm {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
 }
 
-.shadow {
+.shadow-light {
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.06),
-              0 1px 2px -1px rgba(0, 0, 0, 0.04) !important;
+              0 1px 2px -1px rgba(0, 0, 0, 0.04);
 }
 
-.shadow-md {
+.shadow-light-md {
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.06),
-              0 2px 4px -2px rgba(0, 0, 0, 0.04) !important;
+              0 2px 4px -2px rgba(0, 0, 0, 0.04);
 }
 
-.shadow-lg {
+.shadow-light-lg {
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.06),
-              0 4px 6px -4px rgba(0, 0, 0, 0.04) !important;
+              0 4px 6px -4px rgba(0, 0, 0, 0.04);
 }
 
-/* Dark mode lighter shadows */
-.dark .shadow-sm {
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.2) !important;
+/* Dark mode shadow utilities */
+.dark .shadow-light-sm {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.2);
 }
 
-.dark .shadow {
+.dark .shadow-light {
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3),
-              0 1px 2px -1px rgba(0, 0, 0, 0.2) !important;
+              0 1px 2px -1px rgba(0, 0, 0, 0.2);
 }
 
-.dark .shadow-md {
+.dark .shadow-light-md {
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3),
-              0 2px 4px -2px rgba(0, 0, 0, 0.2) !important;
+              0 2px 4px -2px rgba(0, 0, 0, 0.2);
 }
 
-.dark .shadow-lg {
+.dark .shadow-light-lg {
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3),
-              0 4px 6px -4px rgba(0, 0, 0, 0.2) !important;
+              0 4px 6px -4px rgba(0, 0, 0, 0.2);
 }
