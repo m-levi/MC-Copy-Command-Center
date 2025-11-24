@@ -40,7 +40,7 @@ export default function ConversationSearch({
           bg-white dark:bg-gray-800
           border transition-all duration-200
           ${isFocused 
-            ? 'border-blue-500 dark:border-blue-400 shadow-md ring-2 ring-blue-100 dark:ring-blue-900/50' 
+            ? 'border-blue-500 dark:border-blue-400 shadow-sm' 
             : 'border-gray-200 dark:border-gray-700'
           }
         `}

@@ -7,6 +7,8 @@ import { AI_MODELS } from '@/lib/ai-models';
 import ChatSidebarEnhanced from '@/components/ChatSidebarEnhanced';
 import { useSidebarState } from '@/hooks/useSidebarState';
 import ChatMessage from '@/components/ChatMessage';
+import PresenceIndicator from '@/components/PresenceIndicator';
+import RealtimeStatusIndicator from '@/components/RealtimeStatusIndicator';
 import ChatInput from '@/components/ChatInput';
 import AIStatusIndicator from '@/components/AIStatusIndicator';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -2360,12 +2362,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       // Only save user message if not editing
       if (!skipUserMessage) {
+        // Get current user for attribution
+        const { data: { user } } = await supabase.auth.getUser();
+        
         const { data, error: userError } = await supabase
           .from('messages')
           .insert({
             conversation_id: currentConversation.id,
             role: 'user',
             content,
+            user_id: user?.id, // Add user_id for attribution
           })
           .select()
           .single();
@@ -3054,6 +3060,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   return (
     <div className="relative h-screen bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
       <Toaster position="top-right" />
+      <RealtimeStatusIndicator />
       
       {/* Subtle loading progress bar at top */}
       {loadingMessages && (
@@ -3209,6 +3216,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               {/* Action buttons */}
               {currentConversation && (
                 <div className="flex items-center gap-2">
+                  <div className="mr-2">
+                    <PresenceIndicator conversationId={currentConversation.id} />
+                  </div>
+
                   <button
                     onClick={() => setShowShareModal(true)}
                     className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-600 dark:text-gray-400"

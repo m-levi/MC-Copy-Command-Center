@@ -461,7 +461,7 @@ export default function CommentsSidebar({
                   key={comment.id}
                   className="group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-700 transition-all duration-200"
                 >
-                    {/* Quoted Text - Integrated with Card */}
+                  {/* Quoted Text - Integrated with Card */}
                   {comment.quoted_text && (
                     <div className="mb-3 pb-3 border-b border-gray-100 dark:border-gray-800 group/quote relative">
                       <div className="flex items-start gap-2 text-xs text-gray-500 dark:text-gray-400 italic bg-yellow-50/50 dark:bg-yellow-900/10 p-2 rounded border-l-2 border-yellow-400">

@@ -47,7 +47,7 @@ export function useChatMessages(conversationId: string | null) {
           }
 
           // Load from database
-          const { data, error } = await supabase
+          const { data: messagesData, error } = await supabase
             .from('messages')
             .select('*')
             .eq('conversation_id', conversationId)
@@ -55,12 +55,36 @@ export function useChatMessages(conversationId: string | null) {
 
           if (error) throw error;
           
-          if (data) {
-            cacheMessages(conversationId, data);
-            setMessages(data);
+          if (messagesData) {
+            // Fetch user profiles for user messages
+            const userIds = [...new Set(messagesData
+              .filter(m => m.role === 'user' && m.user_id)
+              .map(m => m.user_id))];
+            
+            let messagesWithUsers = messagesData;
+
+            if (userIds.length > 0) {
+              const { data: profiles } = await supabase
+                .from('profiles')
+                .select('*')
+                .in('user_id', userIds);
+                
+              if (profiles) {
+                messagesWithUsers = messagesData.map(msg => {
+                  if (msg.role === 'user' && msg.user_id) {
+                    const profile = profiles.find(p => p.user_id === msg.user_id);
+                    return { ...msg, user: profile };
+                  }
+                  return msg;
+                });
+              }
+            }
+
+            cacheMessages(conversationId, messagesWithUsers);
+            setMessages(messagesWithUsers);
             trackPerformance('load_messages', performance.now() - startTime, { 
               source: 'database',
-              count: data.length 
+              count: messagesWithUsers.length 
             });
           }
         },

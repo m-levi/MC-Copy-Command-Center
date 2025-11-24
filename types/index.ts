@@ -164,6 +164,8 @@ export interface Message {
   metadata?: MessageMetadata;
   edited_at?: string;
   parent_message_id?: string;
+  user_id?: string;
+  user?: Profile;
 }
 
 // Future automation types

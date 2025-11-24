@@ -400,7 +400,7 @@ export default function ChatSidebarEnhanced({
               <button
                 onClick={handleMobileNewConversation}
                 disabled={isCreatingEmail || isCreatingFlow}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all shadow-sm hover:shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
               >
                 {isCreatingEmail || isCreatingFlow ? (
                   <div className="flex items-center gap-2">

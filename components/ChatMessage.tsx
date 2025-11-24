@@ -580,6 +580,11 @@ const ChatMessage = memo(function ChatMessage({
 
   const isUser = message.role === 'user';
 
+  const getInitials = (email: string, fullName?: string) => {
+    if (fullName) return fullName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    return email?.substring(0, 2).toUpperCase() || '??';
+  };
+
   // Render floating elements via portal to avoid CSS containment clipping
   const floatingElements = isMounted && typeof window !== 'undefined' ? createPortal(
     <>
@@ -665,6 +670,16 @@ const ChatMessage = memo(function ChatMessage({
         }}
       >
       <div className={`flex flex-col ${isUser ? 'items-end max-w-[85%] sm:max-w-[70%]' : 'w-full'}`}>
+        {isUser && message.user && (
+          <div className="flex items-center gap-2 mb-1.5 px-1 opacity-80">
+            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+              {message.user.full_name || message.user.email?.split('@')[0]}
+            </span>
+            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[9px] font-bold shadow-sm">
+              {getInitials(message.user.email || '', message.user.full_name)}
+            </div>
+          </div>
+        )}
         <div
           className={`
             transition-all

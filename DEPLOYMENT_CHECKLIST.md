@@ -16,6 +16,10 @@ Use this checklist to ensure a smooth deployment to Vercel.
 - [ ] Row Level Security (RLS) policies are enabled
 - [ ] Supabase URL and anon key are copied
 - [ ] Email confirmation is configured (or disabled for development)
+- [ ] **🚨 CRITICAL: Production domain added to Auth URL Configuration** (prevents CORS errors)
+  - Go to: Authentication → URL Configuration
+  - Set Site URL to production domain
+  - Add production domain to Redirect URLs
 
 ## API Keys
 
@@ -118,10 +122,15 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 - Check API key has credits
 - Check Vercel function logs
 
-**Error: Authentication not working**
+**Error: Authentication not working / CORS errors**
+- **Most Common Fix:** Add production domain to Supabase Auth URL Configuration
+  - Go to: https://supabase.com/dashboard → Authentication → URL Configuration
+  - Set Site URL to your production domain
+  - Add `https://your-domain.com/**` to Redirect URLs
 - Check Supabase Auth settings
 - Verify redirect URLs in Supabase dashboard
-- Add deployment URL to allowed redirect URLs
+- Clear browser cache and test in incognito window
+- See `docs/AUTH_CORS_FIX.md` for detailed troubleshooting
 
 ## Security Checklist
 
