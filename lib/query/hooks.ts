@@ -110,7 +110,7 @@ export function useOrganization(userId: string | null) {
       
       const { data, error } = await supabase
         .from('organizations')
-        .select('id, name, slug')
+        .select('id, name, slug, created_at, updated_at')
         .eq('id', memberData.organization_id)
         .single();
       

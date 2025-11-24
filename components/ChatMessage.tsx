@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import ThoughtProcess from './ThoughtProcess';
 import InlineCommentBox from './InlineCommentBox';
 import { ChatMessageUser, ChatMessageActions, ProductLinksSection } from './chat';
+import SubjectLineGeneratorModal from './SubjectLineGeneratorModal';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
@@ -139,6 +140,7 @@ const ChatMessage = memo(function ChatMessage({
   const [selectedText, setSelectedText] = useState<string>('');
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null);
   const [showInlineCommentBox, setShowInlineCommentBox] = useState(false);
+  const [isSubjectLineModalOpen, setIsSubjectLineModalOpen] = useState(false);
   const [forceRender, setForceRender] = useState(0); // Force re-render
   const [isMounted, setIsMounted] = useState(false);
   const supabase = createClient();
@@ -638,6 +640,13 @@ const ChatMessage = memo(function ChatMessage({
     <>
       {floatingElements}
 
+      {/* Full-screen explorer */}
+      <SubjectLineGeneratorModal
+        isOpen={isSubjectLineModalOpen}
+        onClose={() => setIsSubjectLineModalOpen(false)}
+        emailContent={messageContent}
+      />
+      
       <div 
         className="flex w-full justify-start mb-6 sm:mb-8 group animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards"
       >
@@ -700,6 +709,19 @@ const ChatMessage = memo(function ChatMessage({
                               viewBox="0 0 24 24"
                             >
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                          </button>
+                        )}
+
+                        {/* Subject Line Generator - Only for email drafts */}
+                        {messageContent.includes('```') && (
+                          <button
+                            onClick={() => setIsSubjectLineModalOpen(true)}
+                            className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                            title="Generate Subject Lines"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                             </svg>
                           </button>
                         )}
@@ -859,18 +881,6 @@ const ChatMessage = memo(function ChatMessage({
                 </svg>
                 Copy
               </button>
-              {onEdit && !isEditing && (
-                <button
-                  onClick={handleEdit}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-100 transition-colors"
-                  title="Edit message"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5h2m-1-1v2m-7 7h2m-1-1v2m10.586-7.414l-6.172 6.172a2 2 0 00-.586 1.414V17h1.828a2 2 0 001.414-.586l6.172-6.172a2 2 0 00-2.828-2.828z" />
-                  </svg>
-                  Edit
-                </button>
-              )}
             </div>
           </div>
         )}
