@@ -95,10 +95,13 @@ export function usePresence(conversationId: string) {
           console.log('[Presence] Track status:', trackStatus);
         }
         if (status === 'CHANNEL_ERROR') {
-          console.error('[Presence] Channel error:', err);
+          console.error('[Presence] Channel error:', err || 'Unknown channel error');
         }
         if (status === 'TIMED_OUT') {
-          console.error('[Presence] Connection timed out');
+          console.error('[Presence] Connection timed out', err || '');
+        }
+        if (status === 'CLOSED') {
+          console.log('[Presence] Channel closed');
         }
       });
 
