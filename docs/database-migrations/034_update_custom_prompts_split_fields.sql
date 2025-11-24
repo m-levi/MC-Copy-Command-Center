@@ -26,3 +26,4 @@ COMMENT ON COLUMN custom_prompts.system_prompt IS 'System instructions for the A
 COMMENT ON COLUMN custom_prompts.user_prompt IS 'User prompt template with variables like {{COPY_BRIEF}}, {{BRAND_INFO}}';
 
 
+

@@ -72,3 +72,4 @@ TO authenticated
 USING (user_id = auth.uid());
 
 
+
