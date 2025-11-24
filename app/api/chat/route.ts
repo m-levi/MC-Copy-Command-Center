@@ -287,22 +287,66 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
       }
     }
 
-    // NOTE: Message queue integration is available but currently disabled to maintain real-time streaming UX.
-    // To enable queue mode:
-    // 1. Set ENABLE_MESSAGE_QUEUE=true in environment variables
-    // 2. Create message record first
-    // 3. Queue the job with messageQueue.enqueue()
-    // 4. Return job ID and message ID immediately
-    // 5. Client should use SSE endpoint /api/messages/[id]/stream to get updates
-    // 6. Background worker processes jobs via /api/cron/process-queue
-    // 
-    // Current implementation uses direct streaming for better UX.
-    // Queue mode is useful for:
-    // - High-volume scenarios
-    // - Rate limiting
-    // - Background processing
-    // - Better error recovery
+    // Background queue mode: queue jobs for cron processing instead of direct streaming
+    // Enable with ENABLE_MESSAGE_QUEUE=true in environment variables
+    if (process.env.ENABLE_MESSAGE_QUEUE === 'true' && user && conversationId) {
+      console.log('[Chat API] Background queue mode enabled, queueing job');
+      
+      try {
+        // Create a placeholder message in the database
+        const { data: newMessage, error: msgError } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: '', // Will be filled by worker
+            status: 'queued',
+            queued_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
 
+        if (msgError || !newMessage) {
+          console.error('[Chat API] Failed to create message:', msgError);
+          throw new Error('Failed to create message');
+        }
+
+        // Queue the job for background processing
+        const jobId = await messageQueue.enqueue({
+          messageId: newMessage.id,
+          conversationId,
+          userId: user.id,
+          priority: 0, // Default priority
+          payload: {
+            messages: processedMessages,
+            modelId,
+            brandContext,
+            conversationId,
+            systemPrompt,
+            provider: model.provider,
+            websiteUrl,
+          },
+        });
+
+        console.log('[Chat API] Job queued:', jobId, 'Message:', newMessage.id);
+
+        // Return immediately with job info - client should poll /api/messages/[id]/stream
+        return new Response(JSON.stringify({
+          queued: true,
+          jobId,
+          messageId: newMessage.id,
+          streamUrl: `/api/messages/${newMessage.id}/stream`,
+        }), {
+          status: 202, // Accepted
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (queueError) {
+        console.error('[Chat API] Queue error, falling back to direct streaming:', queueError);
+        // Fall through to direct streaming
+      }
+    }
+
+    // Direct streaming mode (default) - better real-time UX
     // Use unified stream handler with retry logic and fallback
     try {
       return await retryWithBackoff(

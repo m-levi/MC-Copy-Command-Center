@@ -147,6 +147,70 @@ git push -u origin main
 7. Wait for deployment to complete
 8. Visit your live site!
 
+## Step 9: Enable Background Processing (Optional)
+
+Background processing allows AI messages to be queued and processed by a cron job instead of streaming directly. This is useful for:
+- High-volume scenarios with rate limiting
+- Better error recovery and retry logic
+- Decoupling requests from AI processing
+
+### 9.1 Requirements
+
+⚠️ **Vercel Cron Jobs require a Pro plan or higher**. If you're on the Hobby (free) plan, the cron will not run.
+
+### 9.2 Run Database Migration
+
+First, apply the async message queue migration:
+
+1. Go to your Supabase project's **SQL Editor**
+2. Create a new query
+3. Copy and paste the contents of `docs/database-migrations/020_async_message_queue.sql`
+4. Run the query
+
+This creates:
+- `message_jobs` table for queue persistence
+- `get_next_job()` function for workers
+- Status tracking columns on the `messages` table
+
+### 9.3 Set Environment Variables
+
+Add these to your Vercel project (or `.env.local` for local testing):
+
+```env
+# Generate a secure secret: openssl rand -hex 32
+CRON_SECRET=your-random-secret-here
+
+# Enable background queue mode
+ENABLE_MESSAGE_QUEUE=true
+```
+
+### 9.4 How It Works
+
+When `ENABLE_MESSAGE_QUEUE=true`:
+
+1. User sends a message → API creates a placeholder message and queues the job
+2. API returns immediately with `{ queued: true, messageId, streamUrl }`
+3. Client polls `/api/messages/{id}/stream` for updates via Server-Sent Events
+4. Cron job (`/api/cron/process-queue`) runs every 10 minutes and processes queued jobs
+5. Worker calls AI, saves response, and notifies user
+
+### 9.5 Verify Cron is Running
+
+1. Go to your Vercel project dashboard
+2. Click on the **Cron Jobs** tab (in the sidebar)
+3. You should see `/api/cron/process-queue` scheduled for `*/10 * * * *`
+4. Check the logs to verify it's running
+
+### 9.6 Disable Background Processing
+
+To revert to direct streaming (better real-time UX):
+
+```env
+ENABLE_MESSAGE_QUEUE=false
+```
+
+Or simply remove the environment variable.
+
 ## Troubleshooting
 
 ### Issue: "Invalid API key" errors
@@ -177,6 +241,21 @@ git push -u origin main
 1. Check that your API keys are valid and have credits
 2. Check the browser console and terminal for error messages
 3. Make sure the `/api/chat` route is working (check Network tab)
+
+### Issue: Vercel deployment fails with cron errors
+
+**Solution**:
+1. Vercel Cron Jobs require a **Pro plan** or higher. The Hobby (free) plan does not support crons.
+2. If you don't need background processing, remove `vercel.json` or set `ENABLE_MESSAGE_QUEUE=false`
+3. If upgrading to Pro, make sure `CRON_SECRET` is set in your environment variables
+
+### Issue: Background jobs not processing
+
+**Solution**:
+1. Check that the `020_async_message_queue.sql` migration has been applied
+2. Verify `CRON_SECRET` is set correctly in Vercel environment variables
+3. Check the Vercel Cron Jobs logs for errors
+4. Ensure `ENABLE_MESSAGE_QUEUE=true` is set
 
 ## Next Steps
 
