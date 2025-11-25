@@ -62,7 +62,7 @@ export const ChatMessageUser = memo(function ChatMessageUser({
           </div>
         )}
         
-        <div className="bg-gray-50 dark:bg-gray-800/50 rounded-2xl px-5 py-3.5 transition-all">
+        <div className="border border-gray-300/60 dark:border-gray-600/60 rounded-2xl px-5 py-3.5 transition-all">
           {isEditing ? (
             <MessageEditor
               initialContent={messageContent}

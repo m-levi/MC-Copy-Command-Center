@@ -59,21 +59,21 @@ export default function MessageEditor({
         value={content}
         onChange={handleInput}
         onKeyDown={handleKeyDown}
-        className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 rounded-xl focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 focus:ring-1 focus:ring-blue-500 dark:focus:ring-blue-400 resize-none text-[15px] leading-relaxed"
+        className="w-full bg-transparent text-gray-800 dark:text-gray-100 focus:outline-none resize-none text-[15px] leading-relaxed placeholder:text-gray-400 dark:placeholder:text-gray-500"
         rows={1}
         placeholder="Edit your message..."
       />
-      <div className="flex items-center justify-end gap-2 mt-2">
+      <div className="flex items-center justify-end gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/50">
         <button
           onClick={onCancel}
-          className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+          className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
         >
           Cancel
         </button>
         <button
           onClick={handleSave}
           disabled={!content.trim() || content === initialContent}
-          className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Save
         </button>
