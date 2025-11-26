@@ -14,6 +14,7 @@ import { SidebarLoadingSkeleton } from './SkeletonLoader';
 import { useSidebarPanel } from '@/contexts/SidebarPanelContext';
 import LoadingDots from './LoadingDots';
 import SidebarHeader from './SidebarHeader';
+import { SectionErrorBoundary } from './ErrorBoundary';
 
 interface ChatSidebarEnhancedProps {
   brandName: string;
@@ -400,7 +401,7 @@ export default function ChatSidebarEnhanced({
               <button
                 onClick={handleMobileNewConversation}
                 disabled={isCreatingEmail || isCreatingFlow}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all shadow-sm hover:shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white rounded-xl font-semibold transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
               >
                 {isCreatingEmail || isCreatingFlow ? (
                   <div className="flex items-center gap-2">
@@ -503,7 +504,8 @@ export default function ChatSidebarEnhanced({
           {isLoading ? (
             <SidebarLoadingSkeleton />
           ) : !isCollapsed ? (
-            viewMode === 'list' ? (
+            <SectionErrorBoundary sectionName="conversation list">
+            {viewMode === 'list' ? (
               <VirtualizedConversationList
                 conversations={orderedConversations}
                 currentConversationId={currentConversationId}
@@ -567,7 +569,8 @@ export default function ChatSidebarEnhanced({
                   </div>
                 )}
               </div>
-            )
+            )}
+            </SectionErrorBoundary>
           ) : (
             /* Collapsed: Compact conversation dots with tooltips */
             <div className="hidden lg:flex flex-col items-center py-2 px-2 gap-1 overflow-y-auto overflow-x-visible relative">

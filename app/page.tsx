@@ -1,14 +1,19 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback, memo, lazy, Suspense, useRef } from 'react';
+import { useEffect, useState, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Brand, Organization, OrganizationRole } from '@/types';
 import BrandCard from '@/components/BrandCard';
 import BrandListItem from '@/components/BrandListItem';
 import { BrandGridSkeleton } from '@/components/SkeletonLoader';
+import RecentActivityList from '@/components/dashboard/RecentActivityList';
+import RecentBrandsList from '@/components/dashboard/RecentBrandsList';
+import QuickStartAction from '@/components/dashboard/QuickStartAction';
+import DashboardHeader from '@/components/dashboard/DashboardHeader';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 import { logger } from '@/lib/logger';
+import { MoonCommerceLogo } from '@/components/MoonCommerceLogo';
 import NotificationCenter from '@/components/NotificationCenter';
 import { RequestCoalescer } from '@/lib/performance-utils';
 
@@ -22,6 +27,7 @@ type ViewMode = 'grid' | 'list';
 
 export default function HomePage() {
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [brandActivityMap, setBrandActivityMap] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
@@ -30,9 +36,11 @@ export default function HomePage() {
   const [canManageBrands, setCanManageBrands] = useState(false);
   const [currentUserId, setCurrentUserId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
   const supabase = createClient();
   const router = useRouter();
   const requestCoalescerRef = useRef(new RequestCoalescer<void>());
@@ -55,9 +63,11 @@ export default function HomePage() {
     if (viewMode) localStorage.setItem('brandsViewMode', viewMode);
   }, [viewMode]);
 
-  const loadBrands = async () => {
+  const loadBrands = async (silent = false) => {
     return requestCoalescerRef.current.execute(async () => {
       try {
+        if (!silent) setLoading(true);
+        
         const { data: { user } } = await supabase.auth.getUser();
         
         if (!user) {
@@ -67,8 +77,6 @@ export default function HomePage() {
 
         setCurrentUserId(user.id);
 
-        logger.log('Fetching org membership for user:', user.id);
-
         // Get user's organization membership
         const { data: memberData, error: memberError } = await supabase
           .from('organization_members')
@@ -76,24 +84,14 @@ export default function HomePage() {
           .eq('user_id', user.id)
           .single();
 
-        logger.log('Organization membership query result:', {
-          data: memberData,
-          error: memberError,
-          hasData: !!memberData,
-          hasError: !!memberError
-        });
-
         if (memberError || !memberData) {
-          logger.error('Organization membership error:', memberError);
-          logger.error('User ID being queried:', user.id);
-          logger.error('Full error object:', JSON.stringify(memberError, null, 2));
           toast.error('You are not part of any organization. Please contact an admin.');
           await supabase.auth.signOut();
           router.push('/login');
           return;
         }
 
-        // Get organization details separately (only need basic info)
+        // Get organization details separately
         const { data: orgData, error: orgError } = await supabase
           .from('organizations')
           .select('id, name, slug')
@@ -101,7 +99,6 @@ export default function HomePage() {
           .single();
 
         if (orgError || !orgData) {
-          logger.error('Organization fetch error:', orgError);
           toast.error('Failed to load organization details.');
           await supabase.auth.signOut();
           router.push('/login');
@@ -123,18 +120,42 @@ export default function HomePage() {
           .order('created_at', { ascending: false });
 
         if (error) {
-          logger.error('Brands fetch error:', error);
           throw error;
         }
 
         setBrands(data || []);
+
+        // Fetch recent activity
+        const { data: recentActivity } = await supabase
+          .from('conversations')
+          .select('brand_id, updated_at')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+          .limit(100);
+          
+        if (recentActivity) {
+          const activityMap = new Map<string, string>();
+          recentActivity.forEach(item => {
+            if (!activityMap.has(item.brand_id)) {
+              activityMap.set(item.brand_id, item.updated_at);
+            }
+          });
+          setBrandActivityMap(activityMap);
+        }
+
       } catch (error: any) {
         logger.error('Error loading brands:', error);
         toast.error(error.message || 'Failed to load brands');
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
+        setIsRefreshing(false);
       }
     });
+  };
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    loadBrands(true);
   };
 
   const handleCreateBrand = useCallback(() => {
@@ -143,7 +164,6 @@ export default function HomePage() {
   }, []);
 
   const handleEditBrand = useCallback((brand: Brand) => {
-    // Navigate to brand details page instead of opening modal
     router.push(`/brands/${brand.id}`);
   }, [router]);
 
@@ -153,7 +173,6 @@ export default function HomePage() {
 
     try {
       if (editingBrand) {
-        // Update existing brand
         const { error } = await supabase
           .from('brands')
           .update({
@@ -165,7 +184,6 @@ export default function HomePage() {
         if (error) throw error;
         toast.success('Brand updated successfully');
       } else {
-        // Create new brand
         const { error } = await supabase
           .from('brands')
           .insert({
@@ -180,7 +198,7 @@ export default function HomePage() {
       }
 
       setIsModalOpen(false);
-      await loadBrands();
+      await loadBrands(true);
     } catch (error: any) {
       logger.error('Error saving brand:', error);
       toast.error(error.message || 'Failed to save brand');
@@ -197,7 +215,7 @@ export default function HomePage() {
       if (error) throw error;
 
       toast.success('Brand deleted successfully');
-      await loadBrands();
+      await loadBrands(true);
     } catch (error) {
       logger.error('Error deleting brand:', error);
       toast.error('Failed to delete brand');
@@ -209,11 +227,9 @@ export default function HomePage() {
     router.push('/login');
   }, [supabase, router]);
 
-  // Filter and sort brands
   const filteredAndSortedBrands = useMemo(() => {
     let filtered = brands;
 
-    // Apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = brands.filter((brand) => {
@@ -226,7 +242,6 @@ export default function HomePage() {
       });
     }
 
-    // Apply sorting
     const sorted = [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'newest':
@@ -238,64 +253,42 @@ export default function HomePage() {
         case 'z-a':
           return b.name.localeCompare(a.name);
         case 'updated':
-          return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
+          const timeA = brandActivityMap.get(a.id) 
+            ? new Date(brandActivityMap.get(a.id)!).getTime() 
+            : new Date(a.updated_at || a.created_at).getTime();
+            
+          const timeB = brandActivityMap.get(b.id) 
+            ? new Date(brandActivityMap.get(b.id)!).getTime() 
+            : new Date(b.updated_at || b.created_at).getTime();
+            
+          return timeB - timeA;
         default:
           return 0;
       }
     });
 
     return sorted;
-  }, [brands, searchQuery, sortBy]);
+  }, [brands, searchQuery, sortBy, brandActivityMap]);
 
   const getSortLabel = () => {
     switch (sortBy) {
-      case 'newest': return 'Newest First';
-      case 'oldest': return 'Oldest First';
+      case 'newest': return 'Newest';
+      case 'oldest': return 'Oldest';
       case 'a-z': return 'A-Z';
       case 'z-a': return 'Z-A';
-      case 'updated': return 'Recently Updated';
+      case 'updated': return 'Active';
       default: return 'Sort';
     }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 animate-in fade-in duration-300">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 animate-in fade-in duration-300">
         <Toaster position="top-right" />
-        
-        {/* Header Skeleton */}
-        <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-700">
-          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-            <div>
-              <div className="h-8 w-48 bg-gradient-to-r from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 rounded animate-pulse mb-2"></div>
-              <div className="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-10 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse"></div>
-              <div className="h-9 w-10 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse"></div>
-            </div>
-          </div>
-        </header>
-
-        {/* Main content with skeleton */}
+        <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-700 h-16" />
         <main className="max-w-7xl mx-auto px-6 py-8">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <div className="h-9 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-2"></div>
-              <div className="h-5 w-64 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
-            </div>
-            <div className="h-12 w-48 bg-gradient-to-r from-blue-200 to-indigo-200 dark:from-blue-800 dark:to-indigo-800 rounded-lg animate-pulse"></div>
-          </div>
-
-          {/* Search bar skeleton */}
-          <div className="mb-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-            <div className="flex gap-4">
-              <div className="flex-1 h-11 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse"></div>
-              <div className="h-11 w-24 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse"></div>
-              <div className="h-11 w-32 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse"></div>
-            </div>
-          </div>
-
+          <div className="h-20 w-1/3 bg-gray-200 dark:bg-gray-800 rounded-lg animate-pulse mb-8"></div>
+          <div className="h-64 w-full bg-gray-200 dark:bg-gray-800 rounded-xl animate-pulse mb-8"></div>
           <BrandGridSkeleton count={6} />
         </main>
       </div>
@@ -303,28 +296,29 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 animate-in fade-in duration-300">
+    <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950 animate-in fade-in duration-300">
       <Toaster position="top-right" />
       
-      {/* Header */}
-      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 shadow-sm transition-all duration-300">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent tracking-tight">
-              Email Copywriter AI
-            </h1>
+      {/* Top Navigation Bar */}
+      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 transition-all duration-300">
+        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between h-16">
+          <div className="flex items-center gap-4">
+            <MoonCommerceLogo className="h-[1.2rem] w-auto text-gray-900 dark:text-white" />
             {organization && (
-              <div className="flex items-center gap-2 mt-1">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{organization.name}</p>
-              </div>
+              <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
+            )}
+            {organization && (
+              <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                {organization.name}
+              </span>
             )}
           </div>
+          
           <div className="flex items-center gap-2">
             {userRole === 'admin' && (
               <button
                 onClick={() => router.push('/admin')}
-                className="hidden sm:flex items-center justify-center w-10 h-10 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
                 title="Team Management"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -337,7 +331,7 @@ export default function HomePage() {
             </div>
             <button
               onClick={() => router.push('/settings')}
-              className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
               title="Settings"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -345,9 +339,10 @@ export default function HomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </button>
+            <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
             <button
               onClick={handleLogout}
-              className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+              className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
               title="Logout"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -358,245 +353,139 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Header with title and create button */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-50">Brands</h2>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">Select a brand to start writing email copy</p>
+      {/* Main Dashboard Content */}
+      <main className="max-w-7xl mx-auto px-6 py-10">
+        
+        <DashboardHeader />
+
+        {/* Top Section: Grid Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-12 items-start">
+          
+          {/* Left Column: Quick Start Action (Chat Box) & Jump Back In */}
+          <div className="lg:col-span-8 flex flex-col gap-6">
+            <QuickStartAction brands={brands} />
+            <RecentActivityList />
           </div>
-          {canManageBrands && (
-            <button
-              onClick={handleCreateBrand}
-              className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 dark:from-blue-500 dark:to-blue-400 dark:hover:from-blue-600 dark:hover:to-blue-500 text-white font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 cursor-pointer focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
-            >
-              <span className="flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Create New Brand
-              </span>
-            </button>
-          )}
+
+          {/* Right Column: Recent Brands */}
+          <div className="lg:col-span-4 h-full">
+            {/* Quick Brand View (Most Recent Brands) */}
+            <RecentBrandsList brands={brands} activityMap={brandActivityMap} />
+          </div>
         </div>
 
-        {/* Search and Controls Bar */}
-        <div className="mb-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-          <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between">
-            {/* Search Bar */}
-            <div className="flex-1 relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
-              <input
-                type="text"
-                placeholder="Search brands..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-10 py-2.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
+        {/* Brands Workspace Section */}
+        <section className="space-y-6 pt-4 border-t border-gray-200 dark:border-gray-800">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pt-4">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Your Brands</h2>
+              <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">Manage brand profiles and view all history</p>
             </div>
-
-            {/* Controls */}
+            
             <div className="flex items-center gap-3">
-              {/* Results count */}
-              <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                {filteredAndSortedBrands.length} {filteredAndSortedBrands.length === 1 ? 'brand' : 'brands'}
+              {/* Search */}
+              <div className="relative w-full sm:w-64">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search brands..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-white dark:bg-gray-800 border-none ring-1 ring-gray-200 dark:ring-gray-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-gray-800 transition-all"
+                />
               </div>
 
-              {/* Sort Dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSortDropdown(!showSortDropdown)}
-                  className="px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2 whitespace-nowrap"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-                  </svg>
-                  {getSortLabel()}
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {showSortDropdown && (
-                  <div className="absolute top-full right-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden z-10 min-w-[180px]">
-                    {[
-                      { value: 'newest', label: 'Newest First' },
-                      { value: 'oldest', label: 'Oldest First' },
-                      { value: 'a-z', label: 'Alphabetical (A-Z)' },
-                      { value: 'z-a', label: 'Alphabetical (Z-A)' },
-                      { value: 'updated', label: 'Recently Updated' },
-                    ].map((option) => (
-                      <button
-                        key={option.value}
-                        onClick={() => {
-                          setSortBy(option.value as SortOption);
-                          setShowSortDropdown(false);
-                        }}
-                        className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
-                          sortBy === option.value
-                            ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium'
-                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span>{option.label}</span>
-                          {sortBy === option.value && (
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <div className="h-8 w-px bg-gray-200 dark:bg-gray-800 mx-1 hidden sm:block"></div>
 
-              {/* View Toggle */}
-              <div className="flex bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg p-1">
+              {/* View Controls - Simplified */}
+              <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-1">
                 <button
                   onClick={() => setViewMode('grid')}
-                  className={`px-3 py-2 rounded-md transition-all ${
-                    viewMode === 'grid'
-                      ? 'bg-white dark:bg-gray-600 shadow-sm text-blue-600 dark:text-blue-400'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  className={`p-1.5 rounded transition-all ${
+                    viewMode === 'grid' ? 'bg-gray-100 dark:bg-gray-700 text-blue-600 dark:text-blue-400' : 'text-gray-400 hover:text-gray-600'
                   }`}
-                  title="Grid view"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" />
                   </svg>
                 </button>
                 <button
                   onClick={() => setViewMode('list')}
-                  className={`px-3 py-2 rounded-md transition-all ${
-                    viewMode === 'list'
-                      ? 'bg-white dark:bg-gray-600 shadow-sm text-blue-600 dark:text-blue-400'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  className={`p-1.5 rounded transition-all ${
+                    viewMode === 'list' ? 'bg-gray-100 dark:bg-gray-700 text-blue-600 dark:text-blue-400' : 'text-gray-400 hover:text-gray-600'
                   }`}
-                  title="List view"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                   </svg>
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Brands Display */}
-        {brands.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 animate-in fade-in duration-500">
-            <div className="w-full max-w-2xl text-center">
-              <div className="relative mb-8 group">
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full blur-3xl opacity-10 group-hover:opacity-20 transition-opacity duration-500"></div>
-                <div className="relative w-24 h-24 bg-white dark:bg-gray-800 rounded-3xl shadow-xl flex items-center justify-center mx-auto transform group-hover:scale-110 transition-transform duration-500 border border-gray-100 dark:border-gray-700">
-                  <svg
-                    className="w-12 h-12 text-blue-600 dark:text-blue-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                  </svg>
-                </div>
-              </div>
-              
-              <h3 className="text-3xl font-bold text-gray-900 dark:text-gray-50 mb-4 tracking-tight">
-                Let's set up your first brand
-              </h3>
-              <p className="text-lg text-gray-600 dark:text-gray-400 mb-10 max-w-lg mx-auto leading-relaxed">
-                Create a brand profile to teach the AI your voice, style, and preferences. It's the first step to generating amazing copy.
-              </p>
-              
               {canManageBrands && (
-                <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                  <button
-                    onClick={handleCreateBrand}
-                    className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg hover:shadow-blue-500/25 hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2 group"
-                  >
-                    <svg className="w-5 h-5 transition-transform group-hover:rotate-90 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Create Your First Brand
-                  </button>
-                </div>
+                <button
+                  onClick={handleCreateBrand}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm hover:shadow transition-all text-sm font-medium"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>New Brand</span>
+                </button>
               )}
             </div>
           </div>
-        ) : filteredAndSortedBrands.length === 0 ? (
-          <div className="text-center py-20">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-12 max-w-lg mx-auto border border-gray-200 dark:border-gray-700">
-              <div className="mb-6">
-                <svg
-                  className="w-16 h-16 text-gray-400 dark:text-gray-500 mx-auto"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
-                </svg>
-              </div>
-              <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-2">No brands found</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-6">
-                No brands match your search. Try a different search term.
-              </p>
-              <button
-                onClick={() => setSearchQuery('')}
-                className="px-6 py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg transition-colors"
-              >
-                Clear Search
-              </button>
+
+          {/* Brands Grid/List */}
+          {brands.length === 0 ? (
+             <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No brands yet</h3>
+                <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-sm mx-auto">Get started by creating your first brand profile to generate tailored AI content.</p>
+                {canManageBrands && (
+                  <button
+                    onClick={handleCreateBrand}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+                  >
+                    Create Brand
+                  </button>
+                )}
+             </div>
+          ) : filteredAndSortedBrands.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500 dark:text-gray-400">No brands match your search.</p>
             </div>
-          </div>
-        ) : (
-          <div className={viewMode === 'grid' 
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
-            : 'flex flex-col gap-4'
-          }>
-            {filteredAndSortedBrands.map((brand) => (
-              viewMode === 'grid' ? (
-                <BrandCard
-                  key={brand.id}
-                  brand={brand}
-                  currentUserId={currentUserId}
-                  canManage={canManageBrands}
-                  onEdit={handleEditBrand}
-                  onDelete={handleDeleteBrand}
-                />
-              ) : (
-                <BrandListItem
-                  key={brand.id}
-                  brand={brand}
-                  currentUserId={currentUserId}
-                  canManage={canManageBrands}
-                  onEdit={handleEditBrand}
-                  onDelete={handleDeleteBrand}
-                />
-              )
-            ))}
-          </div>
-        )}
+          ) : (
+            <div className={viewMode === 'grid' 
+              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
+              : 'flex flex-col gap-3'
+            }>
+              {filteredAndSortedBrands.map((brand) => (
+                viewMode === 'grid' ? (
+                  <BrandCard
+                    key={brand.id}
+                    brand={brand}
+                    currentUserId={currentUserId}
+                    canManage={canManageBrands}
+                    onEdit={handleEditBrand}
+                    onDelete={handleDeleteBrand}
+                  />
+                ) : (
+                  <BrandListItem
+                    key={brand.id}
+                    brand={brand}
+                    currentUserId={currentUserId}
+                    canManage={canManageBrands}
+                    onEdit={handleEditBrand}
+                    onDelete={handleDeleteBrand}
+                  />
+                )
+              ))}
+            </div>
+          )}
+        </section>
       </main>
 
       <Suspense fallback={null}>

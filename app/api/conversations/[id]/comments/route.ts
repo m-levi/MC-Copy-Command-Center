@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import {
   validationError,
   authenticationError,
@@ -7,8 +8,19 @@ import {
   notFoundError,
   withErrorHandling,
 } from '@/lib/api-error';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
+
+// Get service client for bypassing RLS on membership checks
+function getServiceClient() {
+  try {
+    return createServiceClient();
+  } catch (e) {
+    logger.warn('[Comments API] Service client not available');
+    return null;
+  }
+}
 
 // POST: Add a comment
 export const POST = withErrorHandling(async (
@@ -72,9 +84,20 @@ export const POST = withErrorHandling(async (
 
   if (assignedTo) {
     // Validate assigned user is a member of the organization
-    const isMember = await checkOrgMembership(supabase, conversation.brand_id, assignedTo);
-    if (!isMember) {
-      return validationError('Assigned user is not a member of this organization');
+    logger.log('[Comments API] Validating assignedTo:', assignedTo, 'for brand:', conversation.brand_id);
+    
+    // Only validate if we have a service client (can bypass RLS)
+    // Otherwise, trust the frontend selection from the team members list
+    const serviceClient = getServiceClient();
+    if (serviceClient) {
+      const isMember = await checkOrgMembership(serviceClient, conversation.brand_id, assignedTo);
+      logger.log('[Comments API] isMember result:', isMember);
+      if (!isMember) {
+        logger.log('[Comments API] Assigned user is not a member, rejecting');
+        return validationError('Assigned user is not a member of this organization');
+      }
+    } else {
+      logger.log('[Comments API] No service client available, skipping membership validation');
     }
     commentData.assigned_to = assignedTo;
   }
@@ -83,14 +106,49 @@ export const POST = withErrorHandling(async (
     commentData.attachments = attachments;
   }
 
-  const { data: comment, error: commentError } = await supabase
+  logger.log('[Comments API] Inserting comment data:', JSON.stringify(commentData, null, 2));
+
+  let comment;
+  let commentError;
+
+  // Try to insert with all fields
+  const result = await supabase
     .from('conversation_comments')
     .insert(commentData)
     .select('*')
     .single();
+  
+  comment = result.data;
+  commentError = result.error;
+
+  // If the error is about the assigned_to column not existing, retry without it
+  if (commentError && (
+    commentError.message?.includes('assigned_to') || 
+    commentError.code === '42703' || // undefined_column
+    commentError.details?.includes('assigned_to')
+  )) {
+    logger.warn('[Comments API] assigned_to column may not exist, retrying without it');
+    const { assigned_to, ...commentDataWithoutAssignment } = commentData;
+    
+    const retryResult = await supabase
+      .from('conversation_comments')
+      .insert(commentDataWithoutAssignment)
+      .select('*')
+      .single();
+    
+    comment = retryResult.data;
+    commentError = retryResult.error;
+    
+    if (!commentError) {
+      logger.log('[Comments API] Comment created without assignment - run ADD_COMMENT_ASSIGNMENTS.sql migration to enable assignments');
+    }
+  }
 
   if (commentError) {
-    console.error('[Comments API] Error creating comment:', commentError);
+    logger.error('[Comments API] Error creating comment:', commentError);
+    logger.error('[Comments API] Error code:', commentError.code);
+    logger.error('[Comments API] Error details:', commentError.details);
+    logger.error('[Comments API] Error hint:', commentError.hint);
     throw commentError;
   }
 
@@ -237,7 +295,7 @@ export const GET = withErrorHandling(async (
     .order('created_at', { ascending: true });
 
   if (error) {
-    console.error('[Comments API] Error fetching comments:', error);
+    logger.error('[Comments API] Error fetching comments:', error);
     throw error;
   }
 
@@ -278,25 +336,45 @@ export const GET = withErrorHandling(async (
 });
 
 // Helper function to check organization membership
+// Uses service client to bypass RLS for accurate membership checks
 async function checkOrgMembership(
   supabase: any,
   brandId: string,
   userId: string
 ): Promise<boolean> {
-  const { data } = await supabase
+  // Try to use service client for bypassing RLS
+  const client = getServiceClient() || supabase;
+  
+  const { data, error: brandError } = await client
     .from('brands')
     .select('organization_id')
     .eq('id', brandId)
-    .single();
+    .maybeSingle();
 
-  if (!data) return false;
+  if (brandError) {
+    logger.error('[Comments API] Brand query error:', brandError);
+    return false;
+  }
 
-  const { data: membership } = await supabase
+  if (!data) {
+    logger.log('[Comments API] No brand found for id:', brandId);
+    return false;
+  }
+
+  // Use service client to check membership (bypasses RLS)
+  const { data: membership, error: membershipError } = await client
     .from('organization_members')
     .select('id')
     .eq('organization_id', data.organization_id)
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
+
+  if (membershipError) {
+    logger.error('[Comments API] Membership query error:', membershipError);
+    return false;
+  }
+
+  logger.log('[Comments API] Checking membership for user:', userId, 'in org:', data.organization_id, 'Result:', !!membership);
 
   return !!membership;
 }

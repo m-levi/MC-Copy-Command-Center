@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { canManageMembers, getUserOrganization } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
@@ -45,8 +46,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
 
+    // Use service client for data operations to bypass RLS
+    const serviceClient = createServiceClient();
+
     // Prevent user from changing their own role
-    const { data: member } = await supabase
+    // Use service client to ensure we can see the member record
+    const { data: member } = await serviceClient
       .from('organization_members')
       .select('user_id')
       .eq('id', id)
@@ -57,7 +62,7 @@ export async function PATCH(
     }
 
     // Update the member's role
-    const { data, error } = await supabase
+    const { data, error } = await serviceClient
       .from('organization_members')
       .update({ role })
       .eq('id', id)
@@ -106,8 +111,11 @@ export async function DELETE(
 
     const { id } = await params;
 
+    // Use service client for data operations to bypass RLS
+    const serviceClient = createServiceClient();
+
     // Prevent user from removing themselves
-    const { data: member } = await supabase
+    const { data: member } = await serviceClient
       .from('organization_members')
       .select('user_id')
       .eq('id', id)
@@ -118,7 +126,7 @@ export async function DELETE(
     }
 
     // Delete the member
-    const { error } = await supabase
+    const { error } = await serviceClient
       .from('organization_members')
       .delete()
       .eq('id', id)
@@ -134,4 +142,3 @@ export async function DELETE(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

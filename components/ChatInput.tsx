@@ -4,6 +4,7 @@ import { useState, useRef, KeyboardEvent, useEffect, useCallback } from 'react';
 import { QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
 import { ConversationMode, EmailType } from '@/types';
 import VoiceInput from './VoiceInput';
+import { LayoutTemplate, Mail, GitMerge } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -46,6 +47,9 @@ export default function ChatInput({
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showEmailTypePicker, setShowEmailTypePicker] = useState(false);
+  const [selectedEmailTypeIndex, setSelectedEmailTypeIndex] = useState(0);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [interimVoiceText, setInterimVoiceText] = useState('');
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
@@ -75,9 +79,9 @@ export default function ChatInput({
       ];
 
   const emailTypes = [
-    { id: 'design' as const, name: 'Design Email', description: 'Full structured marketing email' },
-    { id: 'letter' as const, name: 'Letter Email', description: 'Short personal letter' },
-    { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation sequence' },
+    { id: 'design' as const, name: 'Design Email', description: 'Full structured marketing email', icon: LayoutTemplate },
+    { id: 'letter' as const, name: 'Letter Email', description: 'Short personal letter', icon: Mail },
+    { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation sequence', icon: GitMerge },
   ];
 
   const getModelName = (modelId: string) => {
@@ -139,6 +143,39 @@ export default function ChatInput({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showEmailTypePicker]);
+
+  // Handle keyboard navigation for email type picker
+  useEffect(() => {
+    if (!showEmailTypePicker) return;
+
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedEmailTypeIndex(prev => (prev + 1) % emailTypes.length);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedEmailTypeIndex(prev => (prev - 1 + emailTypes.length) % emailTypes.length);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        onEmailTypeChange?.(emailTypes[selectedEmailTypeIndex].id);
+        setShowEmailTypePicker(false);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowEmailTypePicker(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showEmailTypePicker, selectedEmailTypeIndex, onEmailTypeChange]); // emailTypes is static
+
+  // Reset selection index when picker opens
+  useEffect(() => {
+    if (showEmailTypePicker) {
+      const idx = emailTypes.findIndex(t => t.id === emailType);
+      setSelectedEmailTypeIndex(idx >= 0 ? idx : 0);
+    }
+  }, [showEmailTypePicker]); // Only run when open state changes
 
   // Check for slash commands
   useEffect(() => {
@@ -424,13 +461,19 @@ export default function ChatInput({
     return "Describe the email you'd like to create...";
   };
 
-  const handleVoiceTranscript = (transcript: string) => {
-    // Append transcript to current message
-    const newMessage = message ? `${message} ${transcript}` : transcript;
-    setMessage(newMessage);
-    
-    // Use debounced save for consistency with typed input
-    debouncedSave(newMessage);
+  const handleVoiceTranscript = (transcript: string, isFinal: boolean) => {
+    if (isFinal) {
+      // Append final transcript to current message
+      const newMessage = message ? `${message} ${transcript}` : transcript;
+      setMessage(newMessage);
+      setInterimVoiceText('');
+      
+      // Use debounced save for consistency with typed input
+      debouncedSave(newMessage);
+    } else {
+      // Update interim text for live preview
+      setInterimVoiceText(transcript);
+    }
     
     // Auto-expand textarea
     if (textareaRef.current) {
@@ -479,57 +522,57 @@ export default function ChatInput({
         )}
 
         {/* Main Input Card - matching Figma design */}
-        <div className="bg-white dark:bg-gray-800 border border-[#e3e3e3] dark:border-gray-700 rounded-2xl sm:rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.06),0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.3),0_2px_8px_rgba(0,0,0,0.4)] overflow-visible transition-all duration-200 focus-within:border-[#c5c5c5] dark:focus-within:border-gray-600 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08),0_2px_10px_rgba(0,0,0,0.1)]">
-          <div className="px-4 sm:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/50">
+          <div className="px-4 sm:px-6 pt-4 pb-2">
             <textarea
               ref={textareaRef}
-              value={message}
+              value={message + (interimVoiceText ? (message ? ' ' : '') + interimVoiceText : '')}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
               placeholder={getPlaceholder()}
               disabled={disabled || isGenerating}
               rows={1}
-              className="w-full text-sm sm:text-base leading-relaxed font-normal bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 focus:border-none outline-none resize-none max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full text-[15px] sm:text-base leading-relaxed bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 focus:border-none outline-none resize-none max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ border: 'none', outline: 'none', boxShadow: 'none' }}
             />
           </div>
           
           {/* Bottom Controls Bar */}
-          <div className="flex items-center justify-between px-4 sm:px-6 pb-3 sm:pb-4">
+          <div className="flex items-center justify-between px-3 sm:px-5 pb-3">
             {/* Left: Mode Toggle & Dropdowns */}
             <div className="flex items-center gap-2">
-              <div className="bg-gray-50 dark:bg-gray-800/50 p-0.5 rounded-md flex items-center gap-0.5">
+              <div className="flex items-center bg-gray-100 dark:bg-gray-800/50 p-1 rounded-lg">
                 <button
                   onClick={() => onModeChange?.('planning')}
                   disabled={hasMessages}
                   className={`
-                    px-2.5 py-1 rounded text-[11px] font-semibold transition-all duration-150
+                    px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200
                     ${mode === 'planning'
-                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                       : hasMessages
                       ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                     }
                   `}
                   title={hasMessages ? "Can't switch modes after starting conversation" : "Planning mode - brainstorm and strategize"}
                 >
-                  PLAN
+                  Plan
                 </button>
                 <button
                   onClick={() => onModeChange?.('email_copy')}
                   disabled={hasMessages}
                   className={`
-                    px-2.5 py-1 rounded text-[11px] font-semibold transition-all duration-150
+                    px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200
                     ${mode === 'email_copy'
-                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                       : hasMessages
                       ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                     }
                   `}
                   title={hasMessages ? "Can't switch modes after starting conversation" : "Email copy mode - generate email content"}
                 >
-                  WRITE
+                  Write
                 </button>
               </div>
               
@@ -538,23 +581,22 @@ export default function ChatInput({
                 <div className="relative hidden sm:block" ref={modelPickerRef}>
                   <button
                     onClick={() => setShowModelPicker(!showModelPicker)}
-                    className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2.5 py-1 flex items-center gap-1.5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors duration-150"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                   >
-                    <span className="text-[11px] font-medium text-gray-700 dark:text-gray-300">
-                      {getModelName(selectedModel)}
-                    </span>
+                    <span>{getModelName(selectedModel)}</span>
                     <svg 
-                      className={`w-2 h-2 text-gray-500 dark:text-gray-400 transition-transform duration-150 ${showModelPicker ? 'rotate-180' : ''}`} 
-                      fill="currentColor" 
-                      viewBox="0 0 10 5"
+                      className={`w-3 h-3 text-gray-400 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} 
+                      fill="none" 
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
                     >
-                      <path d="M0 0L5 5L10 0H0Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
                   
                   {/* Dropdown Menu */}
                   {showModelPicker && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden min-w-[120px] z-50">
+                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[140px] z-50 py-1 animate-in fade-in zoom-in-95 duration-100">
                       {models.map((model) => (
                         <button
                           key={model.id}
@@ -563,9 +605,9 @@ export default function ChatInput({
                             setShowModelPicker(false);
                           }}
                           className={`
-                            w-full px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors duration-150 cursor-pointer
+                            w-full px-3 py-2 text-left text-xs font-medium transition-colors
                             ${selectedModel === model.id
-                              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+                              ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                               : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                             }
                           `}
@@ -583,40 +625,65 @@ export default function ChatInput({
                 <div className="relative hidden sm:block" ref={emailTypePickerRef}>
                   <button
                     onClick={() => setShowEmailTypePicker(!showEmailTypePicker)}
-                    className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2.5 py-1 flex items-center gap-1.5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors duration-150 cursor-pointer"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                   >
-                    <span className="text-[11px] font-medium text-gray-700 dark:text-gray-300">
-                      {getEmailTypeName(emailType)}
-                    </span>
+                    {(() => {
+                      const activeType = emailTypes.find(t => t.id === emailType);
+                      const Icon = activeType?.icon || LayoutTemplate;
+                      return <Icon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />;
+                    })()}
+                    <span>{getEmailTypeName(emailType)}</span>
                     <svg 
-                      className={`w-2 h-2 text-gray-500 dark:text-gray-400 transition-transform duration-150 ${showEmailTypePicker ? 'rotate-180' : ''}`} 
-                      fill="currentColor" 
-                      viewBox="0 0 10 5"
+                      className={`w-3 h-3 text-gray-400 transition-transform duration-200 ${showEmailTypePicker ? 'rotate-180' : ''}`} 
+                      fill="none" 
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
                     >
-                      <path d="M0 0L5 5L10 0H0Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
                   
                   {/* Dropdown Menu */}
                   {showEmailTypePicker && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden min-w-[140px] z-50">
-                      {emailTypes.map((type) => (
+                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[280px] z-50 py-1.5 animate-in fade-in zoom-in-95 duration-100">
+                      {emailTypes.map((type, index) => (
                         <button
                           key={type.id}
                           onClick={() => {
                             onEmailTypeChange?.(type.id);
                             setShowEmailTypePicker(false);
                           }}
+                          onMouseEnter={() => setSelectedEmailTypeIndex(index)}
                           className={`
-                            w-full px-2.5 py-1.5 text-left transition-colors duration-150 cursor-pointer
-                            ${emailType === type.id
-                              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                            w-full px-3 py-2.5 text-left transition-all flex items-start gap-3 group
+                            ${index === selectedEmailTypeIndex
+                              ? 'bg-blue-50 dark:bg-blue-900/20' 
+                              : ''
                             }
                           `}
                         >
-                          <div className="text-[11px] font-medium">{type.name}</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">{type.description}</div>
+                          <div className={`mt-0.5 p-1.5 rounded-md transition-colors ${
+                            index === selectedEmailTypeIndex || emailType === type.id
+                              ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' 
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                          }`}>
+                            <type.icon className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1">
+                            <div className={`text-sm font-medium ${
+                              emailType === type.id 
+                                ? 'text-blue-700 dark:text-blue-300' 
+                                : 'text-gray-900 dark:text-gray-100'
+                            }`}>
+                              {type.name}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
+                              {type.description}
+                            </div>
+                          </div>
+                          {emailType === type.id && (
+                            <div className="mt-2 w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 flex-shrink-0" />
+                          )}
                         </button>
                       ))}
                     </div>
@@ -626,14 +693,14 @@ export default function ChatInput({
             </div>
 
             {/* Right: Voice Input & Send Button */}
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-2">
               {/* Last saved time - subtle and static */}
-              {lastSavedTime && !isGenerating && charCount > 0 && (
-                <span className="text-[10px] text-gray-400 dark:text-gray-500 hidden sm:inline">
+              {lastSavedTime && !isGenerating && !isRecordingVoice && charCount > 0 && (
+                <span className="text-[10px] text-gray-400 dark:text-gray-500 hidden sm:inline mr-2">
                   Saved {lastSavedTime}
                 </span>
               )}
-              {charCount > 0 && !lastSavedTime && (
+              {charCount > 0 && !lastSavedTime && !isRecordingVoice && (
                 <span className="text-xs text-gray-400 dark:text-gray-500 hidden sm:inline">{charCount}</span>
               )}
               
@@ -642,30 +709,38 @@ export default function ChatInput({
                 <VoiceInput
                   onTranscript={handleVoiceTranscript}
                   disabled={disabled}
+                  onStateChange={setIsRecordingVoice}
                 />
               )}
               
-              {isGenerating && onStop ? (
-                <button
-                  onClick={onStop}
-                  className="w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 active:scale-95 sm:hover:scale-105 dark:bg-red-600 dark:hover:bg-red-700 text-white rounded-full transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer touch-manipulation"
-                  title="Stop generating"
-                >
-                  <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                    <rect x="6" y="6" width="12" height="12" />
-                  </svg>
-                </button>
-              ) : (
-                <button
-                  onClick={handleSend}
-                  disabled={!message.trim() || disabled}
-                  className="w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-95 sm:hover:scale-105 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-full transition-all duration-150 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100 touch-manipulation"
-                  title="Send message"
-                >
-                  <svg className="w-4.5 h-4.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                  </svg>
-                </button>
+              {/* Send / Stop Button - Hidden when recording */}
+              {!isRecordingVoice && (
+                isGenerating && onStop ? (
+                  <button
+                    onClick={onStop}
+                    className="flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 rounded-full transition-colors"
+                    title="Stop generating"
+                  >
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={!message.trim() || disabled}
+                    className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
+                      !message.trim() || disabled
+                        ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                        : 'text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/20'
+                    }`}
+                    title="Send message"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                    </svg>
+                  </button>
+                )
               )}
             </div>
           </div>

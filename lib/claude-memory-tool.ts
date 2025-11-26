@@ -10,6 +10,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createEdgeClient } from '@/lib/supabase/edge';
+import { logger } from '@/lib/logger';
 
 interface MemoryFile {
   id: string;
@@ -119,7 +120,7 @@ export class ClaudeMemoryTool {
 
       return data.content;
     } catch (error) {
-      console.error('[Memory Tool] View error:', error);
+      logger.error('[Memory Tool] View error:', error);
       return `Error reading ${path}: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   }
@@ -152,10 +153,10 @@ export class ClaudeMemoryTool {
 
       if (error) throw error;
 
-      console.log(`[Memory Tool] Created/updated file: ${path} (${content.length} chars)`);
+      logger.log(`[Memory Tool] Created/updated file: ${path} (${content.length} chars)`);
       return `Successfully created/updated ${path}`;
     } catch (error) {
-      console.error('[Memory Tool] Create error:', error);
+      logger.error('[Memory Tool] Create error:', error);
       return `Error creating ${path}: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   }
@@ -201,10 +202,10 @@ export class ClaudeMemoryTool {
 
       if (updateError) throw updateError;
 
-      console.log(`[Memory Tool] Edited file: ${path}`);
+      logger.log(`[Memory Tool] Edited file: ${path}`);
       return `Successfully edited ${path}`;
     } catch (error) {
-      console.error('[Memory Tool] Edit error:', error);
+      logger.error('[Memory Tool] Edit error:', error);
       return `Error editing ${path}: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   }
@@ -255,10 +256,10 @@ export class ClaudeMemoryTool {
 
       if (updateError) throw updateError;
 
-      console.log(`[Memory Tool] Inserted text at line ${lineNumber} in ${path}`);
+      logger.log(`[Memory Tool] Inserted text at line ${lineNumber} in ${path}`);
       return `Successfully inserted text at line ${lineNumber} in ${path}`;
     } catch (error) {
-      console.error('[Memory Tool] Insert error:', error);
+      logger.error('[Memory Tool] Insert error:', error);
       return `Error inserting into ${path}: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   }
@@ -285,7 +286,7 @@ export class ClaudeMemoryTool {
 
         if (error) throw error;
 
-        console.log(`[Memory Tool] Deleted directory: ${path}`);
+        logger.log(`[Memory Tool] Deleted directory: ${path}`);
         return `Successfully deleted directory ${path}`;
       }
 
@@ -298,10 +299,10 @@ export class ClaudeMemoryTool {
 
       if (error) throw error;
 
-      console.log(`[Memory Tool] Deleted file: ${path}`);
+      logger.log(`[Memory Tool] Deleted file: ${path}`);
       return `Successfully deleted ${path}`;
     } catch (error) {
-      console.error('[Memory Tool] Delete error:', error);
+      logger.error('[Memory Tool] Delete error:', error);
       return `Error deleting ${path}: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   }
@@ -347,10 +348,10 @@ export class ClaudeMemoryTool {
 
       if (deleteError) throw deleteError;
 
-      console.log(`[Memory Tool] Renamed ${oldPath} to ${newPath}`);
+      logger.log(`[Memory Tool] Renamed ${oldPath} to ${newPath}`);
       return `Successfully renamed ${oldPath} to ${newPath}`;
     } catch (error) {
-      console.error('[Memory Tool] Rename error:', error);
+      logger.error('[Memory Tool] Rename error:', error);
       return `Error renaming ${oldPath}: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   }
@@ -359,7 +360,7 @@ export class ClaudeMemoryTool {
    * Process a memory tool use request from Claude
    */
   async processToolUse(command: MemoryCommand, params: Record<string, any>): Promise<string> {
-    console.log(`[Memory Tool] Processing command: ${command}`, params);
+    logger.log(`[Memory Tool] Processing command: ${command}`, params);
 
     switch (command) {
       case 'view':
@@ -425,7 +426,7 @@ Use the memory tool to view, create, edit, or delete memory files as needed.
 </memory_context>
 `;
   } catch (error) {
-    console.error('[Memory Context] Error loading:', error);
+    logger.error('[Memory Context] Error loading:', error);
     return '<memory_context>Error loading memory context</memory_context>';
   }
 }

@@ -3,6 +3,8 @@
  * Provides consistent error responses and better debugging
  */
 
+import { logger } from '@/lib/logger';
+
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'AUTHENTICATION_ERROR'
@@ -61,7 +63,7 @@ export function createErrorResponse(
       timestamp,
     };
 
-    console.error(`[API Error ${id}]`, {
+    logger.error(`[API Error ${id}]`, {
       code: error.code,
       message: error.message,
       details: error.details,
@@ -87,7 +89,7 @@ export function createErrorResponse(
       timestamp,
     };
 
-    console.error(`[Unexpected Error ${id}]`, {
+    logger.error(`[Unexpected Error ${id}]`, {
       message: error.message,
       stack: error.stack,
     });
@@ -110,7 +112,7 @@ export function createErrorResponse(
     timestamp,
   };
 
-  console.error(`[Unknown Error ${id}]`, error);
+  logger.error(`[Unknown Error ${id}]`, error);
 
   return new Response(JSON.stringify(errorResponse), {
     status: 500,
@@ -198,12 +200,12 @@ export function withErrorHandling<T = any, R extends Request = Request>(
 ): (req: R, context?: T) => Promise<Response> {
   return async (req: R, context?: T) => {
     const requestId = generateRequestId();
-    console.log(`[${requestId}] ${req.method} ${req.url}`);
+    logger.log(`[${requestId}] ${req.method} ${req.url}`);
 
     try {
       return await handler(req, context);
     } catch (error) {
-      console.error(`[${requestId}] Error in handler:`, error);
+      logger.error(`[${requestId}] Error in handler:`, error);
       return createErrorResponse(error, requestId);
     }
   };

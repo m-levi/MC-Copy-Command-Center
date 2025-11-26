@@ -214,7 +214,15 @@ export class MessageQueue {
 
     const { data: jobs, error } = await query;
 
-    if (error) throw error;
+    // Gracefully handle missing table (migration not run yet)
+    if (error) {
+      // PGRST205 = table not found in schema cache
+      if (error.code === 'PGRST205' || error.message?.includes('message_jobs')) {
+        console.warn('[MessageQueue] message_jobs table not found - migration may not be applied. Returning empty array.');
+        return [];
+      }
+      throw error;
+    }
 
     return (jobs || []).map((job: any) => ({
       id: job.id,

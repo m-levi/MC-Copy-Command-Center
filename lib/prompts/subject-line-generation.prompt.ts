@@ -11,7 +11,9 @@ export const SUBJECT_LINE_GENERATION_SYSTEM_PROMPT = `You are a world-class emai
    - **Short/Punchy**: Under 4 words, extremely scannable.
 3. **Length**: Keep all subject lines under 50 characters (mobile friendly) unless a longer one is exceptionally strong.
 4. **Tone Match**: Ensure the subject lines match the voice of the email body.
-5. **Output JSON**: Return ONLY a JSON object with the options.
+5. **Preheader**: For each subject line, generate a matching "preview text" (preheader) that complements it.
+6. **Scoring**: Predict a "performance score" (0-100) based on industry benchmarks for this type of subject line.
+7. **Output JSON**: Return ONLY a JSON object with the options.
 </rules>
 
 <json_structure>
@@ -19,7 +21,9 @@ export const SUBJECT_LINE_GENERATION_SYSTEM_PROMPT = `You are a world-class emai
   "options": [
     {
       "subject": "The subject line text",
-      "tone": "Benefit | Curiosity | Urgency | Personal | Short",
+      "preview_text": "The preview text/preheader",
+      "type": "Benefit | Curiosity | Urgency | Personal | Short",
+      "score": 85,
       "explanation": "Brief reasoning why this works"
     }
   ]
@@ -36,4 +40,5 @@ Here is the email draft:
 
 Generate 5 high-converting subject line options for this email based on the system instructions. Return valid JSON only.
 `;
+
 

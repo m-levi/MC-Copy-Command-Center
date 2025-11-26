@@ -1,133 +1,199 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { logger } from '@/lib/logger';
 
 interface VoiceInputProps {
-  onTranscript: (text: string) => void;
+  onTranscript: (text: string, isFinal: boolean) => void;
   disabled?: boolean;
+  onStateChange?: (isRecording: boolean) => void;
 }
 
-export default function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+export default function VoiceInput({ onTranscript, disabled, onStateChange }: VoiceInputProps) {
+  const [isListening, setIsListening] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const recognitionRef = useRef<any>(null);
 
-  const startRecording = async () => {
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+    };
+  }, []);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const startListening = useCallback(async () => {
+    // Check for Web Speech API support
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      toast.error('Voice input is not supported in this browser. Try Chrome or Edge.');
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
+      console.log('[Voice] Starting Speech Recognition...');
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+      recognition.onstart = () => {
+        console.log('[Voice] ✅ Recognition started successfully');
+        setIsListening(true);
+        onStateChange?.(true);
+        setDuration(0);
+        timerRef.current = setInterval(() => {
+          setDuration(d => d + 1);
+        }, 1000);
+        toast.success('Listening...', { id: 'voice-status', duration: 2000 });
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        if (finalTranscript) {
+          onTranscript(finalTranscript, true);
+        } else if (interimTranscript) {
+          onTranscript(interimTranscript, false);
         }
       };
 
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        await transcribeAudio(audioBlob);
+      recognition.onerror = (event: any) => {
+        console.error('[Voice] ❌ Recognition error:', event.error);
         
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
+        if (event.error === 'not-allowed') {
+          toast.error('Microphone access denied. Check browser permissions.', { duration: 4000 });
+        } else if (event.error === 'no-speech') {
+          toast('No speech detected', { icon: '🔇' });
+        } else if (event.error !== 'aborted') {
+          toast.error(`Voice error: ${event.error}`);
+        }
+        
+        stopListening();
       };
 
-      mediaRecorder.start();
-      setIsRecording(true);
-      toast('🎤 Recording... Click again to stop', {
-        duration: 3000,
-      });
-    } catch (error) {
-      logger.error('Error starting recording:', error);
-      toast.error('Microphone access denied or not available');
-    }
-  };
+      recognition.onend = () => {
+        console.log('[Voice] Recognition ended');
+        if (isListening) {
+          stopListening();
+        }
+      };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  const transcribeAudio = async (audioBlob: Blob) => {
-    setIsTranscribing(true);
-    toast('✨ Transcribing...', { duration: 2000 });
-
-    try {
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-      formData.append('language', 'en');
-
-      const response = await fetch('/api/transcribe', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('Transcription failed');
-      }
-
-      const { text } = await response.json();
+      recognition.start();
+      recognitionRef.current = recognition;
       
-      if (text && text.trim()) {
-        onTranscript(text.trim());
-        toast.success('✓ Transcribed!');
-      } else {
-        toast.error('No speech detected');
-      }
-    } catch (error) {
-      logger.error('Transcription error:', error);
-      toast.error('Failed to transcribe audio');
-    } finally {
-      setIsTranscribing(false);
+    } catch (error: any) {
+      console.error('[Voice] Failed to start:', error);
+      toast.error('Failed to start voice input');
     }
-  };
+  }, [onTranscript, onStateChange, isListening]);
+
+  const stopListening = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    
+    setIsListening(false);
+    onStateChange?.(false);
+    toast.dismiss('voice-status');
+  }, [onStateChange]);
 
   const handleClick = () => {
-    if (disabled || isTranscribing) return;
+    if (disabled) return;
     
-    if (isRecording) {
-      stopRecording();
+    if (isListening) {
+      stopListening();
     } else {
-      startRecording();
+      startListening();
     }
   };
+
+  // Recording UI
+  if (isListening) {
+    return (
+      <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 rounded-full pl-3 pr-1 py-1 border border-red-200 dark:border-red-800/50 animate-in fade-in slide-in-from-right-2 duration-200">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+        </span>
+        
+        <span className="text-xs font-mono font-medium text-red-600 dark:text-red-400 tabular-nums">
+          {formatTime(duration)}
+        </span>
+        
+        <div className="flex items-center gap-px h-4 mx-1">
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="w-0.5 bg-red-500 dark:bg-red-400 rounded-full animate-pulse"
+              style={{
+                height: `${40 + Math.random() * 60}%`,
+                animationDelay: `${i * 150}ms`,
+                animationDuration: '500ms'
+              }}
+            />
+          ))}
+        </div>
+        
+        <button
+          onClick={stopListening}
+          className="p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors ml-1"
+          title="Stop listening"
+        >
+          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="1" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <button
       onClick={handleClick}
-      disabled={disabled || isTranscribing}
+      disabled={disabled}
       className={`
-        p-2 rounded-lg transition-all duration-150 cursor-pointer
-        ${isRecording
-          ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 animate-pulse'
-          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-blue-600 dark:hover:text-blue-400'
-        }
-        ${isTranscribing ? 'opacity-50 cursor-wait' : ''}
+        flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200
+        bg-gray-100 dark:bg-gray-800 
+        text-gray-500 dark:text-gray-400 
+        hover:bg-red-50 dark:hover:bg-red-900/30 
+        hover:text-red-500 dark:hover:text-red-400
         disabled:opacity-50 disabled:cursor-not-allowed
+        active:scale-95
       `}
-      title={isRecording ? 'Stop recording' : 'Start voice input'}
-      aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
+      title="Start voice input"
+      aria-label="Start voice input"
     >
-      {isTranscribing ? (
-        <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-      ) : isRecording ? (
-        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-          <rect x="7" y="7" width="10" height="10" rx="2" />
-        </svg>
-      ) : (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-        </svg>
-      )}
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+      </svg>
     </button>
   );
 }
-

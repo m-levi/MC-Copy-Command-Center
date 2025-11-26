@@ -6,6 +6,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createEdgeClient } from '@/lib/supabase/edge';
+import { logger } from '@/lib/logger';
 
 export interface MemoryEntry {
   id: string;
@@ -35,10 +36,10 @@ async function getSupabaseClient() {
   const isEdge = typeof (globalThis as any).EdgeRuntime !== 'undefined' || process.env.NEXT_RUNTIME === 'edge';
   
   if (isEdge) {
-    console.log('[Memory] Using Edge runtime client');
+    logger.log('[Memory] Using Edge runtime client');
     return createEdgeClient();
   } else {
-    console.log('[Memory] Using server client');
+    logger.log('[Memory] Using server client');
     return await createClient();
   }
 }
@@ -77,13 +78,13 @@ export async function saveMemory(
       .single();
 
     if (error) {
-      console.error('Error saving memory:', error);
+      logger.error('Error saving memory:', error);
       return null;
     }
 
     return data;
   } catch (error) {
-    console.error('Exception saving memory:', error);
+    logger.error('Exception saving memory:', error);
     return null;
   }
 }
@@ -103,13 +104,13 @@ export async function loadMemories(conversationId: string): Promise<MemoryEntry[
       .order('updated_at', { ascending: false });
 
     if (error) {
-      console.error('Error loading memories:', error);
+      logger.error('Error loading memories:', error);
       return [];
     }
 
     return data || [];
   } catch (error) {
-    console.error('Exception loading memories:', error);
+    logger.error('Exception loading memories:', error);
     return [];
   }
 }
@@ -253,7 +254,7 @@ export function parseMemoryInstructions(content: string): Array<{
   while ((match = pattern.exec(content)) !== null) {
     matchCount++;
     if (matchCount > MAX_MATCHES) {
-      console.warn(`[Memory] Too many memory instructions (>${MAX_MATCHES}), stopping parse`);
+      logger.warn(`[Memory] Too many memory instructions (>${MAX_MATCHES}), stopping parse`);
       break;
     }
     
@@ -264,19 +265,19 @@ export function parseMemoryInstructions(content: string): Array<{
     
     // SECURITY: Validate key is whitelisted
     if (!ALLOWED_MEMORY_KEYS.includes(key)) {
-      console.warn(`[Memory] Rejected non-whitelisted key: ${key}`);
+      logger.warn(`[Memory] Rejected non-whitelisted key: ${key}`);
       continue;
     }
     
     // SECURITY: Validate category
     if (!ALLOWED_CATEGORIES.includes(category as MemoryEntry['category'])) {
-      console.warn(`[Memory] Rejected invalid category: ${category}`);
+      logger.warn(`[Memory] Rejected invalid category: ${category}`);
       continue;
     }
     
     // SECURITY: Validate value length (prevent storage abuse)
     if (value.length > 500) {
-      console.warn(`[Memory] Rejected overly long value for key: ${key}`);
+      logger.warn(`[Memory] Rejected overly long value for key: ${key}`);
       continue;
     }
     
@@ -284,7 +285,7 @@ export function parseMemoryInstructions(content: string): Array<{
     const sanitizedValue = value.replace(/<[^>]*>/g, '').trim();
     
     if (!sanitizedValue) {
-      console.warn(`[Memory] Rejected empty value after sanitization for key: ${key}`);
+      logger.warn(`[Memory] Rejected empty value after sanitization for key: ${key}`);
       continue;
     }
     
@@ -311,7 +312,7 @@ export async function deleteMemory(conversationId: string, key: string): Promise
     .eq('key', key);
 
   if (error) {
-    console.error('Error deleting memory:', error);
+    logger.error('Error deleting memory:', error);
     return false;
   }
 
@@ -331,7 +332,7 @@ export async function clearExpiredMemories(): Promise<number> {
     .select('id');
 
   if (error) {
-    console.error('Error clearing expired memories:', error);
+    logger.error('Error clearing expired memories:', error);
     return 0;
   }
 

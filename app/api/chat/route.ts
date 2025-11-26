@@ -15,6 +15,7 @@ import { getActiveDebugPrompt, determinePromptType } from '@/lib/debug-prompts';
 import { handleUnifiedStream } from '@/lib/unified-stream-handler';
 import { messageQueue } from '@/lib/queue/message-queue';
 import { createClient } from '@/lib/supabase/server';
+import { logger } from '@/lib/logger';
 
 // Temporarily disable edge runtime to debug memory loading issues
 // export const runtime = 'edge';
@@ -23,9 +24,9 @@ import { createClient } from '@/lib/supabase/server';
 
 export async function POST(req: Request) {
   try {
-    console.log('[Chat API] Received request');
+    logger.log('[Chat API] Received request');
     const { messages, modelId, brandContext, regenerateSection, conversationId, conversationMode, emailType, isFlowMode, flowType } = await req.json();
-    console.log('[Chat API] Request params:', { 
+    logger.log('[Chat API] Request params:', { 
       modelId, 
       conversationId, 
       conversationMode,
@@ -38,11 +39,11 @@ export async function POST(req: Request) {
 
     const model = getModelById(modelId);
     if (!model) {
-      console.error('[Chat API] Invalid model:', modelId);
+      logger.error('[Chat API] Invalid model:', modelId);
       return new Response('Invalid model', { status: 400 });
     }
     
-    console.log('[Chat API] Using model:', model.name, 'Provider:', model.provider);
+    logger.log('[Chat API] Using model:', model.name, 'Provider:', model.provider);
 
     // Extract conversation context (fast, synchronous)
     const conversationContext = extractConversationContext(messages);
@@ -67,39 +68,39 @@ export async function POST(req: Request) {
           
           return relevantDocs.length > 0 ? buildRAGContext(relevantDocs) : '';
         } catch (error) {
-          console.error('RAG search error:', error);
+          logger.error('RAG search error:', error);
           return ''; // Continue without RAG if it fails
         }
       })(),
       // Legacy memory (still load for OpenAI models)
       (async () => {
         if (!conversationId) {
-          console.log('[Memory] No conversationId provided, skipping legacy memory load');
+          logger.log('[Memory] No conversationId provided, skipping legacy memory load');
           return [];
         }
         try {
-          console.log('[Memory] Loading legacy memories for conversation:', conversationId);
+          logger.log('[Memory] Loading legacy memories for conversation:', conversationId);
           const mems = await loadMemories(conversationId);
-          console.log('[Memory] Loaded', mems.length, 'legacy memories');
+          logger.log('[Memory] Loaded', mems.length, 'legacy memories');
           return mems;
         } catch (error) {
-          console.error('[Memory] Failed to load legacy memories:', error);
+          logger.error('[Memory] Failed to load legacy memories:', error);
           return [];
         }
       })(),
       // Claude native memory (for Claude models)
       (async () => {
         if (!conversationId) {
-          console.log('[Claude Memory] No conversationId provided');
+          logger.log('[Claude Memory] No conversationId provided');
           return '';
         }
         try {
-          console.log('[Claude Memory] Loading native memory context for conversation:', conversationId);
+          logger.log('[Claude Memory] Loading native memory context for conversation:', conversationId);
           const context = await loadClaudeMemoryContext(conversationId);
-          console.log('[Claude Memory] Loaded native memory context');
+          logger.log('[Claude Memory] Loaded native memory context');
           return context;
         } catch (error) {
-          console.error('[Claude Memory] Failed to load:', error);
+          logger.error('[Claude Memory] Failed to load:', error);
           return '';
         }
       })(),
@@ -135,7 +136,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
       
       if (isFirstMessage) {
         // First message - use V2 prompt with full template
-        console.log('[Chat API] Using new V2 prompt system for standard design email (FIRST MESSAGE)');
+        logger.log('[Chat API] Using new V2 prompt system for standard design email (FIRST MESSAGE)');
         
         const brandInfo = buildBrandInfo(brandContext);
         const contextInfo = buildContextInfo(conversationContext);
@@ -158,7 +159,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         // Get the first user message (the copy brief)
         const copyBrief = userMessages[0]?.content || '';
         
-        console.log('[Chat API] Filling COPY_BRIEF with user message:', copyBrief.substring(0, 100) + '...');
+        logger.log('[Chat API] Filling COPY_BRIEF with user message:', copyBrief.substring(0, 100) + '...');
         
         // Fill in the COPY_BRIEF placeholder with actual user message
         let filledUserPrompt = userPromptTemplate.replace(/{{COPY_BRIEF}}/g, copyBrief || 'No copy brief provided.');
@@ -173,7 +174,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         }
 
         if (filledUserPrompt.includes('{{')) {
-          console.warn('[Chat API] ⚠️ Placeholder(s) still present after replacement. Applying fallbacks.', {
+          logger.warn('[Chat API] ⚠️ Placeholder(s) still present after replacement. Applying fallbacks.', {
             hasCopyBrief: !!copyBrief,
             hasStyleGuide: !!brandVoiceGuidelines,
             hasAdditionalContext: !!additionalContext,
@@ -185,18 +186,18 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
             .replace(/{{ADDITIONAL_CONTEXT}}/g, additionalContext || '');
         }
 
-        console.log('[Chat API] Filled prompt preview:', filledUserPrompt.substring(0, 200));
+        logger.log('[Chat API] Filled prompt preview:', filledUserPrompt.substring(0, 200));
         if (filledUserPrompt.includes('{{')) {
-          console.warn('[Chat API] ⚠️ WARNING: Placeholders still detected in filled prompt.');
+          logger.warn('[Chat API] ⚠️ WARNING: Placeholders still detected in filled prompt.');
         }
         
         // Replace the first (only) user message with the filled prompt
         processedMessages = [{ ...userMessages[0], content: filledUserPrompt }];
         
-        console.log('[Chat API] Processed first message with filled user prompt');
+        logger.log('[Chat API] Processed first message with filled user prompt');
       } else {
         // Follow-up message - use old system with full conversation context
-        console.log('[Chat API] Using standard prompt system for follow-up message (preserving conversation history)');
+        logger.log('[Chat API] Using standard prompt system for follow-up message (preserving conversation history)');
         
         systemPrompt = buildSystemPrompt(brandContext, ragContext, {
           regenerateSection,
@@ -209,7 +210,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         // Keep all messages as-is for follow-ups
         processedMessages = messages;
         
-        console.log('[Chat API] Sending', messages.length, 'messages for context');
+        logger.log('[Chat API] Sending', messages.length, 'messages for context');
       }
     } else {
       // Use existing centralized prompt builder for other modes
@@ -238,7 +239,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         const customPrompt = await getActiveDebugPrompt(supabase, user.id, promptType);
         
         if (customPrompt) {
-          console.log(`[Chat API] 🐛 DEBUG MODE: Using custom prompt: ${customPrompt.name} for ${promptType}`);
+          logger.log(`[Chat API] 🐛 DEBUG MODE: Using custom prompt: ${customPrompt.name} for ${promptType}`);
           
           // Override system prompt if provided
           if (customPrompt.system_prompt) {
@@ -279,7 +280,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         // Flow mode uses 'flow_email' type
         const customPrompt = await getActiveDebugPrompt(supabase, user.id, 'flow_email');
         if (customPrompt) {
-          console.log(`[Chat API] 🐛 DEBUG MODE: Using custom flow prompt: ${customPrompt.name}`);
+          logger.log(`[Chat API] 🐛 DEBUG MODE: Using custom flow prompt: ${customPrompt.name}`);
           if (customPrompt.system_prompt) {
             systemPrompt = customPrompt.system_prompt;
           }
@@ -290,7 +291,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
     // Background queue mode: queue jobs for cron processing instead of direct streaming
     // Enable with ENABLE_MESSAGE_QUEUE=true in environment variables
     if (process.env.ENABLE_MESSAGE_QUEUE === 'true' && user && conversationId) {
-      console.log('[Chat API] Background queue mode enabled, queueing job');
+      logger.log('[Chat API] Background queue mode enabled, queueing job');
       
       try {
         // Create a placeholder message in the database
@@ -307,7 +308,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
           .single();
 
         if (msgError || !newMessage) {
-          console.error('[Chat API] Failed to create message:', msgError);
+          logger.error('[Chat API] Failed to create message:', msgError);
           throw new Error('Failed to create message');
         }
 
@@ -328,7 +329,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
           },
         });
 
-        console.log('[Chat API] Job queued:', jobId, 'Message:', newMessage.id);
+        logger.log('[Chat API] Job queued:', jobId, 'Message:', newMessage.id);
 
         // Return immediately with job info - client should poll /api/messages/[id]/stream
         return new Response(JSON.stringify({
@@ -341,7 +342,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
           headers: { 'Content-Type': 'application/json' },
         });
       } catch (queueError) {
-        console.error('[Chat API] Queue error, falling back to direct streaming:', queueError);
+        logger.error('[Chat API] Queue error, falling back to direct streaming:', queueError);
         // Fall through to direct streaming
       }
     }
@@ -361,7 +362,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         { maxRetries: 2, timeout: 60000 }
       );
     } catch (primaryError) {
-      console.error(`Primary model ${modelId} failed, attempting fallback:`, primaryError);
+      logger.error(`Primary model ${modelId} failed, attempting fallback:`, primaryError);
       
       // Fallback logic: try the other provider
       try {
@@ -377,16 +378,16 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
           conversationId
         });
       } catch (fallbackError) {
-        console.error('Fallback model also failed:', fallbackError);
+        logger.error('Fallback model also failed:', fallbackError);
         throw fallbackError;
       }
     }
 
     return new Response('Unsupported provider', { status: 400 });
   } catch (error) {
-    console.error('[Chat API] Error occurred:', error);
-    console.error('[Chat API] Error type:', typeof error);
-    console.error('[Chat API] Error details:', {
+    logger.error('[Chat API] Error occurred:', error);
+    logger.error('[Chat API] Error type:', typeof error);
+    logger.error('[Chat API] Error details:', {
       name: error instanceof Error ? error.name : 'N/A',
       message: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : 'N/A'

@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import ThoughtProcess from './ThoughtProcess';
 import InlineCommentBox from './InlineCommentBox';
 import { ChatMessageUser, ChatMessageActions, ProductLinksSection } from './chat';
-import SubjectLineGeneratorModal from './SubjectLineGeneratorModal';
+import SubjectLineGeneratorInline from './SubjectLineGeneratorInline';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
@@ -140,7 +140,6 @@ const ChatMessage = memo(function ChatMessage({
   const [selectedText, setSelectedText] = useState<string>('');
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null);
   const [showInlineCommentBox, setShowInlineCommentBox] = useState(false);
-  const [isSubjectLineModalOpen, setIsSubjectLineModalOpen] = useState(false);
   const [forceRender, setForceRender] = useState(0); // Force re-render
   const [isMounted, setIsMounted] = useState(false);
   const supabase = createClient();
@@ -315,18 +314,19 @@ const ChatMessage = memo(function ChatMessage({
           
           const highlight = inlineHighlights[match.highlightIdx];
           
+          // Subtle underline highlight with inline comment count
           parts.push(
             <button
               key={key++}
               type="button"
               onClick={() => onCommentClick?.()}
-              className="inline-block relative bg-amber-50 dark:bg-amber-900/20 text-gray-900 dark:text-gray-100 border-b border-amber-400/70 dark:border-amber-500/60 hover:bg-amber-100 dark:hover:bg-amber-800/30 transition-colors cursor-pointer"
-              title={`${highlight.count} comment${highlight.count > 1 ? 's' : ''} on this text`}
+              className="group/highlight inline text-inherit underline decoration-amber-400/60 dark:decoration-amber-500/50 decoration-dotted decoration-2 underline-offset-4 hover:decoration-amber-500 dark:hover:decoration-amber-400 hover:decoration-solid transition-all duration-150 cursor-pointer relative"
+              title={`${highlight.count} comment${highlight.count > 1 ? 's' : ''} - Click to view`}
             >
               {highlightedText}
-              <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[14px] h-[14px] px-0.5 text-[9px] font-bold text-white bg-amber-500 dark:bg-amber-600 rounded-full">
+              <sup className="ml-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 opacity-70 group-hover/highlight:opacity-100 transition-opacity">
                 {highlight.count}
-              </span>
+              </sup>
             </button>
           );
           
@@ -364,7 +364,8 @@ const ChatMessage = memo(function ChatMessage({
       const selection = window.getSelection();
       const text = selection?.toString().trim();
       
-      if (text && text.length >= 3) {
+      // Minimum 2 characters for selection (allows short words)
+      if (text && text.length >= 2) {
         setSelectedText(text);
         
         // Get selection position for floating menu
@@ -373,22 +374,30 @@ const ChatMessage = memo(function ChatMessage({
           const rect = range?.getBoundingClientRect();
           
           if (rect && rect.width > 0 && rect.height > 0) {
-            const position = {
-              x: rect.left + rect.width / 2,
-              y: Math.max(rect.top - 55, 80)
-            };
+            // Calculate position - center horizontally, above selection
+            // Account for viewport edges to keep menu visible
+            const menuWidth = 200; // Approximate menu width
+            const padding = 16;
             
-            setSelectionPosition(position);
+            let x = rect.left + rect.width / 2;
+            // Keep within viewport
+            x = Math.max(padding + menuWidth / 2, Math.min(window.innerWidth - padding - menuWidth / 2, x));
+            
+            // Position above selection with some padding
+            // Ensure minimum distance from top of viewport
+            const y = Math.max(rect.top - 10, 80);
+            
+            setSelectionPosition({ x, y });
             setForceRender(prev => prev + 1);
           }
         } catch (err) {
-          // Silently fail
+          // Silently fail - selection might be invalid
         }
       } else {
         setSelectedText('');
         setSelectionPosition(null);
       }
-    }, 100);
+    }, 50); // Reduced delay for snappier response
   };
 
   const handleCommentOnHighlight = () => {
@@ -454,17 +463,22 @@ const ChatMessage = memo(function ChatMessage({
 
   // Star status is now passed as prop from parent - no DB query needed here
 
-  // Toggle star status
+  // Toggle star status with optimistic update
   const handleToggleStar = async () => {
     if (!brandId) {
       toast.error('Unable to star email');
       return;
     }
 
+    // Store previous state for rollback
+    const wasStarred = isStarred;
+    
+    // Optimistic update - update UI immediately
+    setIsStarred(!wasStarred);
     setIsStarring(true);
 
     try {
-      if (isStarred) {
+      if (wasStarred) {
         // Unstar
         const { data: existingDocs } = await supabase
           .from('brand_documents')
@@ -481,7 +495,6 @@ const ChatMessage = memo(function ChatMessage({
             .eq('id', existingDocs[0].id);
         }
 
-        setIsStarred(false);
         toast.success('Email unstarred');
       } else {
         // Check limit before starring
@@ -494,6 +507,8 @@ const ChatMessage = memo(function ChatMessage({
         const count = starredEmails?.length || 0;
         
         if (count >= 10) {
+          // Revert optimistic update
+          setIsStarred(wasStarred);
           toast.error('You\'ve reached the limit of 10 starred emails. Go to Settings to remove some.', {
             duration: 5000,
           });
@@ -525,10 +540,11 @@ const ChatMessage = memo(function ChatMessage({
           throw new Error('Failed to star email');
         }
 
-        setIsStarred(true);
         toast.success(`Email starred! (${count + 1}/10)`);
       }
     } catch (error) {
+      // Revert optimistic update on error
+      setIsStarred(wasStarred);
       logger.error('Error toggling star:', error);
       toast.error('Failed to update email');
     } finally {
@@ -639,13 +655,6 @@ const ChatMessage = memo(function ChatMessage({
   return (
     <>
       {floatingElements}
-
-      {/* Full-screen explorer */}
-      <SubjectLineGeneratorModal
-        isOpen={isSubjectLineModalOpen}
-        onClose={() => setIsSubjectLineModalOpen(false)}
-        emailContent={messageContent}
-      />
       
       <div 
         className="flex w-full justify-start mb-6 sm:mb-8 group animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards"
@@ -669,9 +678,9 @@ const ChatMessage = memo(function ChatMessage({
               {isStreaming && !messageContent ? (
                 <div className="px-4 sm:px-6">
                   <div className="space-y-3 animate-pulse">
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-5/6"></div>
+                    <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded w-3/4"></div>
+                    <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded w-full"></div>
+                    <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded w-5/6"></div>
                   </div>
                 </div>
               ) : (
@@ -712,19 +721,6 @@ const ChatMessage = memo(function ChatMessage({
                             </svg>
                           </button>
                         )}
-
-                        {/* Subject Line Generator - Only for email drafts */}
-                        {messageContent.includes('```') && (
-                          <button
-                            onClick={() => setIsSubjectLineModalOpen(true)}
-                            className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                            title="Generate Subject Lines"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                            </svg>
-                          </button>
-                        )}
                       </div>
                     )}
 
@@ -736,48 +732,15 @@ const ChatMessage = memo(function ChatMessage({
 
                   {/* Detect if content is email copy (contains code blocks) */}
                   {messageContent.includes('```') && (
-                    <div className="bg-gray-50 dark:bg-gray-800/50 px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                          </svg>
-                          <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">
-                            Email Draft
-                          </span>
-                          {isStarred && (
-                            <svg className="w-3.5 h-3.5 text-yellow-500 fill-current ml-0.5" viewBox="0 0 24 24">
-                              <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                            </svg>
-                          )}
-                        </div>
-                        
-                        {/* Star toggle - only show for email copy */}
-                        {isEmailMode && brandId && canStar && (
-                          <button
-                            onClick={handleToggleStar}
-                            disabled={isStarring}
-                            className={`p-1.5 rounded-md transition-all ${
-                              isStarred
-                                ? 'text-yellow-500 bg-yellow-50 hover:bg-yellow-100 dark:bg-yellow-900/20'
-                                : 'text-gray-400 hover:text-yellow-500 hover:bg-gray-100 dark:hover:bg-gray-700'
-                            } ${isStarring ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                            title={isStarred ? 'Unstar email' : 'Star email'}
-                          >
-                            <svg className={`w-4 h-4 ${isStarred ? 'fill-current' : ''}`} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} fill={isStarred ? 'currentColor' : 'none'}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                    /* Removed sticky header for simpler, minimal UI */
+                    <div className="sr-only">Email Draft</div>
                   )}
                   
                   {/* Content area */}
-                  <div className={`${messageContent.includes('```') ? 'px-6 sm:px-8 py-7 sm:py-10' : 'py-1'}`}>
+                  <div className={`${messageContent.includes('```') ? 'px-6 sm:px-8 py-6' : 'py-1'}`}>
                     {/* Render all content with ReactMarkdown - code blocks show raw, rest renders */}
                     <div 
-                      className={`prose dark:prose-invert max-w-none select-text cursor-text
+                      className={`prose dark:prose-invert max-w-none select-text cursor-text comment-selection-area
                       prose-headings:font-bold prose-headings:text-gray-900 dark:prose-headings:text-gray-100
                       prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg 
                       prose-p:text-[15px] sm:prose-p:text-base prose-p:leading-7 prose-p:text-gray-800 dark:prose-p:text-gray-200
@@ -804,6 +767,11 @@ const ChatMessage = memo(function ChatMessage({
                   
                   {/* Product Links Section - Using split component */}
                   <ProductLinksSection productLinks={productLinks} />
+
+                  {/* Inline Subject Line Generator - Only for email drafts */}
+                  {!isUser && (messageContent.includes('```') || mode === 'email_copy') && (
+                    <SubjectLineGeneratorInline emailContent={messageContent} />
+                  )}
                   </div>
                   </div>
                 </div>

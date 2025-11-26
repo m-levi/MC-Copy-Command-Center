@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Microphone Test</title>
+    <style>
+        body {
+            font-family: system-ui;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 10px 5px;
+            cursor: pointer;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 8px;
+        }
+        #transcript {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e8f5e9;
+            border-radius: 8px;
+            min-height: 100px;
+        }
+        .error { background: #ffebee !important; }
+        .success { background: #e8f5e9 !important; }
+    </style>
+</head>
+<body>
+    <h1>🎤 Microphone Test Page</h1>
+    <p>This is a simple test to check if microphone access works at all.</p>
+    <p><strong>Current URL:</strong> <span id="currentUrl"></span></p>
+    <p>If using <code>localhost</code>, try <a href="http://127.0.0.1:3000/mic-test.html">127.0.0.1:3000</a> instead (different permission scope).</p>
+    
+    <div>
+        <button onclick="testGetUserMedia()">Test getUserMedia</button>
+        <button onclick="testSpeechRecognition()">Test Speech Recognition</button>
+        <button onclick="checkPermissions()">Check Permissions</button>
+    </div>
+    
+    <script>document.getElementById('currentUrl').textContent = window.location.href;</script>
+    
+    <div id="status">Status: Ready</div>
+    <div id="transcript">Transcript will appear here...</div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const transcriptDiv = document.getElementById('transcript');
+        
+        function log(message, isError = false) {
+            console.log(message);
+            statusDiv.textContent = message;
+            statusDiv.className = isError ? 'error' : 'success';
+        }
+
+        async function checkPermissions() {
+            log('Checking permissions...');
+            
+            if (!navigator.permissions) {
+                log('Permissions API not available', true);
+                return;
+            }
+            
+            try {
+                const result = await navigator.permissions.query({ name: 'microphone' });
+                log(`Permission state: ${result.state}`);
+                
+                result.onchange = () => {
+                    log(`Permission changed to: ${result.state}`);
+                };
+            } catch (e) {
+                log(`Permission check failed: ${e}`, true);
+            }
+        }
+
+        async function testGetUserMedia() {
+            log('Testing getUserMedia...');
+            
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                log('getUserMedia not available', true);
+                return;
+            }
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                log('✅ getUserMedia SUCCESS! Microphone access granted.');
+                
+                // Show track info
+                const tracks = stream.getAudioTracks();
+                console.log('Audio tracks:', tracks);
+                
+                // Stop stream
+                stream.getTracks().forEach(track => track.stop());
+            } catch (e) {
+                log(`❌ getUserMedia FAILED: ${e.name} - ${e.message}`, true);
+                console.error('Full error:', e);
+            }
+        }
+
+        let recognition = null;
+
+        function testSpeechRecognition() {
+            log('Testing Speech Recognition...');
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            if (!SpeechRecognition) {
+                log('Speech Recognition not available', true);
+                return;
+            }
+            
+            try {
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+                
+                recognition.onstart = () => {
+                    log('✅ Speech Recognition STARTED! Say something...');
+                };
+                
+                recognition.onresult = (event) => {
+                    let transcript = '';
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        transcript += event.results[i][0].transcript;
+                    }
+                    transcriptDiv.textContent = transcript;
+                };
+                
+                recognition.onerror = (event) => {
+                    log(`❌ Speech Recognition ERROR: ${event.error}`, true);
+                    console.error('Full error:', event);
+                };
+                
+                recognition.onend = () => {
+                    log('Speech Recognition ended');
+                };
+                
+                recognition.start();
+                
+            } catch (e) {
+                log(`❌ Failed to create Speech Recognition: ${e}`, true);
+                console.error('Full error:', e);
+            }
+        }
+    </script>
+</body>
+</html>
+

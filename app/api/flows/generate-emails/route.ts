@@ -6,6 +6,7 @@ import { getActiveDebugPrompt, determinePromptType } from '@/lib/debug-prompts';
 import { generateMermaidChart } from '@/lib/mermaid-generator';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'edge';
 export const maxDuration = 300; // 5 minutes for generating multiple emails
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (outlineError) {
-      console.error('Error creating flow outline:', outlineError);
+      logger.error('Error creating flow outline:', outlineError);
       return NextResponse.json({ error: 'Failed to save outline' }, { status: 500 });
     }
 
@@ -88,17 +89,17 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
     const results = [];
     const startTime = Date.now();
     
-    console.log(`[Flow Generator] Starting generation of ${outline.emails.length} emails for flow: ${outline.flowName}`);
+    logger.log(`[Flow Generator] Starting generation of ${outline.emails.length} emails for flow: ${outline.flowName}`);
     
     const generateEmail = async (emailOutline: FlowOutlineEmail) => {
       const emailStartTime = Date.now();
 
       try {
-        console.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} START =====`);
-        console.log(`[Flow Generator] Title: ${emailOutline.title}`);
-        console.log(`[Flow Generator] Purpose: ${emailOutline.purpose}`);
+        logger.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} START =====`);
+        logger.log(`[Flow Generator] Title: ${emailOutline.title}`);
+        logger.log(`[Flow Generator] Purpose: ${emailOutline.purpose}`);
 
-        console.log(`[Flow Generator] Creating child conversation...`);
+        logger.log(`[Flow Generator] Creating child conversation...`);
         const { data: childConversation, error: childError } = await supabase
           .from('conversations')
           .insert({
@@ -117,7 +118,7 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           .single();
 
         if (childError) {
-          console.error(`[Flow Generator] Database error creating conversation:`, childError);
+          logger.error(`[Flow Generator] Database error creating conversation:`, childError);
           throw new Error(`Failed to create child conversation: ${childError.message}`);
         }
 
@@ -125,8 +126,8 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           throw new Error(`Failed to create child conversation: No data returned`);
         }
 
-        console.log(`[Flow Generator] Child conversation created: ${childConversation.id}`);
-        console.log(`[Flow Generator] Generating email content using ${emailOutline.emailType} format...`);
+        logger.log(`[Flow Generator] Child conversation created: ${childConversation.id}`);
+        logger.log(`[Flow Generator] Generating email content using ${emailOutline.emailType} format...`);
 
         let prompt = buildFlowEmailPrompt(
           emailOutline,
@@ -141,7 +142,7 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         const customPrompt = await getActiveDebugPrompt(supabase, user.id, 'flow_email');
 
         if (customPrompt && customPrompt.user_prompt) {
-           console.log(`[Flow Generator] 🐛 DEBUG MODE: Overriding flow prompt with custom prompt: ${customPrompt.name}`);
+           logger.log(`[Flow Generator] 🐛 DEBUG MODE: Overriding flow prompt with custom prompt: ${customPrompt.name}`);
            // Replace variables manually since we are bypassing the builder
            prompt = customPrompt.user_prompt
               .replace(/{{EMAIL_SEQUENCE}}/g, emailOutline.sequence.toString())
@@ -161,13 +162,13 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
               .replace(/{{POSITION_GUIDANCE}}/g, `This is email ${emailOutline.sequence} of ${outline.emails.length}`);
         }
 
-        console.log(
+        logger.log(
           `[Flow Generator] Using ${
             (customPrompt && customPrompt.user_prompt) ? `CUSTOM_DEBUG_PROMPT (${customPrompt.name})` : (emailOutline.emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT')
           } for Email ${emailOutline.sequence}`
         );
 
-        console.log(`[Flow Generator] Calling Claude API...`);
+        logger.log(`[Flow Generator] Calling Claude API...`);
         let emailContent = '';
 
         const response = await anthropic.messages.create({
@@ -183,8 +184,8 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           }]
         });
 
-        console.log(`[Flow Generator] Claude API response received`);
-        console.log(`[Flow Generator] Response contains ${response.content.length} blocks`);
+        logger.log(`[Flow Generator] Claude API response received`);
+        logger.log(`[Flow Generator] Response contains ${response.content.length} blocks`);
 
         for (const block of response.content) {
           if (block.type === 'text') {
@@ -192,13 +193,13 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           }
         }
 
-        console.log(`[Flow Generator] Extracted ${emailContent.length} characters of content`);
+        logger.log(`[Flow Generator] Extracted ${emailContent.length} characters of content`);
 
         if (!emailContent || emailContent.length === 0) {
           throw new Error(`No content generated for email ${emailOutline.sequence}`);
         }
 
-        console.log(`[Flow Generator] Saving message to database...`);
+        logger.log(`[Flow Generator] Saving message to database...`);
         const { error: messageError } = await supabase
           .from('messages')
           .insert({
@@ -208,13 +209,13 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           });
 
         if (messageError) {
-          console.error(`[Flow Generator] Database error saving message:`, messageError);
+          logger.error(`[Flow Generator] Database error saving message:`, messageError);
           throw new Error(`Failed to save message: ${messageError.message}`);
         }
 
         const emailDuration = Date.now() - emailStartTime;
-        console.log(`[Flow Generator] ✅ Email ${emailOutline.sequence} completed in ${emailDuration}ms`);
-        console.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} END =====\n`);
+        logger.log(`[Flow Generator] ✅ Email ${emailOutline.sequence} completed in ${emailDuration}ms`);
+        logger.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} END =====\n`);
 
         return {
           success: true as const,
@@ -223,9 +224,9 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         };
       } catch (error) {
         const emailDuration = Date.now() - emailStartTime;
-        console.error(`[Flow Generator] ❌ Email ${emailOutline.sequence} FAILED after ${emailDuration}ms`);
-        console.error(`[Flow Generator] Error details:`, error);
-        console.error(`[Flow Generator] Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
+        logger.error(`[Flow Generator] ❌ Email ${emailOutline.sequence} FAILED after ${emailDuration}ms`);
+        logger.error(`[Flow Generator] Error details:`, error);
+        logger.error(`[Flow Generator] Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
 
         return {
           success: false as const,
@@ -243,10 +244,10 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
     }
     
     const totalDuration = Date.now() - startTime;
-    console.log(`[Flow Generator] ===== FLOW GENERATION COMPLETE =====`);
-    console.log(`[Flow Generator] Total time: ${totalDuration}ms (${(totalDuration / 1000).toFixed(1)}s)`);
-    console.log(`[Flow Generator] Successful: ${results.filter(r => r.success).length}/${outline.emails.length}`);
-    console.log(`[Flow Generator] Failed: ${results.filter(r => !r.success).length}/${outline.emails.length}`);
+    logger.log(`[Flow Generator] ===== FLOW GENERATION COMPLETE =====`);
+    logger.log(`[Flow Generator] Total time: ${totalDuration}ms (${(totalDuration / 1000).toFixed(1)}s)`);
+    logger.log(`[Flow Generator] Successful: ${results.filter(r => r.success).length}/${outline.emails.length}`);
+    logger.log(`[Flow Generator] Failed: ${results.filter(r => !r.success).length}/${outline.emails.length}`);
     
     // Check for failures
     const failures = results.filter(r => !r.success);
@@ -262,7 +263,7 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
     });
 
   } catch (error) {
-    console.error('Error in generate-emails:', error);
+    logger.error('Error in generate-emails:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

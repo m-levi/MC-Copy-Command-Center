@@ -2,6 +2,7 @@
 
 import { Brand } from '@/types';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 
 interface SidebarHeaderProps {
@@ -31,13 +32,19 @@ export default function SidebarHeader({
 }: SidebarHeaderProps) {
   const [showBrandSwitcher, setShowBrandSwitcher] = useState(false);
   const [focusedBrandIndex, setFocusedBrandIndex] = useState<number>(-1);
+  const [dropdownCoords, setDropdownCoords] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [mounted, setMounted] = useState(false);
   const brandSwitcherRef = useRef<HTMLButtonElement>(null);
   const brandDropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Brand switcher keyboard navigation
   const handleBrandKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!showBrandSwitcher || allBrands.length <= 1) return;
+    if (!showBrandSwitcher || allBrands.length === 0) return;
 
     switch (e.key) {
       case 'ArrowDown':
@@ -72,11 +79,35 @@ export default function SidebarHeader({
 
   // Open brand switcher and set initial focus
   const handleOpenBrandSwitcher = useCallback(() => {
+    if (brandSwitcherRef.current) {
+      const rect = brandSwitcherRef.current.getBoundingClientRect();
+      setDropdownCoords({
+        top: rect.bottom + 6,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
     setShowBrandSwitcher(true);
     // Set focus to current brand
     const currentIndex = allBrands.findIndex(b => b.id === brandId);
     setFocusedBrandIndex(currentIndex >= 0 ? currentIndex : 0);
   }, [allBrands, brandId]);
+
+  // Close brand switcher on scroll or resize
+  useEffect(() => {
+    const handleScrollOrResize = () => {
+      if (showBrandSwitcher) setShowBrandSwitcher(false);
+    };
+
+    if (showBrandSwitcher) {
+      window.addEventListener('scroll', handleScrollOrResize, true);
+      window.addEventListener('resize', handleScrollOrResize);
+      return () => {
+        window.removeEventListener('scroll', handleScrollOrResize, true);
+        window.removeEventListener('resize', handleScrollOrResize);
+      };
+    }
+  }, [showBrandSwitcher]);
 
   // Close brand switcher dropdown on outside click
   useEffect(() => {
@@ -107,6 +138,7 @@ export default function SidebarHeader({
           <div className="relative flex-1 min-w-0">
             <button
               ref={brandSwitcherRef}
+              type="button"
               onClick={handleOpenBrandSwitcher}
               onKeyDown={handleBrandKeyDown}
               className="flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 px-3 py-2 rounded-lg transition-all cursor-pointer w-full group"
@@ -115,7 +147,7 @@ export default function SidebarHeader({
                 <h2 className="text-sm font-bold truncate text-gray-900 dark:text-white tracking-tight">{brandName}</h2>
                 <p className="text-xs text-gray-500 dark:text-gray-400 truncate">Switch brand</p>
               </div>
-              {allBrands.length > 1 && (
+              {(allBrands.length > 0 || onNavigateHome) && (
                 <svg 
                   className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform duration-200 ${showBrandSwitcher ? 'rotate-180' : ''} group-hover:text-gray-600 dark:group-hover:text-gray-300`} 
                   fill="none" 
@@ -127,11 +159,18 @@ export default function SidebarHeader({
               )}
             </button>
 
-            {/* Brand Switcher Dropdown with Keyboard Navigation */}
-            {showBrandSwitcher && allBrands.length > 1 && (
+            {/* Brand Switcher Dropdown with Keyboard Navigation - Portaled to avoid clipping */}
+            {mounted && showBrandSwitcher && dropdownCoords && createPortal(
               <div 
                 ref={brandDropdownRef}
-                className="absolute top-full left-0 right-0 mt-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150 origin-top"
+                style={{
+                  position: 'fixed',
+                  top: dropdownCoords.top,
+                  left: dropdownCoords.left,
+                  width: dropdownCoords.width,
+                  zIndex: 9999,
+                }}
+                className="mt-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 origin-top"
                 onKeyDown={handleBrandKeyDown}
               >
                 <div className="p-1.5">
@@ -178,7 +217,8 @@ export default function SidebarHeader({
                     </button>
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
 

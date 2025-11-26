@@ -62,7 +62,7 @@ export const ChatMessageUser = memo(function ChatMessageUser({
           </div>
         )}
         
-        <div className="border border-gray-300/60 dark:border-gray-600/60 rounded-2xl px-5 py-3.5 transition-all">
+        <div className="bg-blue-600 dark:bg-blue-700 text-white rounded-2xl rounded-tr-sm px-5 py-3.5 transition-all shadow-sm">
           {isEditing ? (
             <MessageEditor
               initialContent={messageContent}
@@ -70,7 +70,7 @@ export const ChatMessageUser = memo(function ChatMessageUser({
               onCancel={handleCancelEdit}
             />
           ) : (
-            <p className="whitespace-pre-wrap break-words text-[15px] sm:text-base leading-relaxed font-normal text-gray-800 dark:text-gray-100">
+            <p className="whitespace-pre-wrap break-words text-[15px] sm:text-base leading-relaxed font-normal text-white">
               {messageContent}
             </p>
           )}
@@ -79,6 +79,9 @@ export const ChatMessageUser = memo(function ChatMessageUser({
         {/* User message actions - visible on hover (desktop), always visible on mobile */}
         <div className="flex items-center gap-3 mt-2 text-xs text-gray-400 dark:text-gray-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">
           <span>{formattedTimestamp}</span>
+          {message.edited_at && message.edited_at !== message.created_at && (
+            <span className="italic opacity-80">(Edited)</span>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopy}
@@ -93,7 +96,7 @@ export const ChatMessageUser = memo(function ChatMessageUser({
             {onEdit && !isEditing && (
               <button
                 onClick={handleEdit}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-100 transition-colors"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                 title="Edit message"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

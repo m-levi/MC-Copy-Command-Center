@@ -188,7 +188,7 @@ export default function ConversationCard({
         ${isSelected
           ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
           : isActive 
-            ? 'bg-white dark:bg-gray-800 border-blue-500 dark:border-blue-400 shadow-sm ring-1 ring-blue-500/20 dark:ring-blue-400/20' 
+            ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-md ring-1 ring-black/5 dark:ring-white/5 border-l-4 border-l-blue-600 dark:border-l-blue-500' 
             : 'bg-white dark:bg-gray-900 border-transparent hover:border-gray-200 dark:hover:border-gray-700 hover:shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800'
         }
       `}

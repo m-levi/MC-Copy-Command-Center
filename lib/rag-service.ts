@@ -1,5 +1,6 @@
 import { BrandDocument } from '@/types';
 import { createClient } from '@/lib/supabase/server';
+import { logger } from '@/lib/logger';
 
 /**
  * Generate embeddings using OpenAI
@@ -28,7 +29,7 @@ export async function generateEmbedding(
     const data = await response.json();
     return data.data[0].embedding;
   } catch (error) {
-    console.error('Error generating embedding:', error);
+    logger.error('Error generating embedding:', error);
     throw error;
   }
 }
@@ -58,13 +59,13 @@ export async function searchRelevantDocuments(
     });
 
     if (error) {
-      console.error('Error searching documents:', error);
+      logger.error('Error searching documents:', error);
       return [];
     }
 
     return data || [];
   } catch (error) {
-    console.error('Error in searchRelevantDocuments:', error);
+    logger.error('Error in searchRelevantDocuments:', error);
     return [];
   }
 }
@@ -100,7 +101,7 @@ export async function addBrandDocument(
     if (error) throw error;
     return data;
   } catch (error) {
-    console.error('Error adding document:', error);
+    logger.error('Error adding document:', error);
     return null;
   }
 }
@@ -129,7 +130,7 @@ export async function getBrandDocuments(
     if (error) throw error;
     return data || [];
   } catch (error) {
-    console.error('Error fetching documents:', error);
+    logger.error('Error fetching documents:', error);
     return [];
   }
 }
@@ -149,7 +150,7 @@ export async function deleteBrandDocument(documentId: string): Promise<boolean> 
     if (error) throw error;
     return true;
   } catch (error) {
-    console.error('Error deleting document:', error);
+    logger.error('Error deleting document:', error);
     return false;
   }
 }

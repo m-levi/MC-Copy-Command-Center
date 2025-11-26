@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/client';
 import { Conversation, Message, BulkActionType } from '@/types';
 import toast from 'react-hot-toast';
+import { logger } from '@/lib/logger';
 
 /**
  * Pin or unpin a conversation
@@ -18,7 +19,7 @@ export async function togglePinConversation(conversationId: string, isPinned: bo
     toast.success(isPinned ? 'Conversation pinned' : 'Conversation unpinned');
     return true;
   } catch (error) {
-    console.error('Error toggling pin:', error);
+    logger.error('Error toggling pin:', error);
     toast.error('Failed to update conversation');
     return false;
   }
@@ -40,7 +41,7 @@ export async function toggleArchiveConversation(conversationId: string, isArchiv
     toast.success(isArchived ? 'Conversation archived' : 'Conversation unarchived');
     return true;
   } catch (error) {
-    console.error('Error toggling archive:', error);
+    logger.error('Error toggling archive:', error);
     toast.error('Failed to update conversation');
     return false;
   }
@@ -111,7 +112,7 @@ export async function duplicateConversation(
     toast.success('Conversation duplicated successfully');
     return newConv;
   } catch (error) {
-    console.error('Error duplicating conversation:', error);
+    logger.error('Error duplicating conversation:', error);
     toast.error('Failed to duplicate conversation');
     return null;
   }
@@ -161,7 +162,7 @@ export async function exportConversation(conversationId: string): Promise<void> 
 
     toast.success('Conversation exported');
   } catch (error) {
-    console.error('Error exporting conversation:', error);
+    logger.error('Error exporting conversation:', error);
     toast.error('Failed to export conversation');
   }
 }
@@ -217,7 +218,7 @@ export async function exportConversationAsMarkdown(conversationId: string): Prom
 
     toast.success('Conversation exported as Markdown');
   } catch (error) {
-    console.error('Error exporting conversation:', error);
+    logger.error('Error exporting conversation:', error);
     toast.error('Failed to export conversation');
   }
 }
@@ -240,7 +241,7 @@ export async function deleteConversation(conversationId: string): Promise<boolea
     toast.success('Conversation deleted');
     return true;
   } catch (error) {
-    console.error('Error deleting conversation:', error);
+    logger.error('Error deleting conversation:', error);
     toast.error('Failed to delete conversation');
     return false;
   }
@@ -264,7 +265,7 @@ export async function bulkDeleteConversations(conversationIds: string[]): Promis
     toast.success(`${deletedCount} conversation${deletedCount > 1 ? 's' : ''} deleted`);
     return deletedCount;
   } catch (error) {
-    console.error('Error bulk deleting conversations:', error);
+    logger.error('Error bulk deleting conversations:', error);
     toast.error('Failed to delete conversations');
     return 0;
   }
@@ -288,7 +289,7 @@ export async function bulkArchiveConversations(conversationIds: string[], archiv
     toast.success(`${updatedCount} conversation${updatedCount > 1 ? 's' : ''} ${archive ? 'archived' : 'unarchived'}`);
     return updatedCount;
   } catch (error) {
-    console.error('Error bulk archiving conversations:', error);
+    logger.error('Error bulk archiving conversations:', error);
     toast.error('Failed to update conversations');
     return 0;
   }
@@ -312,7 +313,7 @@ export async function bulkPinConversations(conversationIds: string[], pin: boole
     toast.success(`${updatedCount} conversation${updatedCount > 1 ? 's' : ''} ${pin ? 'pinned' : 'unpinned'}`);
     return updatedCount;
   } catch (error) {
-    console.error('Error bulk pinning conversations:', error);
+    logger.error('Error bulk pinning conversations:', error);
     toast.error('Failed to update conversations');
     return 0;
   }
@@ -367,7 +368,7 @@ export async function bulkExportConversations(conversationIds: string[]): Promis
 
     toast.success(`${exportData.length} conversation${exportData.length > 1 ? 's' : ''} exported`);
   } catch (error) {
-    console.error('Error bulk exporting conversations:', error);
+    logger.error('Error bulk exporting conversations:', error);
     toast.error('Failed to export conversations');
   }
 }

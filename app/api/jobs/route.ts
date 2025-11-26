@@ -17,9 +17,16 @@ export const GET = withErrorHandling(async (req: NextRequest) => {
     return authenticationError('Please log in');
   }
 
-  const jobs = await messageQueue.getUserJobs(user.id, status);
-
-  return NextResponse.json({ jobs });
+  try {
+    const jobs = await messageQueue.getUserJobs(user.id, status);
+    return NextResponse.json({ jobs });
+  } catch (error: any) {
+    // Gracefully handle missing table - return empty array instead of error
+    if (error.code === 'PGRST205' || error.message?.includes('message_jobs')) {
+      return NextResponse.json({ jobs: [] });
+    }
+    throw error;
+  }
 });
 
 

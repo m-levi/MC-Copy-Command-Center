@@ -5,6 +5,7 @@ import {
   authorizationError,
   withErrorHandling,
 } from '@/lib/api-error';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
@@ -13,10 +14,10 @@ export const GET = withErrorHandling(async (
   req: NextRequest,
   context?: { params: Promise<{ token: string }> }
 ) => {
-  console.log('[Shared API Service] ========== REQUEST START ==========');
+  logger.log('[Shared API Service] ========== REQUEST START ==========');
   
   const { token } = await context!.params;
-  console.log('[Shared API Service] Token:', token);
+  logger.log('[Shared API Service] Token:', token);
 
   // Use service role client to bypass RLS - we validate access via share token instead
   const supabase = createServiceClient();
@@ -29,11 +30,11 @@ export const GET = withErrorHandling(async (
     .single();
 
   if (shareError || !share) {
-    console.error('[Shared API Service] Share not found:', shareError);
+    logger.error('[Shared API Service] Share not found:', shareError);
     return notFoundError('Shared link not found or expired');
   }
 
-  console.log('[Shared API Service] Share found:', {
+  logger.log('[Shared API Service] Share found:', {
     id: share.id,
     conversationId: share.conversation_id,
     permissionLevel: share.permission_level
@@ -52,11 +53,11 @@ export const GET = withErrorHandling(async (
     .single();
 
   if (convError || !conversation) {
-    console.error('[Shared API Service] Conversation not found:', convError);
+    logger.error('[Shared API Service] Conversation not found:', convError);
     return notFoundError('Conversation not found');
   }
 
-  console.log('[Shared API Service] Conversation found:', conversation.title);
+  logger.log('[Shared API Service] Conversation found:', conversation.title);
 
   // Get messages based on share preference
   let messages;
@@ -90,10 +91,10 @@ export const GET = withErrorHandling(async (
   }
 
   if (messagesError) {
-    console.error('[Shared API Service] Messages error:', messagesError);
+    logger.error('[Shared API Service] Messages error:', messagesError);
   }
 
-  console.log('[Shared API Service] Messages found:', messages?.length || 0, 'Content type:', shareContent);
+  logger.log('[Shared API Service] Messages found:', messages?.length || 0, 'Content type:', shareContent);
 
   // Get sharer info
   const { data: sharerProfile } = await supabase
@@ -111,7 +112,7 @@ export const GET = withErrorHandling(async (
     })
     .eq('id', share.id);
 
-  console.log('[Shared API Service] ========== SUCCESS ==========');
+  logger.log('[Shared API Service] ========== SUCCESS ==========');
 
   return NextResponse.json({
     share: {
