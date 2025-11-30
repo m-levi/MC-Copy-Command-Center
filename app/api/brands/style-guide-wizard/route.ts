@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
+import { generateText } from 'ai';
+import { gateway, MODELS } from '@/lib/ai-providers';
 import { WizardAnswers } from '@/lib/style-guide-wizard';
 
 export const runtime = 'edge';
@@ -24,10 +24,6 @@ async function generateExamples(
   brandName: string,
   answers: WizardAnswers
 ): Promise<Array<{ id: string; type: string; content: string }>> {
-  const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  });
-
   const answersText = Object.entries(answers)
     .map(([key, value]) => {
       if (Array.isArray(value)) {
@@ -55,57 +51,23 @@ Format your response as JSON:
 
 Make each example distinctive and showcase the brand voice based on the characteristics provided.`;
 
-  try {
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
+  const { text } = await generateText({
+    model: gateway.languageModel(MODELS.CLAUDE_SONNET),
+    prompt,
+    maxRetries: 2,
+  });
 
-    const content = message.content[0];
-    if (content.type === 'text') {
-      const jsonMatch = content.text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return [
-          { id: 'subject-1', type: 'Subject Line', content: parsed.subject },
-          { id: 'hero-1', type: 'Opening Paragraph', content: parsed.hero },
-          { id: 'cta-1', type: 'Call-to-Action', content: parsed.cta },
-        ];
-      }
-    }
-  } catch (error) {
-    console.error('Error generating examples with Claude:', error);
-    // Fallback to OpenAI if Claude fails
+  const jsonMatch = text?.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    const parsed = JSON.parse(jsonMatch[0]);
+    return [
+      { id: 'subject-1', type: 'Subject Line', content: parsed.subject },
+      { id: 'hero-1', type: 'Opening Paragraph', content: parsed.hero },
+      { id: 'cta-1', type: 'Call-to-Action', content: parsed.cta },
+    ];
   }
 
-  // Fallback to OpenAI
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-    response_format: { type: 'json_object' },
-  });
-
-  const parsed = JSON.parse(response.choices[0].message.content || '{}');
-  return [
-    { id: 'subject-1', type: 'Subject Line', content: parsed.subject },
-    { id: 'hero-1', type: 'Opening Paragraph', content: parsed.hero },
-    { id: 'cta-1', type: 'Call-to-Action', content: parsed.cta },
-  ];
+  throw new Error('Failed to parse examples response');
 }
 
 // Generate comprehensive style guide
@@ -114,10 +76,6 @@ async function generateStyleGuide(
   answers: WizardAnswers,
   feedback?: any
 ): Promise<string> {
-  const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  });
-
   const answersText = Object.entries(answers)
     .map(([key, value]) => {
       if (Array.isArray(value)) {
@@ -151,42 +109,13 @@ Make it practical, specific, and actionable. Include concrete examples throughou
 
 Format as clean markdown with clear headers and bullet points.`;
 
-  try {
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
-
-    const content = message.content[0];
-    if (content.type === 'text') {
-      return content.text;
-    }
-  } catch (error) {
-    console.error('Error generating style guide with Claude:', error);
-  }
-
-  // Fallback to OpenAI
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const { text } = await generateText({
+    model: gateway.languageModel(MODELS.CLAUDE_SONNET),
+    prompt,
+    maxRetries: 2,
   });
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-  });
-
-  return response.choices[0].message.content || '';
+  return text || '';
 }
 
 // Refine style guide based on user feedback
@@ -195,10 +124,6 @@ async function refineStyleGuide(
   currentStyleGuide: string,
   refinementRequest: string
 ): Promise<string> {
-  const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  });
-
   const prompt = `Here is the current copywriting style guide for ${brandName}:
 
 ${currentStyleGuide}
@@ -209,42 +134,13 @@ Please update the style guide to incorporate this feedback. Maintain the overall
 
 Return the complete updated style guide in markdown format.`;
 
-  try {
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
-
-    const content = message.content[0];
-    if (content.type === 'text') {
-      return content.text;
-    }
-  } catch (error) {
-    console.error('Error refining with Claude:', error);
-  }
-
-  // Fallback to OpenAI
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const { text } = await generateText({
+    model: gateway.languageModel(MODELS.CLAUDE_SONNET),
+    prompt,
+    maxRetries: 2,
   });
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-  });
-
-  return response.choices[0].message.content || currentStyleGuide;
+  return text || currentStyleGuide;
 }
 
 export async function POST(req: NextRequest) {
@@ -298,4 +194,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

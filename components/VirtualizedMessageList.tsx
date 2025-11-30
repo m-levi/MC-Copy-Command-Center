@@ -231,15 +231,15 @@ export default function VirtualizedMessageList({
                 mode={mode}
                 isStarred={message.role === 'assistant' ? starredEmailContents.has(message.content ?? '') : false}
                 onRegenerate={
-                  message.role === 'assistant' &&
-                  actualIndex === messages.length - 1 &&
-                  !sending
+                  // Allow regeneration on any AI message (not just the last one)
+                  message.role === 'assistant' && !sending
                     ? () => onRegenerate(actualIndex)
                     : undefined
                 }
                 onRegenerateSection={onRegenerateSection}
                 onEdit={
-                  message.role === 'user'
+                  // Allow editing any user message
+                  message.role === 'user' && !sending
                     ? (newContent) => onEdit(actualIndex, newContent)
                     : undefined
                 }

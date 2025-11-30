@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
-import OpenAI from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
+import { gateway, MODELS } from '@/lib/ai-providers';
 
 export const runtime = 'edge';
 
@@ -38,43 +38,22 @@ export async function POST(
       );
     }
 
-    // Generate title using low-cost model
+    // Generate title using low-cost model via AI Gateway
     let title: string;
 
-    // Try OpenAI first (GPT-4o-mini is very cheap)
-    if (process.env.OPENAI_API_KEY) {
-      try {
-        const openai = new OpenAI({
-          apiKey: process.env.OPENAI_API_KEY,
-        });
+    // Try GPT-5 mini first (very cheap)
+    try {
+      const { text } = await generateText({
+        model: gateway.languageModel(MODELS.GPT_5_MINI),
+        system: 'Generate a concise, descriptive 3-6 word title for this conversation. Be specific about the topic. Do not use quotes or punctuation at the end.',
+        prompt: userMessage.substring(0, 500), // Limit input for cost
+      });
 
-        const response = await openai.chat.completions.create({
-          model: 'gpt-4o-mini', // Very low cost model
-          messages: [
-            {
-              role: 'system',
-              content: 'Generate a concise, descriptive 3-6 word title for this conversation. Be specific about the topic. Do not use quotes or punctuation at the end.',
-            },
-            {
-              role: 'user',
-              content: userMessage.substring(0, 500), // Limit input for cost
-            },
-          ],
-          max_tokens: 20,
-          temperature: 0.7,
-        });
-
-        title = response.choices[0]?.message?.content?.trim() || 'New Conversation';
-      } catch (error) {
-        console.error('OpenAI title generation failed:', error);
-        // Fallback to Anthropic
-        title = await generateWithAnthropic(userMessage);
-      }
-    } else if (process.env.ANTHROPIC_API_KEY) {
+      title = text?.trim() || 'New Conversation';
+    } catch (error) {
+      console.error('GPT-5 mini title generation failed:', error);
+      // Fallback to Claude Haiku
       title = await generateWithAnthropic(userMessage);
-    } else {
-      // Fallback: Extract first few words
-      title = generateFallbackTitle(userMessage);
     }
 
     // Update conversation title
@@ -162,32 +141,14 @@ export async function PATCH(
 
 async function generateWithAnthropic(userMessage: string): Promise<string> {
   try {
-    const anthropic = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY!,
-      // Add beta headers for web search and memory tools
-      defaultHeaders: {
-        'anthropic-beta': 'web-search-2025-03-05,context-management-2025-06-27'
-      }
+    const { text } = await generateText({
+      model: gateway.languageModel(MODELS.CLAUDE_HAIKU),
+      prompt: `Generate a concise, descriptive 3-6 word title for this conversation. Be specific about the topic. Do not use quotes or punctuation at the end.\n\nMessage: ${userMessage.substring(0, 500)}`,
     });
 
-    const response = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-20241022', // Very low cost model
-      max_tokens: 30,
-      messages: [
-        {
-          role: 'user',
-          content: `Generate a concise, descriptive 3-6 word title for this conversation. Be specific about the topic. Do not use quotes or punctuation at the end.\n\nMessage: ${userMessage.substring(0, 500)}`,
-        },
-      ],
-    });
-
-    const content = response.content[0];
-    if (content.type === 'text') {
-      return content.text.trim() || 'New Conversation';
-    }
-    return 'New Conversation';
+    return text?.trim() || 'New Conversation';
   } catch (error) {
-    console.error('Anthropic title generation failed:', error);
+    console.error('Claude Haiku title generation failed:', error);
     return generateFallbackTitle(userMessage);
   }
 }
@@ -204,4 +165,3 @@ function generateFallbackTitle(userMessage: string): string {
     ? words.join(' ').substring(0, 50) + (words.length >= 6 ? '...' : '')
     : 'New Conversation';
 }
-

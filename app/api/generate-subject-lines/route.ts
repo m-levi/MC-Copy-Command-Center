@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
+import { gateway, MODELS } from '@/lib/ai-providers';
 import { SUBJECT_LINE_GENERATION_SYSTEM_PROMPT, SUBJECT_LINE_GENERATION_USER_PROMPT } from '@/lib/prompts/subject-line-generation.prompt';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'edge';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
 export async function POST(request: NextRequest) {
   try {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      logger.error('ANTHROPIC_API_KEY is missing');
+    // Check for API keys (either Gateway or direct)
+    if (!process.env.AI_GATEWAY_API_KEY && !process.env.ANTHROPIC_API_KEY) {
+      logger.error('No AI API key configured (AI_GATEWAY_API_KEY or ANTHROPIC_API_KEY)');
       return NextResponse.json({ 
         code: 'INTERNAL_ERROR',
         message: 'Server configuration error: Missing API Key',
@@ -33,21 +31,15 @@ export async function POST(request: NextRequest) {
     // Safe replacement
     const prompt = SUBJECT_LINE_GENERATION_USER_PROMPT.replace('{{EMAIL_CONTENT}}', emailContent || '');
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929', // Using the 4.5 model as per project configuration
-      max_tokens: 1000,
-      temperature: 0.7,
+    const { text } = await generateText({
+      model: gateway.languageModel(MODELS.CLAUDE_SONNET),
       system: SUBJECT_LINE_GENERATION_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: prompt
-        }
-      ]
+      prompt,
+      maxRetries: 2,
     });
 
     // Parse the JSON response
-    let content = response.content[0].type === 'text' ? response.content[0].text : '';
+    let content = text;
     
     // Extract JSON if it's wrapped in something
     const jsonMatch = content.match(/\{[\s\S]*\}/);

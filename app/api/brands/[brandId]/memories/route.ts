@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
+import { 
+  listMemories, 
+  addMemory, 
+  isSupermemoryConfigured 
+} from '@/lib/supermemory';
 
 export const dynamic = 'force-dynamic';
 
-// GET - Fetch all memories for a brand
+// GET - Fetch all memories for a brand (for current user)
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ brandId: string }> }
@@ -12,6 +17,15 @@ export async function GET(
   try {
     const supabase = await createClient();
     const { brandId } = await params;
+
+    // Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
 
     // Verify user has access to this brand
     const { data: brand, error: brandError } = await supabase
@@ -27,16 +41,33 @@ export async function GET(
       );
     }
 
-    // Fetch memories
-    const { data: memories, error } = await supabase
-      .from('brand_memories')
-      .select('*')
-      .eq('brand_id', brandId)
-      .order('updated_at', { ascending: false });
+    // Check if Supermemory is configured
+    if (!isSupermemoryConfigured()) {
+      logger.warn('[Brand Memories API] Supermemory not configured, returning empty list');
+      return NextResponse.json({ memories: [] });
+    }
 
-    if (error) throw error;
+    // Fetch memories from Supermemory (with graceful fallback)
+    try {
+      const supermemoryMemories = await listMemories(brandId, user.id);
 
-    return NextResponse.json({ memories: memories || [] });
+      // Transform to match the expected format
+      const memories = supermemoryMemories.map(mem => ({
+        id: mem.id,
+        brand_id: brandId,
+        title: (mem.metadata?.title as string) || 'Untitled',
+        content: mem.content,
+        category: (mem.metadata?.category as string) || 'general',
+        created_at: mem.createdAt,
+        updated_at: mem.updatedAt || mem.createdAt,
+      }));
+
+      return NextResponse.json({ memories });
+    } catch (supermemoryError) {
+      // Log the error but return empty list instead of failing
+      logger.warn('[Brand Memories API] Supermemory fetch failed, returning empty list:', supermemoryError);
+      return NextResponse.json({ memories: [] });
+    }
   } catch (error) {
     logger.error('Error fetching brand memories:', error);
     return NextResponse.json(
@@ -64,6 +95,15 @@ export async function POST(
       );
     }
 
+    // Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     // Verify user has access to this brand
     const { data: brand, error: brandError } = await supabase
       .from('brands')
@@ -78,19 +118,33 @@ export async function POST(
       );
     }
 
-    // Create memory
-    const { data: memory, error } = await supabase
-      .from('brand_memories')
-      .insert({
-        brand_id: brandId,
-        title,
-        content,
-        category,
-      })
-      .select()
-      .single();
+    // Check if Supermemory is configured
+    if (!isSupermemoryConfigured()) {
+      return NextResponse.json(
+        { error: 'Memory service not configured' },
+        { status: 503 }
+      );
+    }
 
-    if (error) throw error;
+    // Format content with title for better context
+    const formattedContent = `${title}: ${content}`;
+
+    // Add memory to Supermemory
+    const result = await addMemory(brandId, user.id, formattedContent, {
+      title,
+      category,
+    });
+
+    // Return in expected format
+    const memory = {
+      id: result.id,
+      brand_id: brandId,
+      title,
+      content,
+      category,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
 
     return NextResponse.json({ memory }, { status: 201 });
   } catch (error) {
@@ -101,4 +155,3 @@ export async function POST(
     );
   }
 }
-

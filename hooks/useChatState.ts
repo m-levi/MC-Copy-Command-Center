@@ -158,7 +158,7 @@ export function useChatState(): [ChatState, ChatStateSetters, ChatRefs] {
   const [loadingMessages, setLoadingMessages] = useState(false);
   
   // AI state
-  const [selectedModel, setSelectedModel] = useState<AIModel>('claude-4.5-sonnet');
+  const [selectedModel, setSelectedModel] = useState<AIModel>('anthropic/claude-sonnet-4.5');
   const [aiStatus, setAiStatus] = useState<AIStatus>('idle');
   const [sending, setSending] = useState(false);
   const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);

@@ -25,6 +25,51 @@ interface CommentsPanelProps {
   onHighlightedTextUsed?: () => void;
 }
 
+// Delete confirmation dialog
+const DeleteConfirmDialog = ({ 
+  isOpen, 
+  onClose, 
+  onConfirm 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onConfirm: () => void;
+}) => {
+  if (!isOpen) return null;
+  
+  return (
+    <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5 max-w-sm w-full mx-4">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Delete comment?</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">This action cannot be undone.</p>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { onConfirm(); onClose(); }}
+            className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function CommentsPanel({ 
   conversationId, 
   isOpen, 
@@ -40,7 +85,30 @@ export default function CommentsPanel({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const supabase = createClient();
+
+  const copyCommentLink = (commentId: string) => {
+    const url = `${window.location.origin}${window.location.pathname}?comment=${commentId}`;
+    navigator.clipboard.writeText(url);
+    toast.success('Link copied!');
+  };
+
+  const deleteComment = async (commentId: string) => {
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/comments/${commentId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok && response.status !== 404) {
+        throw new Error('Failed to delete');
+      }
+      await loadComments();
+      toast.success('Comment deleted');
+    } catch (error) {
+      logger.error('Failed to delete comment:', error);
+      toast.error('Failed to delete comment');
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -213,6 +281,9 @@ export default function CommentsPanel({
               onResolve={() => toggleResolve(comment.id, comment.resolved)}
               canResolve={currentUserId === comment.user.id}
               getInitials={getInitials}
+              onCopyLink={() => copyCommentLink(comment.id)}
+              onDelete={() => setDeleteConfirmId(comment.id)}
+              canDelete={currentUserId === comment.user.id}
             />
           ))
         )}
@@ -283,6 +354,13 @@ export default function CommentsPanel({
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmDialog
+        isOpen={deleteConfirmId !== null}
+        onClose={() => setDeleteConfirmId(null)}
+        onConfirm={() => deleteConfirmId && deleteComment(deleteConfirmId)}
+      />
     </div>
   );
 }
@@ -295,6 +373,9 @@ function CommentThread({
   onResolve,
   canResolve,
   getInitials,
+  onCopyLink,
+  onDelete,
+  canDelete,
 }: {
   comment: Comment;
   replies: Comment[];
@@ -303,6 +384,9 @@ function CommentThread({
   onResolve: () => void;
   canResolve: boolean;
   getInitials: (email: string, fullName?: string) => string;
+  onCopyLink: () => void;
+  onDelete: () => void;
+  canDelete: boolean;
 }) {
   const [showReactions, setShowReactions] = useState(false);
 
@@ -353,6 +437,26 @@ function CommentThread({
                 className="text-xs text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 font-medium"
               >
                 Resolve
+              </button>
+            )}
+            <button
+              onClick={onCopyLink}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              title="Copy link"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+            </button>
+            {canDelete && (
+              <button
+                onClick={onDelete}
+                className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                title="Delete"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
               </button>
             )}
             <button

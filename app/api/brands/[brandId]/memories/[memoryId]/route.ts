@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
+import { 
+  deleteMemory, 
+  addMemory, 
+  isSupermemoryConfigured 
+} from '@/lib/supermemory';
 
 export const dynamic = 'force-dynamic';
 
-// PUT - Update a memory
+// PUT - Update a memory (delete old + create new in Supermemory)
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ brandId: string; memoryId: string }> }
@@ -14,6 +19,22 @@ export async function PUT(
     const { brandId, memoryId } = await params;
     const body = await request.json();
     const { title, content, category } = body;
+
+    if (!title || !content) {
+      return NextResponse.json(
+        { error: 'Title and content are required' },
+        { status: 400 }
+      );
+    }
+
+    // Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
 
     // Verify user has access to this brand
     const { data: brand, error: brandError } = await supabase
@@ -29,28 +50,39 @@ export async function PUT(
       );
     }
 
-    // Update memory
-    const updateData: any = {};
-    if (title !== undefined) updateData.title = title;
-    if (content !== undefined) updateData.content = content;
-    if (category !== undefined) updateData.category = category;
-
-    const { data: memory, error } = await supabase
-      .from('brand_memories')
-      .update(updateData)
-      .eq('id', memoryId)
-      .eq('brand_id', brandId)
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    if (!memory) {
+    // Check if Supermemory is configured
+    if (!isSupermemoryConfigured()) {
       return NextResponse.json(
-        { error: 'Memory not found' },
-        { status: 404 }
+        { error: 'Memory service not configured' },
+        { status: 503 }
       );
     }
+
+    // Delete the old memory
+    try {
+      await deleteMemory(memoryId);
+    } catch (error) {
+      // Memory might not exist, continue with creating new one
+      logger.warn('[Brand Memory API] Could not delete old memory:', memoryId);
+    }
+
+    // Create new memory with updated content
+    const formattedContent = `${title}: ${content}`;
+    const result = await addMemory(brandId, user.id, formattedContent, {
+      title,
+      category: category || 'general',
+    });
+
+    // Return the updated memory
+    const memory = {
+      id: result.id,
+      brand_id: brandId,
+      title,
+      content,
+      category: category || 'general',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
 
     return NextResponse.json({ memory });
   } catch (error) {
@@ -71,6 +103,15 @@ export async function DELETE(
     const supabase = await createClient();
     const { brandId, memoryId } = await params;
 
+    // Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     // Verify user has access to this brand
     const { data: brand, error: brandError } = await supabase
       .from('brands')
@@ -85,14 +126,16 @@ export async function DELETE(
       );
     }
 
-    // Delete memory
-    const { error } = await supabase
-      .from('brand_memories')
-      .delete()
-      .eq('id', memoryId)
-      .eq('brand_id', brandId);
+    // Check if Supermemory is configured
+    if (!isSupermemoryConfigured()) {
+      return NextResponse.json(
+        { error: 'Memory service not configured' },
+        { status: 503 }
+      );
+    }
 
-    if (error) throw error;
+    // Delete memory from Supermemory
+    await deleteMemory(memoryId);
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -103,4 +146,3 @@ export async function DELETE(
     );
   }
 }
-

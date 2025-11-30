@@ -129,7 +129,7 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
             {canManage && !isNavigating && (
               <button
                 onClick={handleMenuClick}
-                className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 16 16">
                   <circle cx="8" cy="2" r="1.5" />
@@ -175,8 +175,8 @@ export default function BrandCard({ brand, currentUserId, canManage, onEdit, onD
           </p>
         </div>
 
-        {/* Quick Actions Overlay (Appears on hover) */}
-        <div className="absolute inset-x-0 bottom-0 p-4 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm translate-y-full group-hover:translate-y-0 transition-transform duration-300 flex gap-2 border-t border-gray-100 dark:border-gray-700 z-10">
+        {/* Quick Actions Overlay (Appears on hover desktop, always visible mobile) */}
+        <div className="absolute inset-x-0 bottom-0 p-4 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm translate-y-0 sm:translate-y-full sm:group-hover:translate-y-0 transition-transform duration-300 flex gap-2 border-t border-gray-100 dark:border-gray-700 z-10">
           <button
             onClick={handleNewEmail}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-semibold rounded-lg transition-colors"

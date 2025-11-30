@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 
 export interface ActivePrompt {
@@ -9,6 +8,54 @@ export interface ActivePrompt {
   name: string;
 }
 
+/**
+ * OPTIMIZED: Parallel queries for debug mode check and prompt fetch
+ * Used in the chat API where we want to run this in parallel with auth
+ * Returns null if debug mode is disabled or no active prompt found
+ */
+export async function getActiveDebugPromptFast(
+  supabase: SupabaseClient,
+  promptType: string
+): Promise<ActivePrompt | null> {
+  try {
+    // Run both queries in parallel - much faster than sequential
+    const [settingsResult, promptResult] = await Promise.all([
+      // Check if debug mode is enabled (RLS filters by authenticated user)
+      supabase
+        .from('user_settings')
+        .select('debug_mode_enabled')
+        .maybeSingle(),
+      
+      // Fetch the active prompt for this type (RLS filters by authenticated user)
+      supabase
+        .from('custom_prompts')
+        .select('id, prompt_type, system_prompt, user_prompt, name')
+        .eq('prompt_type', promptType)
+        .eq('is_active', true)
+        .maybeSingle(),
+    ]);
+
+    // If debug mode is not enabled, return null
+    if (!settingsResult.data?.debug_mode_enabled) {
+      return null;
+    }
+
+    // If no active prompt found, return null
+    if (!promptResult.data) {
+      return null;
+    }
+
+    return promptResult.data;
+  } catch (error) {
+    // Silently fail - debug prompts are optional
+    return null;
+  }
+}
+
+/**
+ * Legacy function - kept for backwards compatibility
+ * @deprecated Use getActiveDebugPromptFast for better performance
+ */
 export async function getActiveDebugPrompt(
   supabase: SupabaseClient, 
   userId: string, 

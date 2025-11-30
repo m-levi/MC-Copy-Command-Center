@@ -11,6 +11,7 @@ import {
   STANDARD_EMAIL_USER_PROMPT,
   buildStandardEmailPrompt as buildStandardEmailPromptFromModule
 } from './prompts/standard-email.prompt';
+import { buildDesignEmailV2Prompt } from './prompts/design-email-v2.prompt';
 import { SECTION_REGENERATION_PROMPTS } from './prompts/section-regeneration.prompt';
 
 export interface PromptContext {
@@ -227,6 +228,31 @@ export function buildStandardEmailPromptV2(context: PromptContext): {
 }
 
 /**
+ * Design Email V2 - Returns 3 versions (A, B, C) in XML tags
+ * 
+ * This new prompt generates multiple creative versions of each email,
+ * wrapped in <version_a>, <version_b>, <version_c> XML tags for easy
+ * parsing and version switching in the UI.
+ */
+export function buildDesignEmailV2PromptFromContext(
+  context: PromptContext,
+  brandName?: string
+): {
+  systemPrompt: string;
+  userPrompt: string;
+} {
+  const brandVoiceGuidelines = extractBrandVoiceGuidelines(context.brandInfo);
+
+  return buildDesignEmailV2Prompt({
+    brandInfo: context.brandInfo,
+    brandVoiceGuidelines,
+    websiteUrl: context.websiteUrl,
+    brandName,
+    copyBrief: '{{COPY_BRIEF}}', // Placeholder for actual email brief
+  });
+}
+
+/**
  * Section regeneration prompt
  */
 export function buildSectionRegenerationPrompt(
@@ -253,7 +279,7 @@ export function buildSectionRegenerationPrompt(
  */
 export function buildSystemPrompt(
   brandContext: any,
-  ragContext: string,
+  ragContext: string = '', // RAG disabled for performance - kept for API compatibility
   options: {
     regenerateSection?: { type: string; title: string };
     conversationContext?: any;
@@ -267,7 +293,7 @@ export function buildSystemPrompt(
 
   const context: PromptContext = {
     brandInfo,
-    ragContext,
+    ragContext: '', // RAG disabled - always empty
     contextInfo,
     memoryContext: options.memoryContext,
     emailType: options.emailType,

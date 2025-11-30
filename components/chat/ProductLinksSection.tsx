@@ -7,7 +7,7 @@ interface ProductLinksSectionProps {
   productLinks: ProductLink[];
 }
 
-export const ProductLinksSection = memo(function ProductLinksSection({
+const ProductLinksSectionBase = function ProductLinksSection({
   productLinks
 }: ProductLinksSectionProps) {
   const [expanded, setExpanded] = useState(false);
@@ -93,6 +93,6 @@ export const ProductLinksSection = memo(function ProductLinksSection({
       )}
     </div>
   );
-});
+};
 
-
+export const ProductLinksSection = memo(ProductLinksSectionBase);

@@ -39,6 +39,104 @@ interface CommentsSidebarProps {
 }
 
 type FilterTab = 'all' | 'open' | 'resolved' | 'mine';
+type SortOrder = 'newest' | 'oldest';
+
+// Delete confirmation dialog component
+const DeleteConfirmDialog = ({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  isReply 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onConfirm: () => void; 
+  isReply: boolean;
+}) => {
+  if (!isOpen) return null;
+  
+  return (
+    <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
+      <div 
+        className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-stone-200 dark:border-gray-700 p-5 max-w-sm w-full mx-4 animate-in zoom-in-95 slide-in-from-bottom-4 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-stone-900 dark:text-gray-100">
+              Delete {isReply ? 'reply' : 'comment'}?
+            </h3>
+            <p className="text-sm text-stone-500 dark:text-gray-400 mt-1">
+              This action cannot be undone. {!isReply && 'All replies will also be deleted.'}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-stone-600 dark:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { onConfirm(); onClose(); }}
+            className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Keyboard shortcuts help tooltip
+const KeyboardShortcutsHelp = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+  if (!isOpen) return null;
+  
+  const shortcuts = [
+    { keys: ['⌘', 'Enter'], action: 'Post comment' },
+    { keys: ['⌘', 'B'], action: 'Bold text' },
+    { keys: ['⌘', 'I'], action: 'Italic text' },
+    { keys: ['Esc'], action: 'Cancel/Close' },
+    { keys: ['@'], action: 'Mention teammate' },
+  ];
+  
+  return (
+    <div 
+      className="absolute bottom-full right-0 mb-2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-stone-200 dark:border-gray-700 p-3 w-56 animate-in fade-in slide-in-from-bottom-2 duration-150 z-50"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between mb-2 pb-2 border-b border-stone-100 dark:border-gray-700">
+        <span className="text-xs font-semibold text-stone-700 dark:text-gray-200">Keyboard Shortcuts</span>
+        <button onClick={onClose} className="text-stone-400 hover:text-stone-600 dark:hover:text-gray-300">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div className="space-y-2">
+        {shortcuts.map((shortcut, idx) => (
+          <div key={idx} className="flex items-center justify-between text-xs">
+            <span className="text-stone-600 dark:text-gray-400">{shortcut.action}</span>
+            <div className="flex gap-0.5">
+              {shortcut.keys.map((key, kidx) => (
+                <kbd key={kidx} className="px-1.5 py-0.5 bg-stone-100 dark:bg-gray-700 rounded text-[10px] font-mono text-stone-700 dark:text-gray-300">
+                  {key}
+                </kbd>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 // Relative time formatter
 const getRelativeTime = (date: string) => {
@@ -112,7 +210,8 @@ const ReplyItem = ({
   setReplyingTo,
   setReplyContent,
   addReply,
-  deleteComment,
+  onDeleteClick,
+  conversationId,
 }: {
   reply: Comment;
   idx: number;
@@ -122,7 +221,8 @@ const ReplyItem = ({
   setReplyingTo: (id: string | null) => void;
   setReplyContent: (content: string) => void;
   addReply: (parentId: string) => void;
-  deleteComment: (id: string) => void;
+  onDeleteClick: (id: string, isReply: boolean) => void;
+  conversationId: string;
 }) => (
   <div className="group/reply relative animate-in fade-in slide-in-from-left-2 duration-200" style={{ animationDelay: `${idx * 50}ms` }}>
     {/* Connecting line */}
@@ -151,9 +251,22 @@ const ReplyItem = ({
           >
             Reply
           </button>
+          <button
+            onClick={() => {
+              const url = `${window.location.origin}${window.location.pathname}?comment=${reply.id}`;
+              navigator.clipboard.writeText(url);
+              toast.success('Link copied!');
+            }}
+            className="opacity-100 md:opacity-0 md:group-hover/reply:opacity-100 text-[10px] text-stone-400 hover:text-stone-600 dark:hover:text-gray-300 transition-all active:scale-95"
+            title="Copy link"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+          </button>
           {currentUserId === reply.user.id && (
             <button
-              onClick={() => deleteComment(reply.id)}
+              onClick={() => onDeleteClick(reply.id, true)}
               className="opacity-100 md:opacity-0 md:group-hover/reply:opacity-100 text-[10px] text-stone-400 hover:text-red-500 dark:hover:text-red-400 transition-all active:scale-95"
             >
               Delete
@@ -221,7 +334,8 @@ const ReplyItem = ({
             setReplyingTo={setReplyingTo}
             setReplyContent={setReplyContent}
             addReply={addReply}
-            deleteComment={deleteComment}
+            onDeleteClick={onDeleteClick}
+            conversationId={conversationId}
           />
         ))}
       </div>
@@ -262,6 +376,14 @@ export default function CommentsSidebar({
   const [isComposerExpanded, setIsComposerExpanded] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [reassigningCommentId, setReassigningCommentId] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState<SortOrder>('oldest');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; isReply: boolean } | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
+  const commentsListRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
   const loadComments = useCallback(async () => {
@@ -334,6 +456,42 @@ export default function CommentsSidebar({
     }
   }, [comments]);
 
+  // Auto-scroll to first unread comment
+  useEffect(() => {
+    if (firstUnreadId && commentsListRef.current && comments.length > 0) {
+      const element = document.getElementById(`comment-${firstUnreadId}`);
+      if (element) {
+        setTimeout(() => {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Flash highlight effect
+          element.classList.add('ring-2', 'ring-amber-400', 'ring-offset-2');
+          setTimeout(() => {
+            element.classList.remove('ring-2', 'ring-amber-400', 'ring-offset-2');
+          }, 2000);
+        }, 300);
+      }
+      setFirstUnreadId(null);
+    }
+  }, [firstUnreadId, comments]);
+
+  // Check for comment query param on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const commentId = params.get('comment');
+    if (commentId) {
+      setTimeout(() => {
+        const element = document.getElementById(`comment-${commentId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.classList.add('ring-2', 'ring-amber-400', 'ring-offset-2');
+          setTimeout(() => {
+            element.classList.remove('ring-2', 'ring-amber-400', 'ring-offset-2');
+          }, 3000);
+        }
+      }, 500);
+    }
+  }, []);
+
   const loadTeamMembers = async () => {
     try {
       // Use API endpoint to fetch team members (bypasses client-side RLS issues)
@@ -370,6 +528,10 @@ export default function CommentsSidebar({
       if (response.ok) {
         const data = await response.json();
         setUnreadCount(data.unreadCount || 0);
+        // Set first unread for auto-scroll
+        if (data.unreadIds && data.unreadIds.length > 0) {
+          setFirstUnreadId(data.unreadIds[0]);
+        }
       }
     } catch (error) {
       logger.error('Failed to load unread status:', error);
@@ -571,8 +733,19 @@ export default function CommentsSidebar({
   };
 
   const toggleResolve = async (commentId: string) => {
+    // Skip optimistic/temporary comments (they haven't been saved yet)
+    if (commentId.startsWith('temp-')) {
+      toast.error('Please wait for the comment to save before resolving');
+      return;
+    }
+
     const comment = comments.find(c => c.id === commentId);
-    if (!comment) return;
+    if (!comment) {
+      // Comment not in local state - might have been deleted, refresh
+      logger.warn('[CommentsSidebar] Comment not found in local state:', commentId);
+      await loadComments();
+      return;
+    }
 
     setComments(prev => prev.map(c => 
       c.id === commentId ? { ...c, resolved: !c.resolved } : c
@@ -588,6 +761,14 @@ export default function CommentsSidebar({
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         logger.error('[CommentsSidebar] Failed to resolve:', response.status, errorData);
+        
+        // If comment not found (404), refresh comments list - it might have been deleted
+        if (response.status === 404) {
+          await loadComments();
+          toast.error('Comment was removed or no longer exists');
+          return;
+        }
+        
         throw new Error(errorData.error || errorData.message || 'Failed to update');
       }
       
@@ -602,9 +783,23 @@ export default function CommentsSidebar({
     }
   };
 
+  const handleDeleteClick = (commentId: string, isReply: boolean) => {
+    setDeleteConfirm({ id: commentId, isReply });
+  };
+
   const deleteComment = async (commentId: string) => {
+    // Skip optimistic/temporary comments (they haven't been saved yet)
+    if (commentId.startsWith('temp-')) {
+      toast.error('Please wait for the comment to save before deleting');
+      return;
+    }
+
     const comment = comments.find(c => c.id === commentId);
-    if (!comment) return;
+    if (!comment) {
+      logger.warn('[CommentsSidebar] Comment not found for delete:', commentId);
+      await loadComments();
+      return;
+    }
 
     setComments(prev => prev.filter(c => c.id !== commentId));
 
@@ -613,15 +808,54 @@ export default function CommentsSidebar({
         method: 'DELETE',
       });
 
-      if (!response.ok) throw new Error('Failed');
+      if (!response.ok) {
+        // If 404, comment was already deleted - don't restore it
+        if (response.status === 404) {
+          toast.success('Comment removed');
+          return;
+        }
+        throw new Error('Failed');
+      }
+      toast.success('Comment deleted');
     } catch (error) {
       setComments(prev => [...prev, comment]);
       toast.error('Failed to delete');
     }
   };
 
+  const toggleThreadCollapse = (commentId: string) => {
+    setCollapsedThreads(prev => {
+      const next = new Set(prev);
+      if (next.has(commentId)) {
+        next.delete(commentId);
+      } else {
+        next.add(commentId);
+      }
+      return next;
+    });
+  };
+
+  const copyCommentLink = (commentId: string) => {
+    const url = `${window.location.origin}${window.location.pathname}?comment=${commentId}`;
+    navigator.clipboard.writeText(url);
+    toast.success('Link copied to clipboard!');
+  };
+
   const saveEdit = async (commentId: string) => {
+    // Skip optimistic/temporary comments
+    if (commentId.startsWith('temp-')) {
+      toast.error('Please wait for the comment to save before editing');
+      setEditingId(null);
+      return;
+    }
+
     const original = comments.find(c => c.id === commentId);
+    if (!original) {
+      logger.warn('[CommentsSidebar] Comment not found for edit:', commentId);
+      setEditingId(null);
+      await loadComments();
+      return;
+    }
     
     setComments(prev => prev.map(c => 
       c.id === commentId ? { ...c, content: editContent } : c
@@ -638,6 +872,13 @@ export default function CommentsSidebar({
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         logger.error('[CommentsSidebar] Failed to edit:', response.status, errorData);
+        
+        if (response.status === 404) {
+          await loadComments();
+          toast.error('Comment was removed or no longer exists');
+          return;
+        }
+        
         throw new Error(errorData.error || errorData.message || 'Failed to update');
       }
       
@@ -655,8 +896,20 @@ export default function CommentsSidebar({
   };
 
   const updateAssignment = async (commentId: string, newAssigneeId: string | null) => {
+    // Skip optimistic/temporary comments
+    if (commentId.startsWith('temp-')) {
+      toast.error('Please wait for the comment to save before assigning');
+      setReassigningCommentId(null);
+      return;
+    }
+
     const comment = comments.find(c => c.id === commentId);
-    if (!comment) return;
+    if (!comment) {
+      logger.warn('[CommentsSidebar] Comment not found for assignment:', commentId);
+      setReassigningCommentId(null);
+      await loadComments();
+      return;
+    }
 
     const newAssignee = newAssigneeId 
       ? teamMembers.find(m => m.user_id === newAssigneeId)
@@ -685,6 +938,13 @@ export default function CommentsSidebar({
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         logger.error('[CommentsSidebar] Failed to update assignment:', response.status, errorData);
+        
+        if (response.status === 404) {
+          await loadComments();
+          toast.error('Comment was removed or no longer exists');
+          return;
+        }
+        
         throw new Error(errorData.error || errorData.message || `Failed with status ${response.status}`);
       }
       
@@ -788,19 +1048,47 @@ export default function CommentsSidebar({
     return rootComments;
   };
 
-  // Filter comments based on tab
+  // Filter comments based on tab, search, and sort
   const getFilteredComments = () => {
-    const organized = organizeComments(allComments);
+    let organized = organizeComments(allComments);
+    
+    // Filter by tab
     switch (filterTab) {
       case 'open':
-        return organized.filter(c => !c.resolved);
+        organized = organized.filter(c => !c.resolved);
+        break;
       case 'resolved':
-        return organized.filter(c => c.resolved);
+        organized = organized.filter(c => c.resolved);
+        break;
       case 'mine':
-        return organized.filter(c => c.assignee?.id === currentUserId);
-      default:
-        return organized;
+        organized = organized.filter(c => c.assignee?.id === currentUserId);
+        break;
     }
+    
+    // Search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      organized = organized.filter(c => 
+        c.content.toLowerCase().includes(query) ||
+        c.user.full_name?.toLowerCase().includes(query) ||
+        c.user.email.toLowerCase().includes(query) ||
+        c.quoted_text?.toLowerCase().includes(query) ||
+        c.assignee?.full_name?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Sort
+    if (sortOrder === 'newest') {
+      organized = [...organized].sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    } else {
+      organized = [...organized].sort((a, b) => 
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    }
+    
+    return organized;
   };
 
   const filteredComments = getFilteredComments();
@@ -831,12 +1119,73 @@ export default function CommentsSidebar({
               )}
             </div>
           </div>
-          {allComments.length > 0 && (
-            <span className="text-xs px-2.5 py-1 bg-stone-200/60 dark:bg-gray-800/60 text-stone-600 dark:text-gray-400 rounded-full font-medium tabular-nums">
-              {allComments.filter(c => !c.parent_comment_id).length}
-            </span>
-          )}
+          <div className="flex items-center gap-1">
+            {/* Search toggle */}
+            <button
+              onClick={() => setShowSearch(!showSearch)}
+              className={`p-1.5 rounded-lg transition-colors ${showSearch ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' : 'text-stone-400 hover:text-stone-600 dark:hover:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-800'}`}
+              title="Search comments"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
+            {/* Sort toggle */}
+            <button
+              onClick={() => setSortOrder(sortOrder === 'newest' ? 'oldest' : 'newest')}
+              className="p-1.5 rounded-lg text-stone-400 hover:text-stone-600 dark:hover:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-800 transition-colors"
+              title={`Sort by ${sortOrder === 'newest' ? 'oldest' : 'newest'} first`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {sortOrder === 'newest' ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+                )}
+              </svg>
+            </button>
+            {/* Comment count */}
+            {allComments.length > 0 && (
+              <span className="text-xs px-2 py-1 bg-stone-200/60 dark:bg-gray-800/60 text-stone-600 dark:text-gray-400 rounded-full font-medium tabular-nums ml-1">
+                {allComments.filter(c => !c.parent_comment_id).length}
+              </span>
+            )}
+          </div>
         </div>
+        
+        {/* Search input */}
+        {showSearch && (
+          <div className="mb-3 animate-in fade-in slide-in-from-top-2 duration-150">
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search comments..."
+                className="w-full pl-9 pr-8 py-2 text-sm bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-lg placeholder-stone-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
+                autoFocus
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-stone-400 hover:text-stone-600 dark:hover:text-gray-300"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {searchQuery && (
+              <p className="text-[10px] text-stone-400 dark:text-gray-500 mt-1.5 ml-1">
+                {filteredComments.length} result{filteredComments.length !== 1 ? 's' : ''} found
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Filter Tabs */}
         <div className="flex gap-0.5 sm:gap-1 p-1 bg-stone-200/50 dark:bg-gray-800/50 rounded-lg">
@@ -873,7 +1222,7 @@ export default function CommentsSidebar({
       </div>
 
       {/* Comments List */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={commentsListRef} className="flex-1 overflow-y-auto">
         {isLoading ? (
           // Premium skeleton loader
           <div className="p-4 space-y-4">
@@ -932,6 +1281,7 @@ export default function CommentsSidebar({
             {filteredComments.map((comment) => (
               <div
                 key={comment.id}
+                id={`comment-${comment.id}`}
                 className={`group relative bg-white/80 dark:bg-gray-800/50 backdrop-blur-sm rounded-xl border transition-all duration-300 hover:shadow-lg hover:shadow-stone-200/50 dark:hover:shadow-gray-900/50 ${
                   comment.resolved 
                     ? 'border-emerald-200/60 dark:border-emerald-800/40' 
@@ -1086,9 +1436,17 @@ export default function CommentsSidebar({
                             </div>
                           )}
                           
-                          {/* Assignee chip - clickable to change */}
+                          {/* Assignee chip - clickable to change (disabled for optimistic comments) */}
                           <div className="relative mb-2">
-                            {comment.assignee ? (
+                            {comment.id.startsWith('temp-') ? (
+                              // Show static assignee display for optimistic comments (not clickable)
+                              comment.assignee ? (
+                                <span className="inline-flex items-center gap-1.5 text-xs bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 px-2 py-1 rounded-full border border-violet-200/50 dark:border-violet-700/30 opacity-60">
+                                  <Avatar name={comment.assignee.full_name} email={comment.assignee.email} size="sm" />
+                                  <span className="font-medium">{comment.assignee.full_name || comment.assignee.email.split('@')[0]}</span>
+                                </span>
+                              ) : null
+                            ) : comment.assignee ? (
                               <button
                                 onClick={() => {
                                   // Reload team members if empty
@@ -1177,56 +1535,93 @@ export default function CommentsSidebar({
 
                           {/* Actions - always visible on mobile, hover reveal on desktop */}
                           <div className="flex items-center flex-wrap gap-0.5 sm:gap-1 mt-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
-                            <button
-                              onClick={() => { setReplyingTo(comment.id); setReplyContent(''); }}
-                              className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-amber-600 dark:text-gray-400 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-md transition-all active:scale-95"
-                              title="Reply"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                              </svg>
-                              <span className="hidden sm:inline">Reply</span>
-                            </button>
-                            
-                            <button
-                              onClick={() => toggleResolve(comment.id)}
-                              title={comment.resolved ? 'Reopen' : 'Resolve'}
-                              className={`flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium rounded-md transition-all active:scale-95 ${
-                                comment.resolved
-                                  ? 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                                  : 'text-stone-500 hover:text-emerald-600 dark:text-gray-400 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                              }`}
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                              <span className="hidden sm:inline">{comment.resolved ? 'Reopen' : 'Resolve'}</span>
-                            </button>
-
-                            {onSendToChat && (
-                              <button
-                                onClick={() => onSendToChat(comment.content)}
-                                className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-violet-600 dark:text-gray-400 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-md transition-all active:scale-95"
-                                title="Use in chat"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                            {/* Show saving indicator for optimistic comments */}
+                            {comment.id.startsWith('temp-') ? (
+                              <span className="flex items-center gap-1.5 px-2 py-1 text-xs text-amber-600 dark:text-amber-400">
+                                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
-                                <span className="hidden sm:inline">Use</span>
-                              </button>
-                            )}
+                                <span>Saving...</span>
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => { setReplyingTo(comment.id); setReplyContent(''); }}
+                                  className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-amber-600 dark:text-gray-400 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-md transition-all active:scale-95"
+                                  title="Reply"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                                  </svg>
+                                  <span className="hidden sm:inline">Reply</span>
+                                </button>
+                                
+                                <button
+                                  onClick={() => toggleResolve(comment.id)}
+                                  title={comment.resolved ? 'Reopen' : 'Resolve'}
+                                  className={`flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium rounded-md transition-all active:scale-95 ${
+                                    comment.resolved
+                                      ? 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                                      : 'text-stone-500 hover:text-emerald-600 dark:text-gray-400 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                                  }`}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                  <span className="hidden sm:inline">{comment.resolved ? 'Reopen' : 'Resolve'}</span>
+                                </button>
 
-                            {currentUserId === comment.user.id && (
-                              <button
-                                onClick={() => { setEditingId(comment.id); setEditContent(comment.content); }}
-                                className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-stone-100 dark:hover:bg-gray-800 rounded-md transition-all active:scale-95"
-                                title="Edit"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                                <span className="hidden sm:inline">Edit</span>
-                              </button>
+                                {onSendToChat && (
+                                  <button
+                                    onClick={() => onSendToChat(comment.content)}
+                                    className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-violet-600 dark:text-gray-400 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-md transition-all active:scale-95"
+                                    title="Use in chat"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                    </svg>
+                                    <span className="hidden sm:inline">Use</span>
+                                  </button>
+                                )}
+
+                                {/* Copy link button */}
+                                <button
+                                  onClick={() => copyCommentLink(comment.id)}
+                                  className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-stone-100 dark:hover:bg-gray-800 rounded-md transition-all active:scale-95"
+                                  title="Copy link"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                  </svg>
+                                  <span className="hidden sm:inline">Link</span>
+                                </button>
+
+                                {currentUserId === comment.user.id && (
+                                  <>
+                                    <button
+                                      onClick={() => { setEditingId(comment.id); setEditContent(comment.content); }}
+                                      className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-stone-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-stone-100 dark:hover:bg-gray-800 rounded-md transition-all active:scale-95"
+                                      title="Edit"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                      </svg>
+                                      <span className="hidden sm:inline">Edit</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteClick(comment.id, false)}
+                                      className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all active:scale-95"
+                                      title="Delete"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
+                                      <span className="hidden sm:inline">Delete</span>
+                                    </button>
+                                  </>
+                                )}
+                              </>
                             )}
                           </div>
                         </>
@@ -1278,23 +1673,52 @@ export default function CommentsSidebar({
                     </div>
                   )}
 
-                  {/* Replies with Linear-style threading - Now recursive */}
+                  {/* Replies with Linear-style threading - Now recursive with collapse */}
                   {comment.replies && comment.replies.length > 0 && (
-                    <div className="mt-3 ml-11 space-y-2">
-                      {comment.replies.map((reply, idx) => (
-                        <ReplyItem
-                          key={reply.id}
-                          reply={reply}
-                          idx={idx}
-                          currentUserId={currentUserId}
-                          replyingTo={replyingTo}
-                          replyContent={replyContent}
-                          setReplyingTo={setReplyingTo}
-                          setReplyContent={setReplyContent}
-                          addReply={addReply}
-                          deleteComment={deleteComment}
-                        />
-                      ))}
+                    <div className="mt-3 ml-11">
+                      {/* Collapse/Expand toggle for threads with 3+ replies */}
+                      {comment.replies.length >= 3 && (
+                        <button
+                          onClick={() => toggleThreadCollapse(comment.id)}
+                          className="flex items-center gap-1.5 mb-2 text-xs text-stone-500 dark:text-gray-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                        >
+                          <svg 
+                            className={`w-3.5 h-3.5 transition-transform duration-200 ${collapsedThreads.has(comment.id) ? '' : 'rotate-90'}`} 
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                          <span>
+                            {collapsedThreads.has(comment.id) 
+                              ? `Show ${comment.replies.length} ${comment.replies.length === 1 ? 'reply' : 'replies'}` 
+                              : `Hide ${comment.replies.length} ${comment.replies.length === 1 ? 'reply' : 'replies'}`
+                            }
+                          </span>
+                        </button>
+                      )}
+                      
+                      {/* Replies list - collapsible */}
+                      {!collapsedThreads.has(comment.id) && (
+                        <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                          {comment.replies.map((reply, idx) => (
+                            <ReplyItem
+                              key={reply.id}
+                              reply={reply}
+                              idx={idx}
+                              currentUserId={currentUserId}
+                              replyingTo={replyingTo}
+                              replyContent={replyContent}
+                              setReplyingTo={setReplyingTo}
+                              setReplyContent={setReplyContent}
+                              addReply={addReply}
+                              onDeleteClick={handleDeleteClick}
+                              conversationId={conversationId}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1483,6 +1907,21 @@ export default function CommentsSidebar({
 
             {/* Bottom bar */}
             <div className="flex items-center justify-between gap-2 px-2 py-2 border-t border-stone-100 dark:border-gray-700/50">
+              {/* Left side: Assignee picker + keyboard help */}
+              <div className="flex items-center gap-1">
+              {/* Keyboard shortcuts help */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowShortcuts(!showShortcuts)}
+                  className="p-1.5 rounded-lg text-stone-400 hover:text-stone-600 dark:hover:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-700 transition-colors"
+                  title="Keyboard shortcuts"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                  </svg>
+                </button>
+                <KeyboardShortcutsHelp isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+              </div>
               {/* Assignee picker */}
               <div className="relative">
                 <button
@@ -1571,6 +2010,7 @@ export default function CommentsSidebar({
                   </div>
                 )}
               </div>
+              </div>
 
               {/* Post button */}
               <button
@@ -1607,6 +2047,14 @@ export default function CommentsSidebar({
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmDialog
+        isOpen={deleteConfirm !== null}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={() => deleteConfirm && deleteComment(deleteConfirm.id)}
+        isReply={deleteConfirm?.isReply ?? false}
+      />
     </div>
   );
 }

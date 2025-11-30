@@ -262,17 +262,23 @@ function ConversationListItem({
           </button>
         )}
 
-        {/* Three-dot menu button - Always visible on hover or when menu is open */}
+        {/* Three-dot menu button - visible on hover or touch, or when menu is open */}
         {!bulkSelectMode && (
           <button
             onClick={handleThreeDotClick}
-            className={`flex-shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-100 transition-all ${
-              showThreeDotMenu ? 'opacity-100 bg-gray-100 dark:bg-gray-800' : ''
-            } ${
-              isActive 
+            className={`
+              flex-shrink-0 p-1.5 rounded-md transition-all duration-150 cursor-pointer
+              ${showThreeDotMenu || contextMenuPosition 
+                ? 'opacity-100 bg-gray-100 dark:bg-gray-800' 
+                : 'opacity-0 group-hover:opacity-100 sm:group-focus-within:opacity-100'
+              }
+              ${isActive 
                 ? 'text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40' 
                 : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-            }`}
+              }
+              touch-manipulation
+            `}
+            aria-label="More options"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />

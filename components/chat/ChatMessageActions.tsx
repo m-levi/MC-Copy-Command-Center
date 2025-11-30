@@ -9,7 +9,7 @@ interface ChatMessageActionsProps {
   isRegenerating: boolean;
 }
 
-export const ChatMessageActions = memo(function ChatMessageActions({
+const ChatMessageActionsBase = function ChatMessageActions({
   onCopy,
   onRegenerate,
   copied,
@@ -51,6 +51,6 @@ export const ChatMessageActions = memo(function ChatMessageActions({
       )}
     </div>
   );
-});
+};
 
-
+export const ChatMessageActions = memo(ChatMessageActionsBase);

@@ -69,7 +69,8 @@ export async function POST(request: Request) {
       'default_filter',
       'default_filter_person_id',
       'pinned_conversations',
-      'archived_conversations'
+      'archived_conversations',
+      'email_notifications'
     ];
 
     const updates: any = {

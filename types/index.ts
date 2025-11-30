@@ -121,7 +121,15 @@ export type AIStatus =
   | 'writing_hero'
   | 'developing_body'
   | 'creating_cta'
-  | 'finalizing';
+  | 'finalizing'
+  | 'saving_memory';
+
+// Memory-related types
+export interface MemoryNotification {
+  type: 'saved' | 'recalled';
+  content: string;
+  timestamp: Date;
+}
 
 export interface EmailSection {
   type: 'hero' | 'body' | 'cta' | 'subject';
@@ -226,17 +234,31 @@ export type QuickAction =
   | 'add_social_proof'
   | 'improve_cta';
 
-// AI Models
+// AI Models - Using AI Gateway model identifiers (format: provider/model-name)
+// See: https://sdk.vercel.ai/docs/ai-sdk-core/ai-gateway
 export type AIModel = 
-  | 'gpt-5'
-  | 'o1'
-  | 'claude-4.5-sonnet'
-  | 'claude-opus-3.5';
+  // Anthropic models
+  | 'anthropic/claude-sonnet-4.5'
+  | 'anthropic/claude-opus-4'
+  | 'anthropic/claude-haiku-4.5'
+  // OpenAI models - '-thinking' variants stream reasoning
+  | 'openai/gpt-5.1-thinking'
+  | 'openai/gpt-5.1-instant'
+  | 'openai/gpt-5-mini'
+  | 'openai/gpt-5'
+  | 'openai/o1'
+  | 'openai/o3'
+  | 'openai/o3-mini'
+  | 'openai/o4-mini'
+  // Google models
+  | 'google/gemini-3-pro-preview'
+  | 'google/gemini-2.5-pro'
+  | 'google/gemini-2.5-flash';
 
 export interface AIModelOption {
   id: AIModel;
   name: string;
-  provider: 'openai' | 'anthropic';
+  provider: 'openai' | 'anthropic' | 'google';
 }
 
 // Organization and Multi-Tenancy Types

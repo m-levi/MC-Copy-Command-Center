@@ -5,6 +5,9 @@ import { FLOW_BEST_PRACTICES } from './prompts/flow-best-practices';
 import { STANDARD_EMAIL_PROMPT } from './prompts/standard-email.prompt';
 import { LETTER_EMAIL_PROMPT } from './prompts/letter-email.prompt';
 
+// Re-export conversational flow prompt for convenience
+export { buildConversationalFlowPrompt } from './prompts/conversational-flow.prompt';
+
 /**
  * Replace placeholders in a prompt template
  */
@@ -74,7 +77,7 @@ ${ragContext}
 export function buildFlowOutlinePrompt(
   flowType: FlowType,
   brandInfo: string,
-  ragContext: string
+  ragContext: string = '' // RAG disabled for performance
 ): string {
   const template = getFlowTemplate(flowType);
   const bestPractices = FLOW_BEST_PRACTICES[flowType] || '';
@@ -83,7 +86,7 @@ export function buildFlowOutlinePrompt(
     FLOW_NAME: template.name,
     FLOW_NAME_UPPER: template.name.toUpperCase(),
     BRAND_INFO: brandInfo,
-    RAG_CONTEXT: ragContext,
+    RAG_CONTEXT: '', // RAG disabled - always empty
     DEFAULT_EMAIL_COUNT: template.defaultEmailCount.toString(),
     BEST_PRACTICES: bestPractices,
   });

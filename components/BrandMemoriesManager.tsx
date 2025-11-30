@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { logger } from '@/lib/logger';
 
@@ -27,10 +26,9 @@ export default function BrandMemoriesManager({
   brandId,
   category = 'general',
   title = 'Memories & Notes',
-  description = 'Keep track of important facts, preferences, and insights about this brand',
+  description = 'Keep track of important facts, preferences, and insights about this brand. AI will automatically remember and use these.',
   placeholder = 'Add a new memory...',
 }: BrandMemoriesManagerProps) {
-  const supabase = createClient();
   const [memories, setMemories] = useState<BrandMemory[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -38,28 +36,35 @@ export default function BrandMemoriesManager({
   const [editMemory, setEditMemory] = useState({ title: '', content: '' });
   const [showAddForm, setShowAddForm] = useState(false);
 
-  useEffect(() => {
-    loadMemories();
-  }, [brandId, category]);
-
-  const loadMemories = async () => {
+  const loadMemories = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('brand_memories')
-        .select('*')
-        .eq('brand_id', brandId)
-        .eq('category', category)
-        .order('updated_at', { ascending: false });
-
-      if (error) throw error;
-      setMemories(data || []);
+      setLoading(true);
+      const response = await fetch(`/api/brands/${brandId}/memories`);
+      const data = await response.json();
+      
+      // Handle both success and graceful fallback (empty memories)
+      if (!response.ok && response.status !== 503) {
+        logger.warn('Memories API returned error:', data.error);
+      }
+      
+      // Filter by category on the client side (Supermemory stores all memories together)
+      const filteredMemories = (data.memories || []).filter(
+        (m: BrandMemory) => m.category === category
+      );
+      
+      setMemories(filteredMemories);
     } catch (error) {
-      logger.error('Error loading memories:', error);
-      toast.error('Failed to load memories');
+      // Silently handle errors - just show empty state
+      logger.warn('Error loading memories (showing empty state):', error);
+      setMemories([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [brandId, category]);
+
+  useEffect(() => {
+    loadMemories();
+  }, [loadMemories]);
 
   const handleAdd = async () => {
     if (!newMemory.title.trim() || !newMemory.content.trim()) {
@@ -101,13 +106,15 @@ export default function BrandMemoriesManager({
       const response = await fetch(`/api/brands/${brandId}/memories/${memoryId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editMemory),
+        body: JSON.stringify({ ...editMemory, category }),
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
 
-      setMemories(memories.map(m => m.id === memoryId ? data.memory : m));
+      // Supermemory creates a new memory with a new ID on update
+      // So we need to reload the list to get the updated data
+      await loadMemories();
       setEditingId(null);
       toast.success('Memory updated!');
     } catch (error) {

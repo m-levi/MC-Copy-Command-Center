@@ -97,7 +97,16 @@ export default function ChatSidebarEnhanced({
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [hoveredTooltip, setHoveredTooltip] = useState<TooltipState | null>(null);
   const [showFabMenu, setShowFabMenu] = useState(false);
+  const [isMobileView, setIsMobileView] = useState(false);
   const router = useRouter();
+  
+  // Detect mobile view based on window width (lg breakpoint = 1024px)
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 1024);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   
   // Get collapse state from context (provided by panel wrapper on desktop)
   const panelContext = useSidebarPanel();
@@ -288,23 +297,9 @@ export default function ChatSidebarEnhanced({
   }, [onNewFlow, onNewConversation, onMobileToggle]);
 
   // Close mobile sidebar on outside click
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        isMobileOpen &&
-        sidebarRef.current &&
-        !sidebarRef.current.contains(event.target as Node) &&
-        window.innerWidth < 1024
-      ) {
-        onMobileToggle?.(false);
-      }
-    };
-
-    if (isMobileOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [isMobileOpen, onMobileToggle]);
+  // Note: We rely on the overlay's onClick handler for closing, so this is
+  // disabled to prevent conflicts with dropdowns inside the sidebar
+  // The overlay (z-[60]) catches clicks outside the sidebar (z-[70])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -345,11 +340,19 @@ export default function ChatSidebarEnhanced({
 
   return (
     <>
-      {/* Mobile overlay */}
+      {/* Mobile overlay - closes sidebar when clicked directly */}
       {isMobileOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity duration-200"
-          onClick={() => onMobileToggle?.(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] lg:hidden transition-all duration-300"
+          onClick={(e) => {
+            // Only close if clicking directly on the overlay, not on elements inside
+            if (e.target === e.currentTarget) {
+              e.preventDefault();
+              e.stopPropagation();
+              onMobileToggle?.(false);
+            }
+          }}
+          aria-hidden="true"
         />
       )}
 
@@ -358,18 +361,20 @@ export default function ChatSidebarEnhanced({
         className={`
           bg-white dark:bg-gray-900 text-black dark:text-white 
           flex flex-col border-r border-gray-200 dark:border-gray-700 
-          transition-transform duration-300 ease-in-out
+          transition-transform duration-300 ease-out
           
           /* Mobile: Fixed overlay sidebar */
           fixed lg:relative
           inset-y-0 left-0
-          z-50 lg:z-auto
-          ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          z-[70] lg:z-auto
+          ${isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
           
           /* Responsive width - mobile to desktop */
-          w-[280px] xs:w-[320px] sm:w-[360px] md:w-[380px] lg:w-full
+          w-[300px] sm:w-[340px] md:w-[380px] lg:w-full
         `}
         style={{ height: '100dvh' }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <SidebarHeader
           brandName={brandName}
@@ -381,6 +386,7 @@ export default function ChatSidebarEnhanced({
           onNavigateHome={onNavigateHome}
           onMobileToggle={onMobileToggle}
           onOpenExplorer={() => setIsExplorerOpen(true)}
+          isMobile={isMobileView}
         />
 
         {/* Bulk action bar */}

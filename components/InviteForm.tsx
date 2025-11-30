@@ -33,7 +33,13 @@ export default function InviteForm({ onInviteSent }: InviteFormProps) {
       }
 
       setInviteLink(data.inviteLink);
-      toast.success('Invitation sent successfully!');
+      
+      if (data.emailSent) {
+        toast.success('Invitation email sent successfully!');
+      } else {
+        toast.success('Invitation created! Copy the link below.');
+      }
+      
       setEmail('');
       onInviteSent();
     } catch (error: any) {
@@ -95,7 +101,12 @@ export default function InviteForm({ onInviteSent }: InviteFormProps) {
 
       {inviteLink && (
         <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-sm font-medium text-green-800 mb-2">Invitation Created!</p>
+          <p className="text-sm font-medium text-green-800 mb-2">
+            Invitation Created!
+            <span className="block text-xs font-normal mt-1">
+              An email has been sent to the user. You can also copy the link below manually.
+            </span>
+          </p>
           <div className="flex items-center gap-2">
             <input
               type="text"

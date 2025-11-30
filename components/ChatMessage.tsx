@@ -1,16 +1,18 @@
 'use client';
 
 import { Message, ConversationMode, AIStatus } from '@/types';
-import { useState, useEffect, memo, useMemo } from 'react';
+import { useState, useEffect, memo, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import ThoughtProcess from './ThoughtProcess';
+import { AIReasoning } from './chat/AIReasoning';
 import InlineCommentBox from './InlineCommentBox';
-import { ChatMessageUser, ChatMessageActions, ProductLinksSection } from './chat';
+import { ChatMessageUser, ChatMessageActions, ProductLinksSection, FlowUIRenderer, EmailVersionRenderer, StructuredEmailRenderer, isStructuredEmailCopy } from './chat';
 import SubjectLineGeneratorInline from './SubjectLineGeneratorInline';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
 import { stripCampaignTags } from '@/lib/campaign-parser';
+import { hasFlowMarkers, FlowPlan } from '@/lib/flow-ui-parser';
+import { hasEmailVersionMarkers } from '@/lib/email-version-parser';
 import { logger } from '@/lib/logger';
 import { visit } from 'unist-util-visit';
 
@@ -31,6 +33,12 @@ interface ChatMessageProps {
   commentedRanges?: Array<{ text: string; commentCount: number }>; // Text ranges that have comments
   conversationId?: string;
   commentsData?: Array<{ id: string; quoted_text?: string; content: string }>; // Actual comment data for inline display
+  // Flow-related props
+  onFlowSuggestionClick?: (suggestion: string) => void;
+  onFlowApprove?: (plan: FlowPlan) => void;
+  onFlowModify?: (plan: FlowPlan) => void;
+  isGeneratingFlow?: boolean;
+  flowApprovalState?: 'pending' | 'approved' | 'rejected';
 }
 
 // Memoized component to prevent unnecessary re-renders
@@ -45,23 +53,32 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
     textLower: highlight.text.toLowerCase(),
   }));
 
+  // Log highlights being searched for
+  console.log('[Highlight Plugin] Created with highlights:', normalized.map(h => h.text));
+
   return () => (tree: any) => {
     if (!normalized.length) {
+      console.log('[Highlight Plugin] No highlights to process');
       return;
     }
 
-    logger.debug('[Remark Plugin] Processing with', normalized.length, 'highlights');
-
+    console.log('[Highlight Plugin] Processing tree with', normalized.length, 'highlights');
     let matchCount = 0;
+    const textNodesFound: string[] = [];
 
     visit(tree, 'text', (node: any, index: number | undefined, parent: any) => {
       if (!parent || typeof node.value !== 'string') return;
 
       const originalValue = node.value as string;
       const lowerValue = originalValue.toLowerCase();
+      
+      // Log text nodes for debugging
+      if (originalValue.length > 5) {
+        textNodesFound.push(originalValue.substring(0, 50) + (originalValue.length > 50 ? '...' : ''));
+      }
+      
       const newNodes: any[] = [];
       let cursor = 0;
-
 
       while (cursor < originalValue.length) {
         let nextMatch: { start: number; highlight: typeof normalized[number] } | null = null;
@@ -93,13 +110,18 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
           nextMatch.start + nextMatch.highlight.text.length
         );
 
+        console.log('[Highlight Plugin] MATCH FOUND:', highlightText);
+
         newNodes.push({
-          type: 'commentHighlight',
-          value: highlightText,
+          type: 'highlight',
           data: {
-            text: nextMatch.highlight.text,
-            count: nextMatch.highlight.count,
+            hName: 'mark',
+            hProperties: {
+              'data-count': nextMatch.highlight.count,
+              'data-text': nextMatch.highlight.text,
+            },
           },
+          children: [{ type: 'text', value: highlightText }],
         });
 
         matchCount++;
@@ -112,6 +134,7 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
       }
     });
 
+    console.log('[Highlight Plugin] Finished. Matches:', matchCount, 'Text nodes found:', textNodesFound.slice(0, 5));
   };
 };
 
@@ -132,6 +155,12 @@ const ChatMessage = memo(function ChatMessage({
   commentedRanges = [],
   conversationId,
   commentsData = [],
+  // Flow-related props
+  onFlowSuggestionClick,
+  onFlowApprove,
+  onFlowModify,
+  isGeneratingFlow = false,
+  flowApprovalState = 'pending',
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
@@ -149,16 +178,6 @@ const ChatMessage = memo(function ChatMessage({
     setIsMounted(true);
   }, []);
   
-  // Debug: Log state changes (comment out in production)
-  // useEffect(() => {
-  //   console.log('[ChatMessage State Update]', {
-  //     selectedText,
-  //     selectionPosition,
-  //     hasHandler: !!onCommentClick,
-  //     isMounted
-  //   });
-  // }, [selectedText, selectionPosition, onCommentClick, isMounted]);
-  
   // Update local state when prop changes
   useEffect(() => {
     setIsStarred(isStarredProp);
@@ -167,48 +186,117 @@ const ChatMessage = memo(function ChatMessage({
   // Determine mode for display logic
   const isEmailMode = mode === 'email_copy';
   const isPlanningMode = mode === 'planning';
+  const isFlowMode = mode === 'flow';
   const responseType = message.metadata?.responseType || (isEmailMode ? 'email_copy' : 'other');
   const productLinks = message.metadata?.productLinks || [];
   const canStar = responseType === 'email_copy';
   const messageContent = message.content ?? '';
   const showEmailPreview = responseType === 'email_copy' && !!messageContent;
   const formattedTimestamp = new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  
+  // Check if content has flow UI markers (suggestions, plan, confirm)
+  const hasFlowContent = useMemo(() => {
+    return isFlowMode && messageContent && hasFlowMarkers(messageContent);
+  }, [isFlowMode, messageContent]);
+  
+  // Check if content has email version markers (version_a, version_b, version_c)
+  const hasVersionedContent = useMemo(() => {
+    const hasVersions = messageContent && hasEmailVersionMarkers(messageContent);
+    console.log('[ChatMessage] Version check:', {
+      hasVersions,
+      isStreaming,
+      messageId: message.id,
+      contentLength: messageContent?.length || 0,
+      hasVersionA: messageContent?.includes('<version_a>'),
+      hasVersionAClose: messageContent?.includes('</version_a>'),
+      first100: messageContent?.substring(0, 100),
+    });
+    return hasVersions;
+  }, [messageContent, isStreaming, message.id]);
+  
+  // Check if content is structured email copy (has [HERO], [TEXT], etc. markers)
+  const hasStructuredEmailContent = useMemo(() => {
+    return !isStreaming && messageContent && isStructuredEmailCopy(messageContent);
+  }, [messageContent, isStreaming]);
+  
   const inlineHighlights = useMemo(() => {
     if (!commentsData || commentsData.length === 0) return [];
 
     const highlightMap = new Map<string, { text: string; count: number }>();
 
-    commentsData.forEach((comment) => {
-      let snippet = comment.quoted_text?.trim();
-      if (!snippet) return;
+    // Helper to strip markdown formatting
+    const stripMarkdown = (text: string) => text
+      .replace(/\*\*([^*]+)\*\*/g, '$1')  // **bold** -> bold
+      .replace(/\*([^*]+)\*/g, '$1')      // *italic* -> italic
+      .replace(/`([^`]+)`/g, '$1')        // `code` -> code
+      .replace(/^#+\s+/gm, '')            // # headings -> headings
+      .replace(/^[-*+]\s+/gm, '')         // - list items -> list items
+      .replace(/^\d+\.\s+/gm, '')         // 1. numbered list -> numbered list
+      .trim();
 
-      // Strip common prefixes that might have been added when storing the comment
+    // Helper to strip common prefixes
+    const stripPrefixes = (text: string) => {
       const prefixesToStrip = [
         'Headline:',
         'Sub-headline:',
         'Section Title:',
         'Call to Action Button:',
         'CTA:',
+        'Content:',
       ];
       
       for (const prefix of prefixesToStrip) {
-        if (snippet.toLowerCase().startsWith(prefix.toLowerCase())) {
-          snippet = snippet.substring(prefix.length).trim();
-          break;
+        if (text.toLowerCase().startsWith(prefix.toLowerCase())) {
+          return text.substring(prefix.length).trim();
         }
       }
+      return text;
+    };
 
-      const key = snippet.toLowerCase();
+    // Helper to add a variant to the highlight map
+    const addVariant = (text: string, countIncrement: number) => {
+      if (!text || text.length < 3) return;
+      const key = text.toLowerCase();
       const existing = highlightMap.get(key);
-
       if (existing) {
-        existing.count += 1;
+        existing.count += countIncrement;
       } else {
-        highlightMap.set(key, { text: snippet, count: 1 });
+        highlightMap.set(key, { text, count: countIncrement });
+      }
+    };
+
+    commentsData.forEach((comment) => {
+      const original = comment.quoted_text?.trim();
+      if (!original) return;
+
+      // Try multiple variations to maximize match chances:
+      // 1. Original text as-is (for raw text content)
+      addVariant(original, 1);
+
+      // 2. With markdown stripped (for rendered markdown content)
+      const withoutMarkdown = stripMarkdown(original);
+      if (withoutMarkdown !== original) {
+        addVariant(withoutMarkdown, 0); // Don't double count, just add variant
+      }
+
+      // 3. With prefixes stripped 
+      const withoutPrefixes = stripPrefixes(withoutMarkdown);
+      if (withoutPrefixes !== withoutMarkdown) {
+        addVariant(withoutPrefixes, 0);
+      }
+
+      // 4. Just the main content without list markers and prefixes
+      const mainContent = stripPrefixes(stripMarkdown(original.replace(/^[-*+]\s+/, '')));
+      if (mainContent !== withoutPrefixes && mainContent !== withoutMarkdown) {
+        addVariant(mainContent, 0);
       }
     });
 
     const highlights = Array.from(highlightMap.values());
+    
+    // Debug logging
+    console.log('[ChatMessage] commentsData received:', commentsData);
+    console.log('[ChatMessage] Generated highlights:', highlights.map(h => h.text));
     
     return highlights;
   }, [commentsData]);
@@ -220,127 +308,127 @@ const ChatMessage = memo(function ChatMessage({
     return [createCommentHighlightPlugin(inlineHighlights)];
   }, [inlineHighlights]);
 
-  // Wrap the content with highlights using simple string replacement
-  const contentWithHighlights = useMemo(() => {
-    if (!inlineHighlights.length) return stripCampaignTags(messageContent || 'No content');
+  // Helper function to highlight text in a string
+  const highlightTextInContent = useCallback((content: string): React.ReactNode => {
+    if (!inlineHighlights.length || !content) return content;
 
-    let content = stripCampaignTags(messageContent || 'No content');
+    // Build a regex pattern from all highlights
+    const patterns = inlineHighlights
+      .map(h => h.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) // Escape regex special chars
+      .filter(p => p.length >= 3) // Only match meaningful strings
+      .sort((a, b) => b.length - a.length); // Longer matches first
     
-    // Replace each highlight with a marker that we'll convert to a component
-    inlineHighlights.forEach((highlight, idx) => {
-      const regex = new RegExp(
-        highlight.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-        'gi'
+    if (!patterns.length) return content;
+    
+    const regex = new RegExp(`(${patterns.join('|')})`, 'gi');
+    const parts = content.split(regex);
+    
+    if (parts.length === 1) return content; // No matches
+    
+    return parts.map((part, index) => {
+      const highlight = inlineHighlights.find(
+        h => h.text.toLowerCase() === part.toLowerCase()
       );
       
-      // Replace with a unique marker
-      content = content.replace(regex, (match) => {
-        return `{{HIGHLIGHT_${idx}_START}}${match}{{HIGHLIGHT_${idx}_END}}`;
-      });
+      if (highlight) {
+        return (
+          <span
+            key={index}
+            role="button"
+            tabIndex={0}
+            onClick={() => onCommentClick?.()}
+            onKeyDown={(e) => e.key === 'Enter' && onCommentClick?.()}
+            className="group/highlight underline decoration-amber-400 dark:decoration-amber-500 decoration-dotted decoration-2 underline-offset-2 hover:decoration-amber-500 dark:hover:decoration-amber-400 hover:decoration-solid cursor-pointer bg-amber-100/60 dark:bg-amber-900/30 rounded-sm"
+            style={{ display: 'inline', textAlign: 'inherit' }}
+            title={`${highlight.count} comment${highlight.count > 1 ? 's' : ''} - Click to view`}
+          >
+            {part}
+            <sup className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+              {highlight.count}
+            </sup>
+          </span>
+        );
+      }
+      return part;
     });
+  }, [inlineHighlights, onCommentClick]);
 
-    return content;
-  }, [messageContent, inlineHighlights]);
-
-  // Parse and render content with highlights as React elements
-  const renderContentWithHighlights = useMemo(() => {
-    if (!inlineHighlights.length) {
+  const markdownComponents = useMemo(() => ({
+    mark: ({ node, ...props }: any) => {
+      const count = props['data-count'];
+      
       return (
-        <ReactMarkdown>
-          {stripCampaignTags(messageContent || 'No content')}
-        </ReactMarkdown>
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={() => onCommentClick?.()}
+          onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && onCommentClick?.()}
+          className="group/highlight underline decoration-amber-400 dark:decoration-amber-500 decoration-dotted decoration-2 underline-offset-2 hover:decoration-amber-500 dark:hover:decoration-amber-400 hover:decoration-solid cursor-pointer bg-amber-100/60 dark:bg-amber-900/30 rounded-sm"
+          style={{ display: 'inline', textAlign: 'inherit' }}
+          title={`${count} comment${count > 1 ? 's' : ''} - Click to view`}
+        >
+          {props.children}
+          <sup className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+            {count}
+          </sup>
+        </span>
       );
-    }
-
-    // Split content by highlight markers
-    const parts: React.ReactNode[] = [];
-    let remaining = contentWithHighlights;
-    let key = 0;
-
-    while (remaining.length > 0) {
-      let earliestMatch: { index: number; highlightIdx: number; isStart: boolean } | null = null;
-
-      inlineHighlights.forEach((_, idx) => {
-        const startMarker = `{{HIGHLIGHT_${idx}_START}}`;
-        const endMarker = `{{HIGHLIGHT_${idx}_END}}`;
-        
-        const startIdx = remaining.indexOf(startMarker);
-        const endIdx = remaining.indexOf(endMarker);
-
-        if (startIdx !== -1 && (!earliestMatch || startIdx < earliestMatch.index)) {
-          earliestMatch = { index: startIdx, highlightIdx: idx, isStart: true };
-        }
-        if (endIdx !== -1 && (!earliestMatch || endIdx < earliestMatch.index)) {
-          earliestMatch = { index: endIdx, highlightIdx: idx, isStart: false };
-        }
-      });
-
-      if (!earliestMatch) {
-        // No more markers, add remaining content as markdown
-        parts.push(
-          <ReactMarkdown key={key++}>
-            {remaining}
-          </ReactMarkdown>
-        );
-        break;
+    },
+    // Custom code component to highlight text inside code blocks (email copy)
+    code: ({ node, inline, className, children, ...props }: any) => {
+      const content = String(children).replace(/\n$/, '');
+      
+      // For inline code, just render normally
+      if (inline) {
+        return <code className={className} {...props}>{children}</code>;
       }
-
-      // TypeScript type assertion - we know earliestMatch is not null here
-      const match = earliestMatch as { index: number; highlightIdx: number; isStart: boolean };
-
-      // Add content before marker
-      if (match.index > 0) {
-        parts.push(
-          <ReactMarkdown key={key++}>
-            {remaining.substring(0, match.index)}
-          </ReactMarkdown>
+      
+      // For code blocks, apply highlighting to the content
+      const highlightedContent = highlightTextInContent(content);
+      
+      // Check if any highlighting was applied
+      const hasHighlights = typeof highlightedContent !== 'string';
+      
+      if (hasHighlights) {
+        return (
+          <code className={className} {...props}>
+            <span style={{ whiteSpace: 'pre-wrap' }}>{highlightedContent}</span>
+          </code>
         );
       }
-
-      const marker = match.isStart
-        ? `{{HIGHLIGHT_${match.highlightIdx}_START}}`
-        : `{{HIGHLIGHT_${match.highlightIdx}_END}}`;
-
-      if (match.isStart) {
-        // Find the corresponding end marker
-        const endMarker = `{{HIGHLIGHT_${match.highlightIdx}_END}}`;
-        const endIdx = remaining.indexOf(endMarker, match.index + marker.length);
-        
-        if (endIdx !== -1) {
-          const highlightedText = remaining.substring(
-            match.index + marker.length,
-            endIdx
-          );
-          
-          const highlight = inlineHighlights[match.highlightIdx];
-          
-          // Subtle underline highlight with inline comment count
-          parts.push(
-            <button
-              key={key++}
-              type="button"
-              onClick={() => onCommentClick?.()}
-              className="group/highlight inline text-inherit underline decoration-amber-400/60 dark:decoration-amber-500/50 decoration-dotted decoration-2 underline-offset-4 hover:decoration-amber-500 dark:hover:decoration-amber-400 hover:decoration-solid transition-all duration-150 cursor-pointer relative"
-              title={`${highlight.count} comment${highlight.count > 1 ? 's' : ''} - Click to view`}
-            >
-              {highlightedText}
-              <sup className="ml-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 opacity-70 group-hover/highlight:opacity-100 transition-opacity">
-                {highlight.count}
-              </sup>
-            </button>
-          );
-          
-          remaining = remaining.substring(endIdx + endMarker.length);
-          continue;
-        }
+      
+      return <code className={className} {...props}>{children}</code>;
+    },
+    // Custom pre component to handle code blocks
+    pre: ({ node, children, ...props }: any) => {
+      return (
+        <pre {...props} style={{ whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>
+          {children}
+        </pre>
+      );
+    },
+    // Add custom renderer for links to ensure they open in new tab
+    a: ({ node, ...props }: any) => {
+      return (
+        <a 
+          {...props} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {props.children}
+        </a>
+      );
+    },
+    // Custom paragraph and text handlers to apply highlighting
+    p: ({ node, children, ...props }: any) => {
+      // If children is a string, try to highlight it
+      if (typeof children === 'string') {
+        return <p {...props}>{highlightTextInContent(children)}</p>;
       }
-
-      // Skip this marker and continue
-      remaining = remaining.substring(match.index + marker.length);
-    }
-
-    return <>{parts}</>;
-  }, [contentWithHighlights, inlineHighlights, messageContent, onCommentClick]);
+      return <p {...props}>{children}</p>;
+    },
+  }), [onCommentClick, highlightTextInContent]);
 
   const handleCopy = async () => {
     // Strip markdown code block backticks for cleaner copying
@@ -413,10 +501,9 @@ const ChatMessage = memo(function ChatMessage({
     setSelectedText('');
     setSelectionPosition(null);
     window.getSelection()?.removeAllRanges();
-    // Trigger parent to reload comment counts
-    setTimeout(() => {
-      onCommentClick?.(); // This will trigger comment count reload
-    }, 500); // Small delay to ensure comment is saved
+    // Trigger parent to reload comment counts immediately
+    // Realtime subscription will also catch this, but manual trigger ensures fastest update
+    onCommentClick?.();
   };
 
   // Close floating button when clicking outside or scrolling
@@ -663,13 +750,14 @@ const ChatMessage = memo(function ChatMessage({
         <div className="transition-all w-full">
           {(
             <div onMouseUp={handleTextSelection}>
-              {/* Thought Process - Show if available (includes strategy and all non-email content) */}
+              {/* AI Reasoning - Show thinking/reasoning content with AI Elements */}
               {(message.thinking || isStreaming) && (
                 <div className="px-4 sm:px-6 mb-4">
-                  <ThoughtProcess 
+                  <AIReasoning 
                     thinking={message.thinking} 
                     isStreaming={isStreaming}
                     aiStatus={aiStatus}
+                    defaultOpen={isStreaming}
                   />
                 </div>
               )}
@@ -688,7 +776,7 @@ const ChatMessage = memo(function ChatMessage({
                   <div className="relative group/content">
                     {/* Floating Action Bar (Desktop: Hover, Mobile: Always visible) */}
                     {!isUser && messageContent && !isStreaming && (
-                      <div className="absolute top-2 right-2 z-10 opacity-0 group-hover/content:opacity-100 transition-opacity duration-200 flex items-center gap-1 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-1">
+                      <div className="absolute bottom-2 right-2 z-10 opacity-100 sm:opacity-0 sm:group-hover/content:opacity-100 transition-opacity duration-200 flex items-center gap-1 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-1">
                         <button
                           onClick={handleCopy}
                           className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
@@ -737,30 +825,66 @@ const ChatMessage = memo(function ChatMessage({
                   )}
                   
                   {/* Content area */}
-                  <div className={`${messageContent.includes('```') ? 'px-6 sm:px-8 py-6' : 'py-1'}`}>
-                    {/* Render all content with ReactMarkdown - code blocks show raw, rest renders */}
-                    <div 
-                      className={`prose dark:prose-invert max-w-none select-text cursor-text comment-selection-area
-                      prose-headings:font-bold prose-headings:text-gray-900 dark:prose-headings:text-gray-100
-                      prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg 
-                      prose-p:text-[15px] sm:prose-p:text-base prose-p:leading-7 prose-p:text-gray-800 dark:prose-p:text-gray-200
-                      prose-strong:text-gray-900 dark:prose-strong:text-gray-100 prose-strong:font-semibold
-                      prose-ul:list-disc prose-ul:ml-4 prose-ol:list-decimal prose-ol:ml-4
-                      prose-li:text-gray-800 dark:prose-li:text-gray-200 prose-li:my-1.5
-                      prose-code:text-[13px] prose-code:text-gray-800 dark:prose-code:text-gray-200 
-                      prose-pre:bg-gray-50 dark:prose-pre:bg-gray-900/50 prose-pre:border prose-pre:border-gray-200 dark:prose-pre:border-gray-700 prose-pre:rounded-lg prose-pre:p-4
-                      prose-blockquote:border-l-4 prose-blockquote:border-gray-300 dark:prose-blockquote:border-gray-600 prose-blockquote:pl-4 prose-blockquote:italic
-                      prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
-                      ${!messageContent.includes('```') ? 'prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2' : ''}
-                      text-gray-900 dark:text-gray-100`}
-                      style={{
-                        userSelect: 'text',
-                        WebkitUserSelect: 'text',
-                        MozUserSelect: 'text',
-                      }}
-                    >
-                      {renderContentWithHighlights}
-                    </div>
+                  <div className={`${messageContent.includes('```') && !hasFlowContent && !hasVersionedContent && !hasStructuredEmailContent ? 'px-6 sm:px-8 py-6' : 'py-1'}`}>
+                    {/* Render Flow UI for flow mode with markers */}
+                    {hasFlowContent ? (
+                      <div className="px-4 sm:px-6 py-4">
+                        <FlowUIRenderer
+                          content={messageContent}
+                          onSuggestionClick={onFlowSuggestionClick}
+                          onApprove={onFlowApprove}
+                          onModify={onFlowModify}
+                          isGenerating={isGeneratingFlow}
+                          approvalState={flowApprovalState}
+                        />
+                      </div>
+                    ) : hasVersionedContent ? (
+                      /* Render Email Version UI for versioned email content (version_a, version_b, version_c) */
+                      <div className="py-4">
+                        <EmailVersionRenderer
+                          content={stripCampaignTags(messageContent)}
+                          remarkPlugins={remarkPlugins}
+                          markdownComponents={markdownComponents}
+                          isStreaming={isStreaming}
+                        />
+                      </div>
+                    ) : hasStructuredEmailContent ? (
+                      /* Render Structured Email UI for email copy with [HERO], [TEXT], etc. markers */
+                      <div className="px-4 sm:px-6 py-4">
+                        <StructuredEmailRenderer
+                          content={stripCampaignTags(messageContent)}
+                          onCopy={() => toast.success('Copied to clipboard!')}
+                        />
+                      </div>
+                    ) : (
+                      <div 
+                        className={`prose dark:prose-invert max-w-none select-text cursor-text comment-selection-area
+                        prose-headings:font-bold prose-headings:text-gray-900 dark:prose-headings:text-gray-100
+                        prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg 
+                        prose-p:text-[15px] sm:prose-p:text-base prose-p:leading-7 prose-p:text-gray-800 dark:prose-p:text-gray-200
+                        prose-strong:text-gray-900 dark:prose-strong:text-gray-100 prose-strong:font-semibold
+                        prose-ul:list-disc prose-ul:ml-4 prose-ol:list-decimal prose-ol:ml-4
+                        prose-li:text-gray-800 dark:prose-li:text-gray-200 prose-li:my-1.5
+                        prose-code:text-[13px] prose-code:text-gray-800 dark:prose-code:text-gray-200 
+                        prose-pre:bg-gray-50 dark:prose-pre:bg-gray-900/50 prose-pre:border prose-pre:border-gray-200 dark:prose-pre:border-gray-700 prose-pre:rounded-lg prose-pre:p-4
+                        prose-blockquote:border-l-4 prose-blockquote:border-gray-300 dark:prose-blockquote:border-gray-600 prose-blockquote:pl-4 prose-blockquote:italic
+                        prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
+                        ${!messageContent.includes('```') ? 'prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2' : ''}
+                        text-gray-900 dark:text-gray-100`}
+                        style={{
+                          userSelect: 'text',
+                          WebkitUserSelect: 'text',
+                          MozUserSelect: 'text',
+                        }}
+                      >
+                        <ReactMarkdown
+                          remarkPlugins={remarkPlugins}
+                          components={markdownComponents}
+                        >
+                          {stripCampaignTags(messageContent || 'No content')}
+                        </ReactMarkdown>
+                      </div>
+                    )}
                     
                     {/* Commented text snippets removed - now shown inline as highlights */}
                   </div>
@@ -860,18 +984,30 @@ const ChatMessage = memo(function ChatMessage({
 }, (prevProps, nextProps) => {
   // Custom comparison function for memo optimization
   // NOTE: We're NOT comparing internal state like selectedText - that should always trigger re-render
+  
+  // Deep compare commentsData to detect changes in highlighted text
+  const commentsDataEqual = () => {
+    const prev = prevProps.commentsData || [];
+    const next = nextProps.commentsData || [];
+    if (prev.length !== next.length) return false;
+    // Compare by IDs and quoted_text for highlight changes
+    return prev.every((p, i) => 
+      p.id === next[i]?.id && p.quoted_text === next[i]?.quoted_text
+    );
+  };
+  
   return (
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.thinking === nextProps.message.thinking &&
+    JSON.stringify(prevProps.message.metadata) === JSON.stringify(nextProps.message.metadata) &&
     prevProps.isRegenerating === nextProps.isRegenerating &&
     prevProps.mode === nextProps.mode &&
     prevProps.brandId === nextProps.brandId &&
     prevProps.commentCount === nextProps.commentCount &&
-    prevProps.commentsData?.length === nextProps.commentsData?.length && // Re-render if comments change
+    commentsDataEqual() && // Deep compare for highlight updates
     prevProps.onCommentClick === nextProps.onCommentClick
   );
 });
 
 export default ChatMessage;
-

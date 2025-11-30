@@ -1,25 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
+import { gateway, MODELS } from '@/lib/ai-providers';
 
 export const runtime = 'edge';
-
-// Lazy-load AI clients
-function getOpenAIClient() {
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY!,
-  });
-}
-
-function getAnthropicClient() {
-  return new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY!,
-    // Add beta headers for web search and memory tools
-    defaultHeaders: {
-      'anthropic-beta': 'web-search-2025-03-05,context-management-2025-06-27'
-    }
-  });
-}
 
 interface ExtractedBrandInfo {
   name: string;
@@ -133,11 +116,7 @@ async function extractBrandInfoWithAI(
   content: string,
   websiteUrl?: string
 ): Promise<ExtractedBrandInfo> {
-  try {
-    // Try Claude first (better at content analysis)
-    const anthropic = getAnthropicClient();
-    
-    const userPrompt = `
+  const userPrompt = `
 ${websiteUrl ? `Website URL: ${websiteUrl}\n\n` : ''}
 Content to analyze:
 
@@ -145,81 +124,34 @@ ${content}
 
 Extract comprehensive brand information from this content and return it in the specified JSON format.`;
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      system: EXTRACTION_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: userPrompt,
-        },
-      ],
-    });
+  // Use Vercel AI SDK via AI Gateway
+  const { text } = await generateText({
+    model: gateway.languageModel(MODELS.CLAUDE_SONNET),
+    system: EXTRACTION_SYSTEM_PROMPT,
+    prompt: userPrompt,
+    maxRetries: 2,
+  });
 
-    const textContent = response.content.find((block) => block.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
-      throw new Error('No text response from AI');
-    }
-
-    // Extract JSON from response (handle markdown code blocks)
-    let jsonStr = textContent.text.trim();
-    if (jsonStr.startsWith('```json')) {
-      jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?$/g, '');
-    } else if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/```\n?/g, '');
-    }
-
-    const extracted: ExtractedBrandInfo = JSON.parse(jsonStr);
-    
-    // If website_url was provided but not in response, add it
-    if (websiteUrl && !extracted.website_url) {
-      extracted.website_url = websiteUrl;
-    }
-
-    return extracted;
-  } catch (error) {
-    console.error('Claude extraction failed, trying OpenAI:', error);
-    
-    // Fallback to OpenAI
-    try {
-      const openai = getOpenAIClient();
-      
-      const userPrompt = `
-${websiteUrl ? `Website URL: ${websiteUrl}\n\n` : ''}
-Content to analyze:
-
-${content}
-
-Extract comprehensive brand information from this content and return it in the specified JSON format.`;
-
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        response_format: { type: 'json_object' },
-      });
-
-      const result = completion.choices[0]?.message?.content;
-      if (!result) {
-        throw new Error('No response from OpenAI');
-      }
-
-      const extracted: ExtractedBrandInfo = JSON.parse(result);
-      
-      // If website_url was provided but not in response, add it
-      if (websiteUrl && !extracted.website_url) {
-        extracted.website_url = websiteUrl;
-      }
-
-      return extracted;
-    } catch (openaiError) {
-      console.error('OpenAI extraction also failed:', openaiError);
-      throw new Error('Failed to extract brand information using AI. Please try again.');
-    }
+  if (!text) {
+    throw new Error('No response from AI');
   }
+
+  // Extract JSON from response (handle markdown code blocks)
+  let jsonStr = text.trim();
+  if (jsonStr.startsWith('```json')) {
+    jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?$/g, '');
+  } else if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/```\n?/g, '');
+  }
+
+  const extracted: ExtractedBrandInfo = JSON.parse(jsonStr);
+  
+  // If website_url was provided but not in response, add it
+  if (websiteUrl && !extracted.website_url) {
+    extracted.website_url = websiteUrl;
+  }
+
+  return extracted;
 }
 
 export async function POST(req: NextRequest) {
@@ -284,4 +216,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

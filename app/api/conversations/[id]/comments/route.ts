@@ -9,6 +9,12 @@ import {
   withErrorHandling,
 } from '@/lib/api-error';
 import { logger } from '@/lib/logger';
+import {
+  sendCommentAddedEmail,
+  sendCommentAssignedEmail,
+  sendCommentMentionEmail,
+  shouldSendEmail,
+} from '@/lib/email-service';
 
 export const runtime = 'nodejs';
 
@@ -165,13 +171,32 @@ export const POST = withErrorHandling(async (
     user: profile || { id: user.id, email: user.email || 'Unknown' }
   };
 
+  // Get conversation title for emails
+  const { data: conversationData } = await supabase
+    .from('conversations')
+    .select('title')
+    .eq('id', conversationId)
+    .single();
+  
+  // Get brand name for emails
+  const { data: brandData } = await supabase
+    .from('brands')
+    .select('name')
+    .eq('id', conversation.brand_id)
+    .single();
+
+  const conversationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/brands/${conversation.brand_id}/chat?conversation=${conversationId}`;
+  const commenterName = profile?.full_name || user.email || 'Someone';
+
   // Create notification for conversation owner (if not the commenter)
   if (conversation.user_id !== user.id) {
+    logger.log('[Comments API] Creating notification for conversation owner:', conversation.user_id);
+    
     await supabase.from('notifications').insert({
       user_id: conversation.user_id,
       type: 'comment_added',
       title: 'New Comment',
-      message: `${profile?.full_name || user.email || 'Someone'} commented on your conversation`,
+      message: `${commenterName} commented on your conversation`,
       link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
       metadata: {
         conversation_id: conversationId,
@@ -179,6 +204,50 @@ export const POST = withErrorHandling(async (
         commenter_id: user.id,
       },
     });
+
+    // Send email notification to conversation owner
+    logger.log('[Comments API] Attempting to send email notification...');
+    const serviceClient = getServiceClient();
+    
+    if (!serviceClient) {
+      logger.warn('[Comments API] No service client available for email sending');
+    } else {
+      logger.log('[Comments API] Service client available, checking email preferences...');
+      const shouldEmail = await shouldSendEmail(serviceClient, conversation.user_id, 'comment_added');
+      logger.log('[Comments API] Should send email:', shouldEmail);
+      
+      if (shouldEmail) {
+        // Get owner's email
+        const { data: ownerProfile, error: profileError } = await serviceClient
+          .from('profiles')
+          .select('email')
+          .eq('user_id', conversation.user_id)
+          .single();
+        
+        logger.log('[Comments API] Owner profile lookup:', { email: ownerProfile?.email, error: profileError?.message });
+        
+        if (ownerProfile?.email) {
+          logger.log('[Comments API] Sending comment notification email to:', ownerProfile.email);
+          sendCommentAddedEmail({
+            to: ownerProfile.email,
+            commenterName,
+            commentContent: content,
+            conversationTitle: conversationData?.title,
+            brandName: brandData?.name,
+            conversationLink,
+            quotedText,
+          }).then(result => {
+            logger.log('[Comments API] Email send result:', result);
+          }).catch(err => {
+            logger.error('[Comments API] Failed to send comment email:', err);
+          });
+        } else {
+          logger.warn('[Comments API] No email found for owner');
+        }
+      }
+    }
+  } else {
+    logger.log('[Comments API] Commenter is the owner, skipping owner notification');
   }
 
   // Create notification for assigned user (if different from commenter)
@@ -187,7 +256,7 @@ export const POST = withErrorHandling(async (
       user_id: assignedTo,
       type: 'comment_assigned',
       title: 'Comment Assigned to You',
-      message: `${profile?.full_name || user.email || 'Someone'} assigned you a comment`,
+      message: `${commenterName} assigned you a comment`,
       link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
       metadata: {
         conversation_id: conversationId,
@@ -195,6 +264,32 @@ export const POST = withErrorHandling(async (
         assigner_id: user.id,
       },
     });
+
+    // Send email notification to assigned user
+    const serviceClient = getServiceClient();
+    if (serviceClient) {
+      const shouldEmail = await shouldSendEmail(serviceClient, assignedTo, 'comment_assigned');
+      if (shouldEmail) {
+        // Get assignee's email
+        const { data: assigneeProfile } = await serviceClient
+          .from('profiles')
+          .select('email')
+          .eq('user_id', assignedTo)
+          .single();
+        
+        if (assigneeProfile?.email) {
+          sendCommentAssignedEmail({
+            to: assigneeProfile.email,
+            assignerName: commenterName,
+            commentContent: content,
+            conversationTitle: conversationData?.title,
+            brandName: brandData?.name,
+            conversationLink,
+            quotedText,
+          }).catch(err => logger.error('[Comments API] Failed to send assignment email:', err));
+        }
+      }
+    }
   }
 
   // Parse @mentions from content and create notifications
@@ -241,7 +336,7 @@ export const POST = withErrorHandling(async (
                 user_id: matchedMember.user_id,
                 type: 'comment_mention',
                 title: 'You were mentioned',
-                message: `${profile?.full_name || user.email || 'Someone'} mentioned you in a comment`,
+                message: `${commenterName} mentioned you in a comment`,
                 link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
                 metadata: {
                   conversation_id: conversationId,
@@ -249,6 +344,22 @@ export const POST = withErrorHandling(async (
                   mentioner_id: user.id,
                 },
               });
+
+              // Send email notification for mention
+              const serviceClient = getServiceClient();
+              if (serviceClient && matchedMember.profile?.email) {
+                const shouldEmail = await shouldSendEmail(serviceClient, matchedMember.user_id, 'comment_mention');
+                if (shouldEmail) {
+                  sendCommentMentionEmail({
+                    to: matchedMember.profile.email,
+                    mentionerName: commenterName,
+                    commentContent: content,
+                    conversationTitle: conversationData?.title,
+                    brandName: brandData?.name,
+                    conversationLink,
+                  }).catch(err => logger.error('[Comments API] Failed to send mention email:', err));
+                }
+              }
             }
           }
         }

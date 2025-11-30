@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { generateText } from 'ai';
+import { gateway, MODELS } from '@/lib/ai-providers';
 
 export const runtime = 'edge';
 
@@ -53,7 +49,7 @@ async function handleIngestion(data: { text?: string; url?: string }) {
 }
 
 // Phase 2: Interview Question Generation
-async function handleInterview(data: { chatHistory: any[] }) {
+async function handleInterview(data: { chatHistory: Array<{ role: string; content: string }> }) {
   const systemPrompt = `
     You are the Brand Voice Architect. Your goal is to extract a distinct persona from the user.
     Analyze the conversation history and ask a high-leverage question to identify tonal nuance.
@@ -61,17 +57,20 @@ async function handleInterview(data: { chatHistory: any[] }) {
     Keep questions short and conversational.
   `;
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...data.chatHistory
-    ],
-    temperature: 0.7,
+  // Convert chat history to a formatted prompt string
+  // The Vercel AI SDK's generateText expects either `prompt` or properly formatted `messages`
+  const conversationContext = data.chatHistory
+    .map((msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+    .join('\n');
+
+  const { text } = await generateText({
+    model: gateway.languageModel(MODELS.GPT_5),
+    system: systemPrompt,
+    prompt: `Based on this conversation history, generate the next interview question:\n\n${conversationContext}`,
   });
 
   return NextResponse.json({
-    message: response.choices[0].message.content
+    message: text
   });
 }
 
@@ -93,16 +92,13 @@ async function handleCalibration(data: {
     Return JSON: { "options": [{ "id": "A", "content": "...", "label": "Option A", "style_notes": "..." }, { "id": "B", "content": "...", "label": "Option B", "style_notes": "..." }] }
   `;
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: "Generate calibration options." }
-    ],
-    response_format: { type: "json_object" }
+  const { text } = await generateText({
+    model: gateway.languageModel(MODELS.GPT_5),
+    system: systemPrompt,
+    prompt: "Generate calibration options.",
   });
 
-  const content = JSON.parse(response.choices[0].message.content || "{}");
+  const content = JSON.parse(text || "{}");
 
   return NextResponse.json(content);
 }
@@ -126,17 +122,13 @@ async function handleSynthesis(data: {
     Ensure "Do's and Don'ts" are specific (e.g., "Never use the word 'delighted'"), not generic.
   `;
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: JSON.stringify(data) }
-    ],
-    response_format: { type: "json_object" }
+  const { text } = await generateText({
+    model: gateway.languageModel(MODELS.GPT_5),
+    system: systemPrompt,
+    prompt: JSON.stringify(data),
   });
 
-  const profile = JSON.parse(response.choices[0].message.content || "{}");
+  const profile = JSON.parse(text || "{}");
 
   return NextResponse.json({ profile });
 }
-

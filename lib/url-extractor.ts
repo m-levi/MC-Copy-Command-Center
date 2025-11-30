@@ -182,6 +182,80 @@ export function extractURLsFromSearchContext(searchContent: string, websiteUrl?:
 }
 
 /**
+ * Extract citation-style links from AI responses
+ * Handles formats like:
+ * - [1] https://example.com
+ * - [Source: Example](https://example.com)
+ * - Source: https://example.com
+ * - Reference: https://example.com
+ */
+export function extractCitationLinks(text: string): ExtractedURL[] {
+  const citations: ExtractedURL[] = [];
+  
+  // Pattern 1: Numbered citations like [1] https://... or [1]: https://...
+  const numberedCitationRegex = /\[(\d+)\]:?\s*(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
+  let match;
+  
+  while ((match = numberedCitationRegex.exec(text)) !== null) {
+    const [, number, url] = match;
+    try {
+      const cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
+      new URL(cleanUrl); // Validate URL
+      citations.push({
+        url: cleanUrl,
+        title: `Source ${number}`,
+        source: 'ai_response',
+      });
+    } catch {
+      // Invalid URL, skip
+    }
+  }
+  
+  // Pattern 2: Labeled citations like "Source:" or "Reference:" followed by URL
+  const labeledCitationRegex = /(?:Source|Reference|Citation|See|From|Via):\s*(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
+  
+  while ((match = labeledCitationRegex.exec(text)) !== null) {
+    const [, url] = match;
+    try {
+      const cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
+      new URL(cleanUrl); // Validate URL
+      // Avoid duplicates
+      if (!citations.some(c => c.url === cleanUrl)) {
+        citations.push({
+          url: cleanUrl,
+          source: 'ai_response',
+        });
+      }
+    } catch {
+      // Invalid URL, skip
+    }
+  }
+  
+  // Pattern 3: "Title - URL" format commonly in search results
+  const titleUrlRegex = /([^-\n]{5,50})\s*[-–—]\s*(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
+  
+  while ((match = titleUrlRegex.exec(text)) !== null) {
+    const [, title, url] = match;
+    try {
+      const cleanUrl = url.replace(/[.,;:!?)\]]+$/, '');
+      new URL(cleanUrl); // Validate URL
+      // Avoid duplicates
+      if (!citations.some(c => c.url === cleanUrl)) {
+        citations.push({
+          url: cleanUrl,
+          title: title.trim(),
+          source: 'ai_response',
+        });
+      }
+    } catch {
+      // Invalid URL, skip
+    }
+  }
+  
+  return citations;
+}
+
+/**
  * Convert extracted URLs to ProductLink format
  */
 export function convertToProductLinks(
@@ -266,6 +340,11 @@ export function smartExtractProductLinks(
     userUrls.map(u => ({ ...u, source: 'user_message' as const })),
     websiteUrl
   ));
+  
+  // Strategy 5: Extract citation-style links (common in web search results)
+  const citationLinks = extractCitationLinks(aiResponse);
+  logger.debug('[SmartExtract] Citation links:', citationLinks.length);
+  allLinks.push(...convertToProductLinks(citationLinks, websiteUrl));
   
   // Remove duplicates based on URL
   const uniqueLinks = allLinks.filter((link, index, self) => 

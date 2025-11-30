@@ -209,7 +209,7 @@ export default function ConversationOptionsMenu({
   const menuContent = (
     <div
       ref={menuRef}
-      className="fixed z-[9999] bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 py-1 min-w-[220px]"
+      className="fixed z-[9999] bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 py-1.5 min-w-[220px] animate-in fade-in zoom-in-95 duration-150 origin-top-right"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -218,7 +218,7 @@ export default function ConversationOptionsMenu({
       {menuItems.map((item, index) => {
         if (item.type === 'divider') {
           return (
-            <div key={`divider-${index}`} className="my-1 border-t border-gray-200 dark:border-gray-700" />
+            <div key={`divider-${index}`} className="my-1.5 mx-2 border-t border-gray-200 dark:border-gray-700" />
           );
         }
 
@@ -226,10 +226,11 @@ export default function ConversationOptionsMenu({
           <button
             key={item.label}
             onClick={item.onClick}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer ${item.color}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-100 cursor-pointer rounded-md mx-1 ${item.color}`}
+            style={{ width: 'calc(100% - 8px)' }}
           >
             {item.icon}
-            <span>{item.label}</span>
+            <span className="font-medium">{item.label}</span>
           </button>
         );
       })}

@@ -84,23 +84,51 @@ export const PATCH = withErrorHandling(async (
   }
 
   // Use service client for lookups to bypass RLS (fallback to regular client)
-  const serviceClient = getServiceClient() || supabase;
-
-  // Get the comment with additional info - use service client to bypass RLS
-  const { data: comment, error: commentError } = await serviceClient
-    .from('conversation_comments')
-    .select('id, user_id, conversation_id, assigned_to, resolved')
-    .eq('id', commentId)
-    .maybeSingle();
-
-  console.log('[Comments PATCH] Looking up comment:', commentId, 'result:', comment, 'error:', commentError);
+  const serviceClient = getServiceClient();
+  
+  // Try service client first, then fall back to querying via conversation
+  let comment: any = null;
+  
+  if (serviceClient) {
+    // Service client available - can bypass RLS
+    const { data, error: commentError } = await serviceClient
+      .from('conversation_comments')
+      .select('id, user_id, conversation_id, assigned_to, resolved')
+      .eq('id', commentId)
+      .maybeSingle();
+    
+    comment = data;
+    console.log('[Comments PATCH] Service client lookup:', commentId, 'result:', comment, 'error:', commentError);
+  } else {
+    // No service client - query via conversation which user has access to
+    // First verify the user has access to the conversation
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .maybeSingle();
+    
+    if (conv) {
+      // User has conversation access, now get all comments for this conversation
+      // and find the one we need
+      const { data: comments } = await supabase
+        .from('conversation_comments')
+        .select('id, user_id, conversation_id, assigned_to, resolved')
+        .eq('conversation_id', conversationId);
+      
+      comment = comments?.find((c: any) => c.id === commentId);
+      console.log('[Comments PATCH] RLS-aware lookup via conversation:', commentId, 'found:', !!comment);
+    }
+  }
 
   if (!comment) {
+    console.log('[Comments PATCH] Comment not found:', commentId, 'in conversation:', conversationId);
     return notFoundError('Comment');
   }
 
   // Get conversation for brand info and authorization (required for validation and notifications)
-  const { data: conversation, error: convError } = await serviceClient
+  const lookupClient = serviceClient || supabase;
+  const { data: conversation, error: convError } = await lookupClient
     .from('conversations')
     .select('user_id, brand_id')
     .eq('id', conversationId)
@@ -114,8 +142,8 @@ export const PATCH = withErrorHandling(async (
 
   // Verify user has access to conversation (owner, org member, or share with comment/edit permission)
   const hasAccess = conversation.user_id === user.id || 
-    await checkOrgMembership(serviceClient, conversation.brand_id, user.id) ||
-    await checkSharePermission(serviceClient, conversationId, user.id, ['comment', 'edit']);
+    await checkOrgMembership(lookupClient, conversation.brand_id, user.id) ||
+    await checkSharePermission(lookupClient, conversationId, user.id, ['comment', 'edit']);
 
   if (!hasAccess) {
     return authorizationError('You do not have permission to modify comments on this conversation');
@@ -139,8 +167,8 @@ export const PATCH = withErrorHandling(async (
       // Unassign
       updateData.assigned_to = null;
     } else {
-      // Validate assigned user is a member of the organization (skip if no service client)
-      const isMember = await checkOrgMembership(serviceClient, conversation.brand_id, assignedTo);
+      // Validate assigned user is a member of the organization
+      const isMember = await checkOrgMembership(lookupClient, conversation.brand_id, assignedTo);
       if (!isMember) {
         return validationError('Assigned user is not a member of this organization');
       }
@@ -150,11 +178,28 @@ export const PATCH = withErrorHandling(async (
 
   console.log('[Comments PATCH] Updating comment with:', updateData);
 
-  // Try to update with service client
+  // Try to update - use service client if available, otherwise regular client
   let updatedComment;
   let updateError;
+  const updateClient = serviceClient || supabase;
   
-  const result = await serviceClient
+  // If using regular client and user is not the comment owner, 
+  // they can only update if they own the conversation (for resolve/assign)
+  const isOwner = comment.user_id === user.id;
+  const isConversationOwner = conversation.user_id === user.id;
+  
+  if (!serviceClient && !isOwner && !isConversationOwner) {
+    // Check if user has edit permission via share
+    const hasEditPermission = await checkSharePermission(supabase, conversationId, user.id, ['edit']);
+    if (!hasEditPermission) {
+      console.log('[Comments PATCH] User lacks permission to update comment (RLS will block)');
+      // For resolve/assignment changes by users with comment permission, 
+      // we need service client which isn't available
+      return authorizationError('Unable to update comment. Please contact your administrator.');
+    }
+  }
+  
+  const result = await updateClient
     .from('conversation_comments')
     .update(updateData)
     .eq('id', commentId)
@@ -163,6 +208,12 @@ export const PATCH = withErrorHandling(async (
   
   updatedComment = result.data;
   updateError = result.error;
+
+  // If RLS blocked the update (no rows returned), try a different approach
+  if (!updatedComment && !updateError) {
+    console.log('[Comments PATCH] Update returned no data - RLS may have blocked');
+    updateError = { message: 'Update blocked by permissions' };
+  }
 
   // If the error is about the assigned_to column not existing, retry without it
   if (updateError && assignedTo !== undefined && (
@@ -173,7 +224,7 @@ export const PATCH = withErrorHandling(async (
     console.warn('[Comments PATCH] assigned_to column may not exist, retrying without it');
     const { assigned_to, ...updateDataWithoutAssignment } = updateData;
     
-    const retryResult = await serviceClient
+    const retryResult = await updateClient
       .from('conversation_comments')
       .update(updateDataWithoutAssignment)
       .eq('id', commentId)
@@ -183,18 +234,18 @@ export const PATCH = withErrorHandling(async (
     updatedComment = retryResult.data;
     updateError = retryResult.error;
     
-    if (!updateError) {
+    if (!updateError && updatedComment) {
       console.log('[Comments PATCH] Comment updated without assignment - run ADD_COMMENT_ASSIGNMENTS.sql migration to enable assignments');
     }
   }
 
-  if (updateError) {
+  if (updateError || !updatedComment) {
     console.error('[Comments PATCH] Update error:', updateError);
-    throw updateError;
+    throw updateError || new Error('Failed to update comment');
   }
 
   // Get current user's profile for notifications
-  const { data: userProfile } = await serviceClient
+  const { data: userProfile } = await lookupClient
     .from('profiles')
     .select('full_name, email')
     .eq('user_id', user.id)
@@ -206,7 +257,7 @@ export const PATCH = withErrorHandling(async (
   if (assignedTo !== undefined && assignedTo !== comment.assigned_to) {
     // Notify new assignee (if not self-assigning)
     if (assignedTo && assignedTo !== user.id) {
-      await serviceClient.from('notifications').insert({
+      await supabase.from('notifications').insert({
         user_id: assignedTo,
         type: 'comment_assigned',
         title: 'Comment Assigned to You',
@@ -222,7 +273,7 @@ export const PATCH = withErrorHandling(async (
 
     // Notify previous assignee that they were unassigned (if they're not the one making the change)
     if (comment.assigned_to && comment.assigned_to !== user.id && comment.assigned_to !== assignedTo) {
-      await serviceClient.from('notifications').insert({
+      await supabase.from('notifications').insert({
         user_id: comment.assigned_to,
         type: 'comment_unassigned',
         title: 'Comment Unassigned',
@@ -239,7 +290,7 @@ export const PATCH = withErrorHandling(async (
 
   // Send notification when comment is resolved (if assigned to someone)
   if (resolved === true && !comment.resolved && comment.assigned_to && comment.assigned_to !== user.id) {
-    await serviceClient.from('notifications').insert({
+    await supabase.from('notifications').insert({
       user_id: comment.assigned_to,
       type: 'comment_resolved',
       title: 'Comment Resolved',
@@ -255,7 +306,7 @@ export const PATCH = withErrorHandling(async (
 
   // Notify comment owner when their comment is resolved by someone else
   if (resolved === true && !comment.resolved && comment.user_id !== user.id && comment.user_id !== comment.assigned_to) {
-    await serviceClient.from('notifications').insert({
+    await supabase.from('notifications').insert({
       user_id: comment.user_id,
       type: 'comment_resolved',
       title: 'Your Comment Was Resolved',
@@ -275,7 +326,7 @@ export const PATCH = withErrorHandling(async (
     allUserIds.push(updatedComment.assigned_to);
   }
 
-  const { data: profiles } = await serviceClient
+  const { data: profiles } = await lookupClient
     .from('profiles')
     .select('user_id, email, full_name')
     .in('user_id', allUserIds);

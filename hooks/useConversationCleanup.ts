@@ -162,8 +162,10 @@ export async function shouldDeleteEmptyConversation(
  * Bulk cleanup of all empty conversations for a brand
  * Runs on page load to clean up any accumulated empty conversations
  * ONLY deletes conversations with exactly 0 messages
+ * @param brandId - The brand ID to cleanup conversations for
+ * @param excludeConversationId - Optional conversation ID to exclude from cleanup (e.g., currently selected)
  */
-export async function bulkCleanupEmptyConversations(brandId: string): Promise<number> {
+export async function bulkCleanupEmptyConversations(brandId: string, excludeConversationId?: string | null): Promise<number> {
   try {
     const supabase = createClient();
     
@@ -188,6 +190,12 @@ export async function bulkCleanupEmptyConversations(brandId: string): Promise<nu
       try {
         // Skip if conversation is invalid
         if (!conv || !conv.id) {
+          continue;
+        }
+        
+        // NEVER delete the currently selected conversation (prevents race condition)
+        if (excludeConversationId && conv.id === excludeConversationId) {
+          logger.log('[BulkCleanup] Skipping excluded conversation:', conv.id);
           continue;
         }
         

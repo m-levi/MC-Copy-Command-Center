@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { canManageMembers, getUserOrganization } from '@/lib/permissions';
+import { sendInviteEmail } from '@/lib/email-service';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // Need Node.js runtime for crypto
@@ -99,15 +100,24 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user is already a member
-    const { data: existingMember } = await supabase
-      .from('organization_members')
-      .select('id')
-      .eq('organization_id', userOrg.organization.id)
-      .eq('user_id', (await supabase.from('profiles').select('user_id').eq('email', email).single()).data?.user_id || '')
+    // We need to handle the case where the user might not have a profile yet or the query fails safely
+    const { data: userProfile } = await supabase
+      .from('profiles')
+      .select('user_id')
+      .eq('email', email)
       .single();
 
-    if (existingMember) {
-      return NextResponse.json({ error: 'User is already a member of this organization' }, { status: 400 });
+    if (userProfile) {
+      const { data: existingMember } = await supabase
+        .from('organization_members')
+        .select('id')
+        .eq('organization_id', userOrg.organization.id)
+        .eq('user_id', userProfile.user_id)
+        .single();
+
+      if (existingMember) {
+        return NextResponse.json({ error: 'User is already a member of this organization' }, { status: 400 });
+      }
     }
 
     // Check if there's already a pending invitation
@@ -153,13 +163,30 @@ export async function POST(request: NextRequest) {
     // Generate invite link
     const inviteLink = `${request.nextUrl.origin}/signup/${inviteToken}`;
 
+    // Fetch inviter's profile to get name
+    const { data: inviterProfile } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('user_id', user.id)
+      .single();
+
+    // Send email
+    const emailResult = await sendInviteEmail({
+      to: email,
+      inviteLink,
+      inviterName: inviterProfile?.full_name || user.email,
+      organizationName: userOrg.organization.name,
+      role,
+    });
+
     return NextResponse.json({ 
       invite,
-      inviteLink 
+      inviteLink,
+      emailSent: emailResult.success,
+      emailError: emailResult.success ? undefined : emailResult.error
     });
   } catch (error: any) {
     console.error('Error creating invite:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

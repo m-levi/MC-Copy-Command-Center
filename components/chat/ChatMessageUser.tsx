@@ -10,7 +10,7 @@ interface ChatMessageUserProps {
   onEdit?: (newContent: string) => void;
 }
 
-export const ChatMessageUser = memo(function ChatMessageUser({
+const ChatMessageUserBase = function ChatMessageUser({
   message,
   onEdit
 }: ChatMessageUserProps) {
@@ -110,6 +110,6 @@ export const ChatMessageUser = memo(function ChatMessageUser({
       </div>
     </div>
   );
-});
+};
 
-
+export const ChatMessageUser = memo(ChatMessageUserBase);

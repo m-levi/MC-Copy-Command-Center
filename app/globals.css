@@ -270,6 +270,43 @@ body {
   animation: fade-in 0.3s ease-out;
 }
 
+/* Zoom in animations for dropdowns and menus */
+@keyframes zoom-in-95 {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-in.zoom-in-95 {
+  animation: zoom-in-95 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-in.fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+.animate-in.fade-in.zoom-in-95 {
+  animation: zoom-in-95 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Origin utilities for animations */
+.origin-top {
+  transform-origin: top center;
+}
+
+.origin-top-left {
+  transform-origin: top left;
+}
+
+.origin-top-right {
+  transform-origin: top right;
+}
+
 /* Slide in from bottom */
 @keyframes slide-in-from-bottom-2 {
   from {
@@ -462,6 +499,24 @@ html {
 /* Remove focus outline for mouse users */
 :focus:not(:focus-visible) {
   outline: none;
+}
+
+/* Touch manipulation for better mobile interaction */
+.touch-manipulation {
+  touch-action: manipulation;
+}
+
+/* Prevent text selection on interactive elements (better for touch) */
+.select-none-interactive {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Minimum tap target size for accessibility (44x44px recommended) */
+.min-tap-target {
+  min-width: 44px;
+  min-height: 44px;
 }
 
 /* Custom shadow utilities - lighter feel */

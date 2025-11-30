@@ -100,7 +100,7 @@ export function NoConversationState({ onNewConversation }: { onNewConversation: 
           Select a conversation from the sidebar or start a new one to begin creating email copy.
         </p>
         <button
-          onClick={onNewConversation}
+          onClick={() => onNewConversation()}
           className="px-6 py-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer shadow-sm hover:shadow-md"
         >
           Start New Conversation

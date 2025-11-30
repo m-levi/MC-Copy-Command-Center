@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useRef, KeyboardEvent, useEffect, useCallback } from 'react';
+import { useState, useRef, KeyboardEvent, useEffect, useCallback, DragEvent } from 'react';
 import { QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
-import { ConversationMode, EmailType } from '@/types';
-import VoiceInput from './VoiceInput';
-import { LayoutTemplate, Mail, GitMerge } from 'lucide-react';
+import { ConversationMode, EmailType, AIModel } from '@/types';
+import { SpeechButton } from './chat/SpeechButton';
+import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, SparklesIcon, Upload } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, files?: File[]) => void;
   onStop?: () => void;
   disabled?: boolean;
   isGenerating?: boolean;
@@ -20,8 +21,10 @@ interface ChatInputProps {
   onModelChange?: (model: string) => void;
   emailType?: EmailType;
   onEmailTypeChange?: (type: EmailType) => void;
-  hasMessages?: boolean; // Track if conversation has any messages
-  autoFocus?: boolean; // Auto-focus the input on mount
+  hasMessages?: boolean;
+  autoFocus?: boolean;
+  // Flow-specific callback - called when user selects Flow to start the conversation
+  onStartFlow?: () => void;
 }
 
 export default function ChatInput({ 
@@ -34,14 +37,16 @@ export default function ChatInput({
   draftContent = '',
   onDraftChange,
   onModeChange,
-  selectedModel = 'claude-4.5-sonnet',
+  selectedModel = 'anthropic/claude-sonnet-4.5',
   onModelChange,
   emailType = 'design',
   onEmailTypeChange,
   hasMessages = false,
-  autoFocus = false
+  autoFocus = false,
+  onStartFlow
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState<string[]>([]);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -51,12 +56,15 @@ export default function ChatInput({
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [interimVoiceText, setInterimVoiceText] = useState('');
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const emailTypePickerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const onDraftChangeRef = useRef(onDraftChange);
-  const justSentRef = useRef(false); // Track if message was just sent to prevent draft save
+  const justSentRef = useRef(false);
 
   const slashCommands = [
     { command: '/shorten', label: 'Make it shorter', icon: '📏' },
@@ -67,16 +75,12 @@ export default function ChatInput({
     { command: '/cta', label: 'Improve CTAs', icon: '🎯' },
   ];
 
-  // For writing mode (email_copy), only show Claude Sonnet 4.5
-  // For planning mode, show both GPT-5 and Claude Sonnet 4.5
-  const models = mode === 'planning' 
-    ? [
-        { id: 'gpt-5', name: 'GPT-5' },
-        { id: 'claude-4.5-sonnet', name: 'SONNET 4.5' },
-      ]
-    : [
-        { id: 'claude-4.5-sonnet', name: 'SONNET 4.5' },
-      ];
+  const models = [
+    { id: 'anthropic/claude-sonnet-4.5', name: 'Sonnet 4.5' },
+    { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+    { id: 'anthropic/claude-opus-4', name: 'Opus 4' },
+    { id: 'openai/gpt-5.1-thinking', name: 'GPT 5.1' },
+  ];
 
   const emailTypes = [
     { id: 'design' as const, name: 'Design Email', description: 'Full structured marketing email', icon: LayoutTemplate },
@@ -84,8 +88,13 @@ export default function ChatInput({
     { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation sequence', icon: GitMerge },
   ];
 
+  const availableEmailTypes = emailTypes.filter(type => {
+    if (hasMessages && type.id === 'flow' && emailType !== 'flow') return false;
+    return true;
+  });
+
   const getModelName = (modelId: string) => {
-    return models.find(m => m.id === modelId)?.name || 'SONNET 4.5';
+    return models.find(m => m.id === modelId)?.name || 'Sonnet 4.5';
   };
 
   const getEmailTypeName = (type: string) => {
@@ -93,21 +102,11 @@ export default function ChatInput({
     return emailTypes.find(t => t.id === type)?.name || 'Design Email';
   };
 
-  // Keep onDraftChange ref up-to-date
   useEffect(() => {
     onDraftChangeRef.current = onDraftChange;
   }, [onDraftChange]);
 
-  // Auto-switch to Claude Sonnet 4.5 when switching from planning to writing mode
-  useEffect(() => {
-    if (mode === 'email_copy' && selectedModel === 'gpt-5') {
-      onModelChange?.('claude-4.5-sonnet');
-    }
-  }, [mode, selectedModel, onModelChange]);
 
-  // Sync with draft content from parent
-  // Only update local state if draft content changes from parent
-  // Don't update if we just cleared the message locally (prevents re-population bug)
   useEffect(() => {
     setMessage(draftContent);
     if (textareaRef.current) {
@@ -123,7 +122,6 @@ export default function ChatInput({
         setShowModelPicker(false);
       }
     };
-
     if (showModelPicker) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -137,49 +135,127 @@ export default function ChatInput({
         setShowEmailTypePicker(false);
       }
     };
-
     if (showEmailTypePicker) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showEmailTypePicker]);
 
-  // Handle keyboard navigation for email type picker
-  useEffect(() => {
-    if (!showEmailTypePicker) return;
-
-    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedEmailTypeIndex(prev => (prev + 1) % emailTypes.length);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedEmailTypeIndex(prev => (prev - 1 + emailTypes.length) % emailTypes.length);
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        onEmailTypeChange?.(emailTypes[selectedEmailTypeIndex].id);
-        setShowEmailTypePicker(false);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        setShowEmailTypePicker(false);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showEmailTypePicker, selectedEmailTypeIndex, onEmailTypeChange]); // emailTypes is static
-
-  // Reset selection index when picker opens
-  useEffect(() => {
-    if (showEmailTypePicker) {
-      const idx = emailTypes.findIndex(t => t.id === emailType);
-      setSelectedEmailTypeIndex(idx >= 0 ? idx : 0);
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
     }
-  }, [showEmailTypePicker]); // Only run when open state changes
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
-  // Check for slash commands
-  useEffect(() => {
-    const lastWord = message.split(' ').pop() || '';
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Drag and drop handlers
+  const dragCounter = useRef(0);
+
+  const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounter.current = 0;
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      setFiles(prev => [...prev, ...droppedFiles]);
+      e.dataTransfer.clearData();
+    }
+  }, []);
+
+  const handleSend = () => {
+    if ((message.trim() || files.length > 0) && !disabled) {
+      const trimmed = message.trim();
+      let finalMessage = trimmed;
+
+      if (trimmed.startsWith('/')) {
+        const command = trimmed.toLowerCase();
+        if (command === '/shorten') finalMessage = QUICK_ACTION_PROMPTS.make_shorter;
+        else if (command === '/urgent') finalMessage = QUICK_ACTION_PROMPTS.add_urgency;
+        else if (command === '/casual') finalMessage = QUICK_ACTION_PROMPTS.change_tone_casual;
+        else if (command === '/professional') finalMessage = QUICK_ACTION_PROMPTS.change_tone_professional;
+        else if (command === '/proof') finalMessage = QUICK_ACTION_PROMPTS.add_social_proof;
+        else if (command === '/cta') finalMessage = QUICK_ACTION_PROMPTS.improve_cta;
+      }
+
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
+      justSentRef.current = true;
+      setMessage('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      
+      if (onDraftChange) onDraftChange('');
+      setLastSavedTime(null);
+      
+      onSend(finalMessage, files);
+      setFiles([]);
+      
+      setTimeout(() => {
+        justSentRef.current = false;
+      }, 100);
+    }
+  };
+
+  const debouncedSave = useCallback((value: string) => {
+    if (justSentRef.current) return;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+    if (value.trim()) {
+      saveTimeoutRef.current = setTimeout(() => {
+        if (!justSentRef.current && onDraftChangeRef.current) {
+          onDraftChangeRef.current(value);
+          const now = new Date();
+          setLastSavedTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
+      }, 1000);
+    }
+  }, []);
+
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    setMessage(newValue);
+    debouncedSave(newValue);
+    
+    requestAnimationFrame(() => {
+      e.target.style.height = 'auto';
+      e.target.style.height = e.target.scrollHeight + 'px';
+    });
+
+    // Check for slash commands
+    const lastWord = newValue.split(' ').pop() || '';
     if (lastWord.startsWith('/')) {
       const matches = slashCommands.filter(cmd => 
         cmd.command.startsWith(lastWord.toLowerCase())
@@ -194,147 +270,14 @@ export default function ChatInput({
     } else {
       setShowSlashCommands(false);
     }
-  }, [message]);
-
-  const handleSend = () => {
-    if (message.trim() && !disabled) {
-      // Check for slash command
-      const trimmed = message.trim();
-      let finalMessage = trimmed;
-
-      if (trimmed.startsWith('/')) {
-        const command = trimmed.toLowerCase();
-        if (command === '/shorten') finalMessage = QUICK_ACTION_PROMPTS.make_shorter;
-        else if (command === '/urgent') finalMessage = QUICK_ACTION_PROMPTS.add_urgency;
-        else if (command === '/casual') finalMessage = QUICK_ACTION_PROMPTS.change_tone_casual;
-        else if (command === '/professional') finalMessage = QUICK_ACTION_PROMPTS.change_tone_professional;
-        else if (command === '/proof') finalMessage = QUICK_ACTION_PROMPTS.add_social_proof;
-        else if (command === '/cta') finalMessage = QUICK_ACTION_PROMPTS.improve_cta;
-      }
-
-      // CRITICAL: Cancel any pending debounced saves to prevent draft from being saved after send
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
-
-      // Mark that we're sending to prevent any pending saves
-      justSentRef.current = true;
-      
-      // Clear message BEFORE calling onSend to prevent race conditions
-      setMessage('');
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
-      
-      // Clear the draft immediately via the callback
-      if (onDraftChange) {
-        onDraftChange('');
-      }
-      
-      // Clear saved time indicator
-      setLastSavedTime(null);
-      
-      // Then send the message
-      onSend(finalMessage);
-      
-      // Reset flag after a short delay to allow for any async operations
-      setTimeout(() => {
-        justSentRef.current = false;
-      }, 100);
-    }
-  };
-
-  // Handle markdown formatting shortcuts - auto-continue lists
-  const handleMarkdownShortcuts = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Only handle Shift+Enter for markdown lists
-    if (e.key !== 'Enter' || !e.shiftKey) {
-      return false;
-    }
-
-    const textarea = e.currentTarget;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const value = textarea.value;
-    
-    // Get the current line (from last newline to cursor)
-    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
-    const currentLine = value.substring(lineStart, start);
-    
-    // Check if current line starts with a list marker
-    // Match: optional spaces + (-, *, +, •, or number.) + space + content
-    const listMatch = currentLine.match(/^(\s*)([-*+•]|\d+\.)\s(.*)$/);
-    
-    if (listMatch) {
-      const indent = listMatch[1];
-      const marker = listMatch[2];
-      const listContent = listMatch[3];
-      
-      // If list item has content, continue the list
-      if (listContent.trim().length > 0) {
-        e.preventDefault();
-        
-        const isNumbered = /^\d+\.$/.test(marker);
-        // For bullet character, keep using it
-        const newMarker = isNumbered ? `${parseInt(marker) + 1}.` : marker;
-        const newLine = `\n${indent}${newMarker} `;
-        
-        const newValue = value.substring(0, start) + newLine + value.substring(end);
-        const newPos = start + newLine.length;
-        
-        // Update value and cursor position synchronously
-        textarea.value = newValue;
-        textarea.setSelectionRange(newPos, newPos);
-        setMessage(newValue);
-        
-        // Resize after state update
-        requestAnimationFrame(() => {
-          textarea.style.height = 'auto';
-          textarea.style.height = textarea.scrollHeight + 'px';
-        });
-        
-        return true;
-      } else {
-        // If list item is empty, remove the marker and exit list mode
-        e.preventDefault();
-        
-        // Remove the current line with the marker
-        const beforeMarker = value.substring(0, lineStart);
-        const afterCursor = value.substring(end);
-        const newValue = beforeMarker + '\n' + afterCursor;
-        const newPos = lineStart + 1;
-        
-        // Update value and cursor position synchronously
-        textarea.value = newValue;
-        textarea.setSelectionRange(newPos, newPos);
-        setMessage(newValue);
-        
-        // Resize after state update
-        requestAnimationFrame(() => {
-          textarea.style.height = 'auto';
-          textarea.style.height = textarea.scrollHeight + 'px';
-        });
-        
-        return true;
-      }
-    }
-    
-    return false;
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Try markdown shortcuts first (for Shift+Enter list continuation)
-    if (handleMarkdownShortcuts(e)) {
-      return; // Markdown handled it
-    }
-    
-    // Handle slash commands menu
+    // Slash command navigation
     if (showSlashCommands) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedCommandIndex(prev => 
-          prev < filteredCommands.length - 1 ? prev + 1 : prev
-        );
+        setSelectedCommandIndex(prev => prev < filteredCommands.length - 1 ? prev + 1 : prev);
         return;
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -356,138 +299,26 @@ export default function ChatInput({
         return;
       }
     }
-    
-    // Handle Enter key (without Shift) - send message
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  // Debounced save handler - only saves after user stops typing for 1 second
-  // Note: onDraftChange is intentionally NOT in the dependency array to prevent
-  // the debounce from being reset on every parent re-render. We use a ref instead.
-  const debouncedSave = useCallback((value: string) => {
-    // Don't save if message was just sent
-    if (justSentRef.current) {
-      return;
-    }
-    
-    // Clear any pending save when called
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    // Only save if there's actual content
-    if (value.trim()) {
-      saveTimeoutRef.current = setTimeout(() => {
-        // Double-check flag before saving (race condition protection)
-        if (!justSentRef.current && onDraftChangeRef.current) {
-          onDraftChangeRef.current(value);
-          // Update last saved time
-          const now = new Date();
-          setLastSavedTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        }
-      }, 1000); // Wait 1 second after user stops typing
-    }
-  }, []); // Empty deps - use ref to access latest onDraftChange
-
-  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    let newValue = e.target.value;
-    const textarea = e.target;
-    const cursorPos = textarea.selectionStart;
-    
-    // Auto-convert bullet list markers (- or * followed by space)
-    const textBeforeCursor = newValue.substring(0, cursorPos);
-    const lines = textBeforeCursor.split('\n');
-    const currentLine = lines[lines.length - 1];
-    
-    // If current line is exactly "- " or "* ", convert to bullet
-    if (currentLine === '- ' || currentLine === '* ') {
-      const beforeList = newValue.substring(0, cursorPos - 2);
-      const afterCursor = newValue.substring(cursorPos);
-      newValue = beforeList + '• ' + afterCursor;
-      const newCursorPos = beforeList.length + 2;
-      
-      // Update textarea value directly FIRST
-      textarea.value = newValue;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-      
-      // Then update state
-      setMessage(newValue);
-    } else {
-      setMessage(newValue);
-    }
-    
-    // Debounce the save
-    debouncedSave(newValue);
-    
-    // Auto-expand textarea
-    requestAnimationFrame(() => {
-      textarea.style.height = 'auto';
-      textarea.style.height = textarea.scrollHeight + 'px';
-    });
-  };
-
-  // Cleanup timeout on unmount and when conversationId changes
-  useEffect(() => {
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-    };
-  }, [conversationId]);
-
-  // Auto-focus the input when requested
-  useEffect(() => {
-    if (autoFocus && textareaRef.current && !disabled && !isGenerating) {
-      // Small delay to ensure DOM is ready
-      const timer = setTimeout(() => {
-        textareaRef.current?.focus();
-      }, 150);
-      return () => clearTimeout(timer);
-    }
-  }, [autoFocus, disabled, isGenerating, conversationId]);
-
-  const charCount = message.length;
-
   const getPlaceholder = () => {
-    if (mode === 'planning') {
-      return "Ask a question, explore ideas, or plan a campaign...";
-    }
-    if (mode === 'flow') {
-      return "Describe the automation flow you want to create...";
-    }
+    if (mode === 'planning') return "Ask a question, explore ideas, or plan a campaign...";
+    if (mode === 'flow') return "Describe the automation flow you want to create...";
     return "Describe the email you'd like to create...";
-  };
-
-  const handleVoiceTranscript = (transcript: string, isFinal: boolean) => {
-    if (isFinal) {
-      // Append final transcript to current message
-      const newMessage = message ? `${message} ${transcript}` : transcript;
-      setMessage(newMessage);
-      setInterimVoiceText('');
-      
-      // Use debounced save for consistency with typed input
-      debouncedSave(newMessage);
-    } else {
-      // Update interim text for live preview
-      setInterimVoiceText(transcript);
-    }
-    
-    // Auto-expand textarea
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-    }
   };
 
   return (
     <div className="relative px-4 sm:px-6 lg:px-8 pt-0 pb-4 sm:pb-5 bg-transparent">
       <div className="max-w-5xl mx-auto relative">
+        
         {/* Slash Command Suggestions */}
         {showSlashCommands && (
-          <div className="mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden backdrop-blur-xl">
+          <div className="mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2">
             <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
               <p className="text-xs font-semibold text-gray-600 dark:text-gray-400">QUICK COMMANDS</p>
             </div>
@@ -503,13 +334,12 @@ export default function ChatInput({
                     setShowSlashCommands(false);
                     textareaRef.current?.focus();
                   }}
-                  className={`
-                    w-full px-4 py-2.5 text-left text-sm flex items-center gap-3 transition-all duration-150
-                    ${index === selectedCommandIndex 
+                  className={cn(
+                    "w-full px-4 py-2.5 text-left text-sm flex items-center gap-3 transition-all duration-150",
+                    index === selectedCommandIndex 
                       ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-l-2 border-blue-500' 
                       : 'hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-l-2 border-transparent'
-                    }
-                  `}
+                  )}
                 >
                   <span className="text-lg">{cmd.icon}</span>
                   <div className="flex-1 min-w-0">
@@ -521,8 +351,47 @@ export default function ChatInput({
           </div>
         )}
 
-        {/* Main Input Card - matching Figma design */}
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/50">
+        {/* Main Input Card */}
+        <div 
+          className={cn(
+            "relative bg-white dark:bg-gray-800 border rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/50",
+            isDragging 
+              ? "border-blue-500 border-2 border-dashed bg-blue-50/50 dark:bg-blue-950/20" 
+              : "border-gray-200 dark:border-gray-700"
+          )}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          {/* Drag Overlay */}
+          {isDragging && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-blue-50/90 dark:bg-blue-950/90 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-2 text-blue-600 dark:text-blue-400">
+                <Upload className="w-8 h-8 animate-bounce" />
+                <span className="text-sm font-medium">Drop files here</span>
+              </div>
+            </div>
+          )}
+          
+          {/* File Previews */}
+          {files.length > 0 && (
+            <div className="px-4 pt-4 flex flex-wrap gap-2">
+              {files.map((file, index) => (
+                <div key={index} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700/50 px-3 py-1.5 rounded-lg text-xs group">
+                  {file.type.startsWith('image/') ? <ImageIcon className="w-3.5 h-3.5 text-blue-500" /> : <FileTextIcon className="w-3.5 h-3.5 text-gray-500" />}
+                  <span className="max-w-[150px] truncate">{file.name}</span>
+                  <button 
+                    onClick={() => removeFile(index)}
+                    className="ml-1 p-0.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-gray-600"
+                  >
+                    <XIcon className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="px-4 sm:px-6 pt-4 pb-2">
             <textarea
               ref={textareaRef}
@@ -539,8 +408,25 @@ export default function ChatInput({
           
           {/* Bottom Controls Bar */}
           <div className="flex items-center justify-between px-3 sm:px-5 pb-3">
-            {/* Left: Mode Toggle & Dropdowns */}
+            {/* Left: Attachments & Mode */}
             <div className="flex items-center gap-2">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                multiple 
+                onChange={handleFileSelect}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+                title="Attach files"
+              >
+                <PaperclipIcon className="w-4 h-4" />
+              </button>
+
+              <div className="h-4 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
+
               <div className="flex items-center bg-gray-100 dark:bg-gray-800/50 p-1 rounded-lg">
                 <button
                   onClick={() => onModeChange?.('planning')}
@@ -554,7 +440,6 @@ export default function ChatInput({
                       : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                     }
                   `}
-                  title={hasMessages ? "Can't switch modes after starting conversation" : "Planning mode - brainstorm and strategize"}
                 >
                   Plan
                 </button>
@@ -570,31 +455,22 @@ export default function ChatInput({
                       : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                     }
                   `}
-                  title={hasMessages ? "Can't switch modes after starting conversation" : "Email copy mode - generate email content"}
                 >
                   Write
                 </button>
               </div>
               
-              {/* Model Selector Dropdown - Only show if multiple models available */}
+              {/* Model Selector */}
               {models.length > 1 && (
-                <div className="relative hidden sm:block" ref={modelPickerRef}>
+                <div className="relative block" ref={modelPickerRef}>
                   <button
                     onClick={() => setShowModelPicker(!showModelPicker)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                   >
-                    <span>{getModelName(selectedModel)}</span>
-                    <svg 
-                      className={`w-3 h-3 text-gray-400 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} 
-                      fill="none" 
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
+                    <SparklesIcon className="w-3 h-3 text-blue-500" />
+                    <span className="hidden sm:inline">{getModelName(selectedModel)}</span>
                   </button>
                   
-                  {/* Dropdown Menu */}
                   {showModelPicker && (
                     <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[140px] z-50 py-1 animate-in fade-in zoom-in-95 duration-100">
                       {models.map((model) => (
@@ -620,9 +496,9 @@ export default function ChatInput({
                 </div>
               )}
 
-              {/* Email Type Dropdown - Only in Write Mode */}
+              {/* Email Type Selector */}
               {mode === 'email_copy' && (
-                <div className="relative hidden sm:block" ref={emailTypePickerRef}>
+                <div className="relative block" ref={emailTypePickerRef}>
                   <button
                     onClick={() => setShowEmailTypePicker(!showEmailTypePicker)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -632,26 +508,22 @@ export default function ChatInput({
                       const Icon = activeType?.icon || LayoutTemplate;
                       return <Icon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />;
                     })()}
-                    <span>{getEmailTypeName(emailType)}</span>
-                    <svg 
-                      className={`w-3 h-3 text-gray-400 transition-transform duration-200 ${showEmailTypePicker ? 'rotate-180' : ''}`} 
-                      fill="none" 
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
+                    <span className="hidden sm:inline">{getEmailTypeName(emailType)}</span>
                   </button>
                   
-                  {/* Dropdown Menu */}
                   {showEmailTypePicker && (
                     <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[280px] z-50 py-1.5 animate-in fade-in zoom-in-95 duration-100">
-                      {emailTypes.map((type, index) => (
+                      {availableEmailTypes.map((type, index) => (
                         <button
                           key={type.id}
                           onClick={() => {
                             onEmailTypeChange?.(type.id);
                             setShowEmailTypePicker(false);
+                            // When Flow is selected, trigger the flow conversation start
+                            if (type.id === 'flow' && onStartFlow) {
+                              // Small delay to allow mode change to propagate
+                              setTimeout(() => onStartFlow(), 50);
+                            }
                           }}
                           onMouseEnter={() => setSelectedEmailTypeIndex(index)}
                           className={`
@@ -692,28 +564,31 @@ export default function ChatInput({
               )}
             </div>
 
-            {/* Right: Voice Input & Send Button */}
+            {/* Right: Voice & Send */}
             <div className="flex items-center gap-2">
-              {/* Last saved time - subtle and static */}
-              {lastSavedTime && !isGenerating && !isRecordingVoice && charCount > 0 && (
-                <span className="text-[10px] text-gray-400 dark:text-gray-500 hidden sm:inline mr-2">
+              {lastSavedTime && !isGenerating && message.length > 0 && (
+                <span className="text-[10px] text-muted-foreground hidden sm:inline mr-2">
                   Saved {lastSavedTime}
                 </span>
               )}
-              {charCount > 0 && !lastSavedTime && !isRecordingVoice && (
-                <span className="text-xs text-gray-400 dark:text-gray-500 hidden sm:inline">{charCount}</span>
-              )}
               
-              {/* Voice Input Button */}
               {!isGenerating && (
-                <VoiceInput
-                  onTranscript={handleVoiceTranscript}
+                <SpeechButton
+                  onTranscript={(text, isFinal) => {
+                    if (isFinal) {
+                      const newMessage = message ? `${message} ${text}` : text;
+                      setMessage(newMessage);
+                      setInterimVoiceText('');
+                      debouncedSave(newMessage);
+                    } else {
+                      setInterimVoiceText(text);
+                    }
+                  }}
                   disabled={disabled}
                   onStateChange={setIsRecordingVoice}
                 />
               )}
               
-              {/* Send / Stop Button - Hidden when recording */}
               {!isRecordingVoice && (
                 isGenerating && onStop ? (
                   <button
@@ -728,13 +603,12 @@ export default function ChatInput({
                 ) : (
                   <button
                     onClick={handleSend}
-                    disabled={!message.trim() || disabled}
+                    disabled={(!message.trim() && files.length === 0) || disabled}
                     className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
-                      !message.trim() || disabled
+                      (!message.trim() && files.length === 0) || disabled
                         ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
                         : 'text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/20'
                     }`}
-                    title="Send message"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
@@ -749,5 +623,3 @@ export default function ChatInput({
     </div>
   );
 }
-
-

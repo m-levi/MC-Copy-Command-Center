@@ -2,19 +2,29 @@ import OpenAI from 'openai';
 
 export const runtime = 'edge';
 
+// OpenAI client for Whisper transcription
+// Note: Whisper is not part of the Vercel AI SDK, so we use the direct OpenAI client
+function getOpenAIClient() {
+  const apiKey = process.env.AI_GATEWAY_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('No API key configured');
+  }
+  
+  return new OpenAI({
+    apiKey,
+    // Use AI Gateway if available
+    ...(process.env.AI_GATEWAY_API_KEY && {
+      baseURL: 'https://api.vercel.ai/v1',
+    }),
+  });
+}
+
 /**
  * Transcribe audio to text using OpenAI's Whisper API
  * Supports WAV, MP3, M4A, and other audio formats
  */
 export async function POST(req: Request) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: 'OpenAI API key not configured' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
     const formData = await req.formData();
     const audioFile = formData.get('audio') as File;
     const language = formData.get('language') as string || 'en';
@@ -26,9 +36,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    const openai = getOpenAIClient();
 
     // Transcribe using Whisper
     const transcription = await openai.audio.transcriptions.create({
@@ -62,4 +70,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

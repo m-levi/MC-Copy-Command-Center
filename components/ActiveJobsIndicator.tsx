@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { performSearch } from '@/lib/search-service';
+import { useState, useEffect, useRef } from 'react';
 import { logger } from '@/lib/logger';
 
 interface Job {
@@ -12,31 +11,46 @@ interface Job {
   createdAt: number;
 }
 
+// PERFORMANCE: Disable polling entirely - queue mode is not enabled
+// The queue feature (ENABLE_MESSAGE_QUEUE) is a server-side env var
+// If you enable queue mode in the future, set this to true
+const ENABLE_JOB_POLLING = false;
+const POLLING_INTERVAL = 10000; // 10 seconds when enabled (was 2 seconds)
+
 export default function ActiveJobsIndicator() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // Poll for active jobs
-    const interval = setInterval(async () => {
+    // PERFORMANCE: Skip polling if disabled
+    if (!ENABLE_JOB_POLLING) {
+      return;
+    }
+
+    // Initial fetch
+    const fetchJobs = async () => {
       try {
         const response = await fetch('/api/jobs?status=queued&status=processing&status=streaming');
-        if (!response.ok) {
-          // Skip non-OK responses silently (API might not exist yet)
-          return;
-        }
+        if (!response.ok) return;
         const data = await response.json();
         setJobs(data.jobs || []);
       } catch (error) {
-        // Only log non-network errors to avoid console pollution during page transitions
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (!errorMessage.includes('Failed to fetch') && !errorMessage.includes('aborted')) {
           logger.error('Failed to fetch jobs:', error);
         }
       }
-    }, 2000);
+    };
 
-    return () => clearInterval(interval);
+    fetchJobs();
+    intervalRef.current = setInterval(fetchJobs, POLLING_INTERVAL);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
   }, []);
 
   const activeJobs = jobs.filter(

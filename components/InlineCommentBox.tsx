@@ -4,6 +4,14 @@ import { useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { logger } from '@/lib/logger';
 
+interface TeamMember {
+  user_id: string;
+  profile: {
+    email: string;
+    full_name?: string;
+  };
+}
+
 interface InlineCommentBoxProps {
   position: { x: number; y: number };
   quotedText: string;
@@ -23,12 +31,28 @@ export default function InlineCommentBox({
 }: InlineCommentBoxProps) {
   const [comment, setComment] = useState('');
   const [isPosting, setIsPosting] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [assignedUser, setAssignedUser] = useState<string | null>(null);
+  const [showAssignPicker, setShowAssignPicker] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-focus textarea on mount
+  // Auto-focus textarea on mount and load team members
   useEffect(() => {
     textareaRef.current?.focus();
+    loadTeamMembers();
   }, []);
+
+  const loadTeamMembers = async () => {
+    try {
+      const response = await fetch('/api/team-members');
+      if (response.ok) {
+        const data = await response.json();
+        setTeamMembers(data.members || []);
+      }
+    } catch (e) {
+      logger.error('Failed to load team members:', e);
+    }
+  };
 
   const handlePost = async () => {
     if (!comment.trim()) return;
@@ -42,6 +66,7 @@ export default function InlineCommentBox({
           content: comment,
           messageId,
           quotedText,
+          assignedTo: assignedUser,
         }),
       });
 
@@ -50,7 +75,10 @@ export default function InlineCommentBox({
         throw new Error(data.error || 'Failed to add comment');
       }
 
-      toast.success('Comment added');
+      const assigneeName = assignedUser 
+        ? teamMembers.find(m => m.user_id === assignedUser)?.profile.full_name || 'team member'
+        : null;
+      toast.success(assigneeName ? `Comment added and assigned to ${assigneeName}` : 'Comment added');
       onCommentAdded();
       onClose();
     } catch (error) {
@@ -168,20 +196,90 @@ export default function InlineCommentBox({
 
               {/* Footer */}
               <div className="flex items-center justify-between mt-3">
-                <button
-                  onClick={onClose}
-                  className="text-xs text-stone-500 dark:text-gray-400 hover:text-stone-700 dark:hover:text-gray-200 px-2 py-1 rounded-md hover:bg-stone-100 dark:hover:bg-gray-700 transition-colors"
-                >
-                  Cancel
-                </button>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-stone-400 dark:text-gray-500">
-                    <kbd className="px-1 py-0.5 bg-stone-100 dark:bg-gray-800 rounded text-[9px] font-mono">⌘↵</kbd>
+                  <button
+                    onClick={onClose}
+                    className="text-xs text-stone-500 dark:text-gray-400 hover:text-stone-700 dark:hover:text-gray-200 px-2 py-1 rounded-md hover:bg-stone-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  
+                  {/* Assign picker */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowAssignPicker(!showAssignPicker)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
+                        assignedUser
+                          ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
+                          : 'text-stone-400 hover:text-stone-600 dark:hover:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-700'
+                      }`}
+                      title="Assign to team member"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      {assignedUser ? (
+                        <span className="max-w-[60px] truncate">
+                          {teamMembers.find(m => m.user_id === assignedUser)?.profile.full_name?.split(' ')[0] || 'Assigned'}
+                        </span>
+                      ) : (
+                        <span>Assign</span>
+                      )}
+                    </button>
+                    
+                    {/* Assign dropdown */}
+                    {showAssignPicker && (
+                      <div className="absolute bottom-full left-0 mb-1 w-48 bg-white dark:bg-gray-800 border border-stone-200 dark:border-gray-700 rounded-lg shadow-xl z-50 max-h-40 overflow-y-auto">
+                        {assignedUser && (
+                          <button
+                            onClick={() => { setAssignedUser(null); setShowAssignPicker(false); }}
+                            className="w-full px-3 py-2 text-left text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 border-b border-stone-100 dark:border-gray-700"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            Unassign
+                          </button>
+                        )}
+                        {teamMembers.length === 0 ? (
+                          <div className="px-3 py-2 text-xs text-stone-400 dark:text-gray-500">No team members</div>
+                        ) : (
+                          teamMembers.map((member) => (
+                            <button
+                              key={member.user_id}
+                              onClick={() => { setAssignedUser(member.user_id); setShowAssignPicker(false); }}
+                              className="w-full px-3 py-2 text-left text-xs hover:bg-amber-50 dark:hover:bg-amber-900/20 flex items-center gap-2"
+                            >
+                              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-[10px] font-semibold">
+                                {(member.profile.full_name || member.profile.email)[0].toUpperCase()}
+                              </div>
+                              <span className="truncate text-stone-700 dark:text-gray-200">
+                                {member.profile.full_name || member.profile.email.split('@')[0]}
+                              </span>
+                              {assignedUser === member.user_id && (
+                                <svg className="w-3.5 h-3.5 text-amber-500 ml-auto" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                              )}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-stone-400 dark:text-gray-500 hidden sm:inline" title="Press ⌘+Enter to post">
+                    <kbd className="px-1 py-0.5 bg-stone-100 dark:bg-gray-800 rounded text-[9px] font-mono">⌘</kbd>
+                    <span className="mx-0.5">+</span>
+                    <kbd className="px-1 py-0.5 bg-stone-100 dark:bg-gray-800 rounded text-[9px] font-mono">↵</kbd>
                   </span>
                   <button
                     onClick={handlePost}
                     disabled={!comment.trim() || isPosting}
-                    className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2 rounded-lg hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-sm font-medium shadow-sm hover:shadow-md"
+                    className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white px-3 py-1.5 rounded-lg hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-sm font-medium shadow-sm hover:shadow-md active:scale-95"
                   >
                     {isPosting ? (
                       <>

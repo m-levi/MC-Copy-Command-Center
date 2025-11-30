@@ -87,12 +87,23 @@ export default function BrandDetailsPage() {
         .eq('doc_type', 'example')
         .order('created_at', { ascending: false });
 
-      // Load memories
-      const { data: memories } = await supabase
-        .from('brand_memories')
-        .select('*')
-        .eq('brand_id', brandId)
-        .order('created_at', { ascending: false });
+      // Load memories from Supermemory API
+      let memories: Array<{
+        id: string;
+        title: string;
+        content: string;
+        category: string;
+        created_at: string;
+      }> = [];
+      try {
+        const memoriesResponse = await fetch(`/api/brands/${brandId}/memories`);
+        if (memoriesResponse.ok) {
+          const memoriesData = await memoriesResponse.json();
+          memories = memoriesData.memories || [];
+        }
+      } catch (e) {
+        // Memories are optional for export
+      }
 
       // Generate markdown content
       let markdown = `# ${brand.name}\n\n`;

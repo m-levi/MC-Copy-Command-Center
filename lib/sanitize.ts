@@ -43,6 +43,7 @@ export function normalizeWhitespace(value: string): string {
 
 /**
  * DOMPurify configuration for sanitizing user and AI content
+ * Includes email version tags for multi-version email UI
  */
 const DOMPURIFY_CONFIG = {
   ALLOWED_TAGS: [
@@ -51,7 +52,9 @@ const DOMPURIFY_CONFIG = {
     'ul', 'ol', 'li',
     'a', 'code', 'pre', 'blockquote',
     'table', 'thead', 'tbody', 'tr', 'th', 'td',
-    'hr', 'span', 'div'
+    'hr', 'span', 'div',
+    // Email version tags for multi-version email UI
+    'version_a', 'version_b', 'version_c',
   ],
   ALLOWED_ATTR: ['href', 'title', 'target', 'class'],
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,

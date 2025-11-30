@@ -19,12 +19,18 @@ export const stripControlMarkers = (value: string | undefined): string => {
 
 /**
  * Sanitize AI-generated content before saving to database
+ * Preserves email version tags (version_a, version_b, version_c) for the version switching UI
  */
 export const sanitizeContent = (content: string): string => {
   const withoutMarkers = stripControlMarkers(content);
 
   return DOMPurify.sanitize(withoutMarkers, {
-    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote'],
+    ALLOWED_TAGS: [
+      // Standard HTML tags
+      'p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote',
+      // Email version tags for multi-version email UI
+      'version_a', 'version_b', 'version_c',
+    ],
     ALLOWED_ATTR: ['href', 'title', 'target'],
     ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   });
@@ -124,4 +130,6 @@ export function buildMetadataPayload(
   
   return Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
 }
+
+
 

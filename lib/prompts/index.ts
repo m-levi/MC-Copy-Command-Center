@@ -12,6 +12,14 @@ export { SECTION_REGENERATION_PROMPTS } from './section-regeneration.prompt';
 export { FLOW_OUTLINE_PROMPT } from './flow-outline.prompt';
 export { FLOW_BEST_PRACTICES } from './flow-best-practices';
 export { FLOW_EMAIL_PROMPT_DESIGN, FLOW_EMAIL_PROMPT_LETTER } from './flow-email.prompt';
+export { CONVERSATIONAL_FLOW_PROMPT, buildConversationalFlowPrompt } from './conversational-flow.prompt';
+
+// Design Email V2 - Returns 3 versions (A, B, C) in XML tags
+export { 
+  DESIGN_EMAIL_V2_SYSTEM_PROMPT, 
+  DESIGN_EMAIL_V2_USER_PROMPT, 
+  buildDesignEmailV2Prompt 
+} from './design-email-v2.prompt';
 
 
 

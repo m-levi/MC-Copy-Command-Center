@@ -1,5 +1,10 @@
 /**
- * Unified stream handler for both OpenAI and Anthropic
+ * @deprecated This file is deprecated. Use the Vercel AI SDK streamText in api routes.
+ * 
+ * This file is kept for backwards compatibility with the background queue worker.
+ * New code should use @/lib/ai-providers with the Vercel AI SDK.
+ * 
+ * Legacy: Unified stream handler for both OpenAI and Anthropic
  * Reduces code duplication from ~500 lines to single implementation
  */
 
@@ -252,10 +257,11 @@ function formatMessages(
 function getProviderModelName(modelId: string, provider: AIProvider): string {
   if (provider === 'anthropic') {
     const modelMap: Record<string, string> = {
-      'claude-4.5-sonnet': 'claude-sonnet-4-5-20250929', // Updated to new model for standard design emails
-      'claude-opus-3.5': 'claude-opus-4-20250514',
+      'anthropic/claude-sonnet-4.5': 'claude-sonnet-4-5',
+      'anthropic/claude-opus-4': 'claude-opus-4',
+      'anthropic/claude-haiku-4.5': 'claude-haiku-4-5',
     };
-    return modelMap[modelId] || 'claude-sonnet-4-5-20250929';
+    return modelMap[modelId] || 'claude-sonnet-4-5';
   }
   return modelId; // OpenAI uses direct model IDs
 }

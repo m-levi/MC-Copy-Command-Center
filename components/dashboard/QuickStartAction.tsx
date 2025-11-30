@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Brand } from '@/types';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import VoiceInput from '@/components/VoiceInput';
+import { SpeechButton } from '@/components/chat/SpeechButton';
 import { LayoutTemplate, Mail, GitMerge } from 'lucide-react';
 
 interface QuickStartActionProps {
@@ -261,7 +261,7 @@ export default function QuickStartAction({ brands }: QuickStartActionProps) {
 
         <div className="flex items-center gap-2">
           {/* Voice Input Button */}
-          <VoiceInput
+          <SpeechButton
             onTranscript={handleVoiceTranscript}
             disabled={isSubmitting}
             onStateChange={setIsRecordingVoice}
