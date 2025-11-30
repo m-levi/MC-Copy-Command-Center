@@ -52,15 +52,26 @@ export async function GET(
       const supermemoryMemories = await listMemories(brandId, user.id);
 
       // Transform to match the expected format
-      const memories = supermemoryMemories.map(mem => ({
-        id: mem.id,
-        brand_id: brandId,
-        title: (mem.metadata?.title as string) || 'Untitled',
-        content: mem.content,
-        category: (mem.metadata?.category as string) || 'general',
-        created_at: mem.createdAt,
-        updated_at: mem.updatedAt || mem.createdAt,
-      }));
+      // Note: Content is stored as "title: content" format, so we need to extract the original content
+      const memories = supermemoryMemories.map(mem => {
+        const title = (mem.metadata?.title as string) || 'Untitled';
+        // Extract original content by removing the "title: " prefix if present
+        let content = mem.content;
+        const titlePrefix = `${title}: `;
+        if (content.startsWith(titlePrefix)) {
+          content = content.slice(titlePrefix.length);
+        }
+        
+        return {
+          id: mem.id,
+          brand_id: brandId,
+          title,
+          content,
+          category: (mem.metadata?.category as string) || 'general',
+          created_at: mem.createdAt,
+          updated_at: mem.updatedAt || mem.createdAt,
+        };
+      });
 
       return NextResponse.json({ memories });
     } catch (supermemoryError) {

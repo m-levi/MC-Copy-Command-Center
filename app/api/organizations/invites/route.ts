@@ -170,20 +170,32 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user.id)
       .single();
 
-    // Send email
-    const emailResult = await sendInviteEmail({
-      to: email,
-      inviteLink,
-      inviterName: inviterProfile?.full_name || user.email,
-      organizationName: userOrg.organization.name,
-      role,
-    });
+    // Send email - wrapped in try-catch to ensure invite creation succeeds even if email fails
+    let emailSent = false;
+    let emailError: string | undefined;
+    try {
+      const emailResult = await sendInviteEmail({
+        to: email,
+        inviteLink,
+        inviterName: inviterProfile?.full_name || user.email,
+        organizationName: userOrg.organization.name,
+        role,
+      });
+      emailSent = emailResult.success;
+      if (!emailResult.success) {
+        emailError = emailResult.error;
+        console.error('Failed to send invite email:', emailResult.error);
+      }
+    } catch (err) {
+      console.error('Error sending invite email:', err);
+      emailError = err instanceof Error ? err.message : 'Failed to send email';
+    }
 
     return NextResponse.json({ 
       invite,
       inviteLink,
-      emailSent: emailResult.success,
-      emailError: emailResult.success ? undefined : emailResult.error
+      emailSent,
+      emailError: emailSent ? undefined : emailError
     });
   } catch (error: any) {
     console.error('Error creating invite:', error);

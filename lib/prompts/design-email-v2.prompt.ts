@@ -184,15 +184,6 @@ When in doubt, write the email. A good email from a thin brief beats no email wh
 ## OUTPUT FORMAT
 
 \`\`\`
-
----
-
-SUBJECT LINE: [Subject]
-
-PREVIEW TEXT: [Preview]
-
----
-
 [HERO]
 
 Accent: [Optional]
@@ -214,40 +205,35 @@ CTA: [Required]
 [BLOCK TYPE]
 
 [Content]
-
----
-
-Design notes: [Optional]
-
 \`\`\`
 
 ---
 
 ## OUTPUT PROTOCOL
 
-For each brief, produce three complete versions wrapped in XML tags:
+For each brief, produce three complete versions wrapped in XML tags. Each version must start with a one-sentence explanation of the approach and why it works (or why you'd choose it).
 
 <version_a>
 
-Your primary recommendation. The one you'd send. Include a one-line note at the top explaining why you chose this approach.
+Approach: [One sentence explaining what this version does and why it's your primary pick]
 
-[Full email: subject, preview, all blocks]
+[Full email: all blocks]
 
 </version_a>
 
 <version_b>
 
-Different creative angle.
+Approach: [One sentence explaining the different angle this version takes]
 
-[Full email: subject, preview, all blocks]
+[Full email: all blocks]
 
 </version_b>
 
 <version_c>
 
-Third option—safer, bolder, or different concept.
+Approach: [One sentence explaining this version—if it's a creative swing, say why the brief called for it; if it's a straightforward variation, explain the difference]
 
-[Full email: subject, preview, all blocks]
+[Full email: all blocks]
 
 </version_c>
 
@@ -257,31 +243,15 @@ Always use these exact XML tags. Each version must be complete and sendable.
 
 ## QUICK REFERENCE
 
-- **Subject lines**: 30-50 characters, front-load the hook
-
-- **Preview text**: 40-70 characters, extends subject (don't repeat)
-
 - **Headlines**: 2-8 words
 
 - **Sentences**: Under 15 words
 
+- **Text blocks**: 25 words max
+
 - **Bullets**: 3-8 words each
 
-- **CTAs**: Action verb + object/benefit, 2-4 words
-
----
-
-## BEFORE YOU SUBMIT
-
-- Does the hero work alone?
-
-- Is there a concept, not just information?
-
-- Would this stop a scanner?
-
-- Does it sound like {{BRAND_NAME}}?
-
-- Did you earn every sentence?`;
+- **CTAs**: Action verb + object/benefit, 2-4 words`;
 
 /**
  * User Prompt Template - Just the brief from the user

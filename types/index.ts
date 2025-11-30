@@ -178,10 +178,20 @@ export interface Message {
 }
 
 // Future automation types
+export interface AutomationOutlineData {
+  name: string;
+  description?: string;
+  trigger?: string;
+  steps?: Array<{
+    type: string;
+    config: Record<string, unknown>;
+  }>;
+}
+
 export interface AutomationOutline {
   id: string;
   conversation_id: string;
-  outline_data: any;
+  outline_data: AutomationOutlineData;
   approved: boolean;
   created_at: string;
 }
@@ -239,7 +249,7 @@ export type QuickAction =
 export type AIModel = 
   // Anthropic models
   | 'anthropic/claude-sonnet-4.5'
-  | 'anthropic/claude-opus-4'
+  | 'anthropic/claude-opus-4.5'
   | 'anthropic/claude-haiku-4.5'
   // OpenAI models - '-thinking' variants stream reasoning
   | 'openai/gpt-5.1-thinking'
@@ -251,7 +261,8 @@ export type AIModel =
   | 'openai/o3-mini'
   | 'openai/o4-mini'
   // Google models
-  | 'google/gemini-3-pro-preview'
+  | 'google/gemini-3-pro'
+  | 'google/gemini-3-flash'
   | 'google/gemini-2.5-pro'
   | 'google/gemini-2.5-flash';
 
@@ -296,7 +307,7 @@ export interface OrganizationInvite {
 }
 
 export interface UserWithOrganization {
-  user: any;
+  user: Profile;
   organization: Organization | null;
   role: OrganizationRole | null;
 }

@@ -671,8 +671,18 @@ export default function CommentsSidebar({
         throw new Error(errorData.error || errorData.message || `Failed with status ${response.status}`);
       }
       
+      // Parse response to get the new comment immediately
+      const responseData = await response.json();
+      const newComment = responseData.comment;
+      
+      // Add the new comment directly to state for instant feedback
+      if (newComment) {
+        setComments(prev => [...prev, newComment]);
+        setOptimisticComments([]);
+        toast.success('Comment added');
+      }
+      
       onHighlightedTextUsed?.();
-      await loadComments();
     } catch (error) {
       setOptimisticComments([]);
       setNewComment(savedComment);
@@ -720,7 +730,16 @@ export default function CommentsSidebar({
         throw new Error(errorData.error || errorData.message || `Failed with status ${response.status}`);
       }
       
-      await loadComments();
+      // Parse response to get the new reply immediately
+      const responseData = await response.json();
+      const newReply = responseData.comment;
+      
+      // Add the new reply directly to state for instant feedback
+      if (newReply) {
+        setComments(prev => [...prev, newReply]);
+        setOptimisticComments([]);
+      }
+      
       toast.success('Reply added');
     } catch (error) {
       setOptimisticComments([]);
@@ -1306,12 +1325,15 @@ export default function CommentsSidebar({
                       </p>
                       {onSendToChat && (
                         <button
-                          onClick={() => onSendToChat(comment.quoted_text!)}
-                          className="flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1.5 bg-white dark:bg-gray-800 rounded-md shadow-sm border border-stone-200 dark:border-gray-700 text-stone-400 hover:text-amber-600 dark:hover:text-amber-400 transition-all hover:scale-105 active:scale-95"
-                          title="Use in chat"
+                          onClick={() => {
+                            onSendToChat(comment.quoted_text!);
+                            toast.success('Quote added to chat', { icon: '💬', duration: 2000 });
+                          }}
+                          className="flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1.5 bg-white dark:bg-gray-800 rounded-md shadow-sm border border-stone-200 dark:border-gray-700 text-stone-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all hover:scale-105 active:scale-95"
+                          title="Quote in chat"
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                           </svg>
                         </button>
                       )}
@@ -1572,16 +1594,19 @@ export default function CommentsSidebar({
                                   <span className="hidden sm:inline">{comment.resolved ? 'Reopen' : 'Resolve'}</span>
                                 </button>
 
-                                {onSendToChat && (
+                                {onSendToChat && comment.quoted_text && (
                                   <button
-                                    onClick={() => onSendToChat(comment.content)}
-                                    className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-violet-600 dark:text-gray-400 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 rounded-md transition-all active:scale-95"
-                                    title="Use in chat"
+                                    onClick={() => {
+                                      onSendToChat(comment.quoted_text!);
+                                      toast.success('Quote added to chat', { icon: '💬', duration: 2000 });
+                                    }}
+                                    className="flex items-center gap-1 px-1.5 sm:px-2 py-1 text-xs font-medium text-stone-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md transition-all active:scale-95"
+                                    title="Quote referenced text in chat"
                                   >
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                                     </svg>
-                                    <span className="hidden sm:inline">Use</span>
+                                    <span className="hidden sm:inline">Quote</span>
                                   </button>
                                 )}
 

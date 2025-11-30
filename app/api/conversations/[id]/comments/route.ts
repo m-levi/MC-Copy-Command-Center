@@ -319,8 +319,9 @@ export const POST = withErrorHandling(async (
             
             // Find matching member
             const matchedMember = orgMembers.find((m: any) => {
-              const fullName = m.profile?.full_name?.toLowerCase() || '';
-              const emailPrefix = m.profile?.email?.split('@')[0].toLowerCase() || '';
+              const profile = Array.isArray(m.profile) ? m.profile[0] : m.profile;
+              const fullName = profile?.full_name?.toLowerCase() || '';
+              const emailPrefix = profile?.email?.split('@')[0].toLowerCase() || '';
               return fullName.includes(mentionName) || emailPrefix === mentionName;
             });
 
@@ -347,11 +348,13 @@ export const POST = withErrorHandling(async (
 
               // Send email notification for mention
               const serviceClient = getServiceClient();
-              if (serviceClient && matchedMember.profile?.email) {
+              const memberProfile = Array.isArray(matchedMember.profile) ? matchedMember.profile[0] : matchedMember.profile;
+              const memberEmail = memberProfile?.email;
+              if (serviceClient && memberEmail) {
                 const shouldEmail = await shouldSendEmail(serviceClient, matchedMember.user_id, 'comment_mention');
                 if (shouldEmail) {
                   sendCommentMentionEmail({
-                    to: matchedMember.profile.email,
+                    to: memberEmail,
                     mentionerName: commenterName,
                     commentContent: content,
                     conversationTitle: conversationData?.title,

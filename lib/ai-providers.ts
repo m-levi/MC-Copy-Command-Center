@@ -114,10 +114,11 @@ export const getProviderOptionsWithWebSearch = (
   
   // Add OpenAI web search configuration
   if (modelId.startsWith('openai/')) {
+    const openaiOptions = (baseOptions as { openai?: Record<string, unknown> }).openai || {};
     return {
       ...baseOptions,
       openai: {
-        ...baseOptions.openai,
+        ...openaiOptions,
         // Enable web search for OpenAI models that support it
         // Note: This uses OpenAI's built-in web browsing capabilities
         webSearch: true,
@@ -131,10 +132,11 @@ export const getProviderOptionsWithWebSearch = (
   
   // Add Google grounding/search configuration
   if (modelId.startsWith('google/')) {
+    const googleOptions = (baseOptions as { google?: Record<string, unknown> }).google || {};
     return {
       ...baseOptions,
       google: {
-        ...baseOptions.google,
+        ...googleOptions,
         // Enable grounding with Google Search
         groundingMetadata: {
           groundingSource: 'GOOGLE_SEARCH',

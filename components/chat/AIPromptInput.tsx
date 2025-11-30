@@ -52,9 +52,9 @@ interface AIPromptInputProps {
 
 // Model options for selector
 const MODEL_OPTIONS = [
-  { id: 'anthropic/claude-sonnet-4.5' as AIModel, name: 'Claude Sonnet 4.5', provider: 'anthropic' },
-  { id: 'google/gemini-2.5-pro' as AIModel, name: 'Gemini 2.5 Pro', provider: 'google' },
-  { id: 'anthropic/claude-opus-4' as AIModel, name: 'Claude Opus 4', provider: 'anthropic' },
+  { id: 'anthropic/claude-sonnet-4.5' as AIModel, name: 'Sonnet 4.5', provider: 'anthropic' },
+  { id: 'google/gemini-3-pro' as AIModel, name: 'Gemini 3', provider: 'google' },
+  { id: 'anthropic/claude-opus-4.5' as AIModel, name: 'Opus 4.5', provider: 'anthropic' },
   { id: 'openai/gpt-5.1-thinking' as AIModel, name: 'GPT 5.1', provider: 'openai' },
 ];
 
@@ -72,6 +72,7 @@ function getStatusInfo(status: AIStatus, isLoading: boolean) {
     developing_body: { label: 'Writing body...', color: 'text-green-500' },
     creating_cta: { label: 'Creating CTA...', color: 'text-green-500' },
     finalizing: { label: 'Finalizing...', color: 'text-emerald-500' },
+    saving_memory: { label: 'Saving to memory...', color: 'text-violet-500' },
   };
   
   return statusMap[status] || { label: 'Processing...', color: 'text-gray-500' };

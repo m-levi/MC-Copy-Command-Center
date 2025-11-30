@@ -1,345 +1,282 @@
 /**
- * Email Copy Parser
- * Parses structured email copy format into semantic sections for beautiful rendering
+ * Email Copy Parser - FULLY DYNAMIC & BULLETPROOF
+ * 
+ * This parser captures ALL content from AI output without assumptions.
+ * It handles ANY section type, ANY field label, and gracefully falls back
+ * when the format doesn't match expectations.
+ * 
+ * GUARANTEES:
+ * 1. All text content is captured (never dropped)
+ * 2. Unknown section types display properly
+ * 3. Unknown field labels display with their labels
+ * 4. Lines without labels are captured as "unlabeled content"
+ * 5. Raw content is always preserved for fallback/plain view
  */
 
+export interface EmailField {
+  label: string;
+  value: string;
+  /** Lowercase label for matching */
+  labelLower: string;
+}
+
 export interface EmailSection {
-  type: 'hero' | 'text' | 'bullets' | 'product_grid' | 'cta_block' | 'social_proof' | 'testimonial' | 'generic';
-  /** Original section type name (for unknown/generic types) */
-  originalType?: string;
-  headline?: string;
-  subhead?: string;
-  body?: string;
-  bullets?: string[];
-  cta?: string;
-  products?: Array<{
-    name: string;
-    price?: string;
-    description?: string;
-  }>;
-  /** Catch-all for any other Label: Value fields not explicitly handled */
-  extraFields?: Array<{
-    label: string;
-    value: string;
-  }>;
-  rawContent?: string;
+  /** The section name as it appears in brackets, e.g., "HERO", "TEXT", "PRODUCT CARD" */
+  name: string;
+  /** All labeled fields found in this section */
+  fields: EmailField[];
+  /** Any bullet list items found (lines starting with - or •) */
+  bullets: string[];
+  /** Any lines that weren't labeled fields or bullets */
+  unlabeledContent: string[];
+  /** Raw content of the section for fallback display */
+  rawContent: string;
 }
 
 export interface ParsedEmailCopy {
-  approach?: string;
-  subjectLine?: string;
-  previewText?: string;
+  /** Content before the first section (approach/strategy notes) */
+  preamble: string;
+  /** All sections found */
   sections: EmailSection[];
-  designNotes?: string;
+  /** Content after all sections (design notes, etc.) */
+  postamble: string;
+  /** Original full content for plain text view */
+  originalContent: string;
 }
 
 /**
- * Parse structured email copy into semantic components
+ * Check if content appears to be structured email copy
+ * Looks for UPPERCASE section markers like [HERO], [TEXT], [PRODUCT CARD]
+ */
+export function isStructuredEmailCopy(content: string): boolean {
+  if (!content || typeof content !== 'string') return false;
+  // Match section markers that are:
+  // - Inside square brackets
+  // - Start with an uppercase letter
+  // - Contain only uppercase letters, numbers, spaces, underscores, or hyphens
+  // This excludes placeholders like [Price], [Name] which have lowercase letters
+  return /\[[A-Z][A-Z0-9 _-]*\]/.test(content);
+}
+
+/**
+ * Parse structured email copy - FULLY DYNAMIC & BULLETPROOF
+ * Captures ALL content without dropping anything
  */
 export function parseEmailCopy(content: string): ParsedEmailCopy | null {
   if (!content || typeof content !== 'string') return null;
   
   // Check if this looks like structured email copy
-  const hasStructuredMarkers = 
-    content.includes('SUBJECT LINE:') ||
-    content.includes('Subject Line:') ||
-    content.includes('[HERO]') ||
-    content.includes('[TEXT]') ||
-    content.includes('[BULLETS]') ||
-    content.includes('[PRODUCT GRID]');
-  
-  if (!hasStructuredMarkers) return null;
-  
-  const result: ParsedEmailCopy = {
-    sections: [],
-  };
+  if (!isStructuredEmailCopy(content)) return null;
   
   // Strip code block markers if present
-  let cleanContent = content
-    .replace(/^```\n?/gm, '')
+  const cleanContent = content
+    .replace(/^```[\w]*\n?/gm, '')  // Handle ```markdown, ```text, etc.
     .replace(/\n?```$/gm, '')
     .trim();
   
-  // Split by horizontal rules first to separate major parts
-  const parts = cleanContent.split(/\n---\n/).map(p => p.trim());
+  const result: ParsedEmailCopy = {
+    preamble: '',
+    sections: [],
+    postamble: '',
+    originalContent: cleanContent,
+  };
   
-  for (const part of parts) {
-    // Extract approach/strategy note (usually starts with **Approach: or similar)
-    if (part.match(/^\*\*Approach:|^Approach:|^\*\*Strategy:|^Strategy:/i)) {
-      result.approach = part
-        .replace(/^\*\*/g, '')
-        .replace(/\*\*$/g, '')
-        .replace(/^Approach:\s*/i, '')
-        .replace(/^Strategy:\s*/i, '')
-        .trim();
-      continue;
-    }
-    
-    // Extract subject line and preview text
-    const subjectMatch = part.match(/(?:SUBJECT LINE|Subject Line):\s*(.+?)(?:\n|$)/i);
-    if (subjectMatch) {
-      result.subjectLine = subjectMatch[1].trim();
-    }
-    
-    const previewMatch = part.match(/(?:PREVIEW TEXT|Preview Text):\s*(.+?)(?:\n|$)/i);
-    if (previewMatch) {
-      result.previewText = previewMatch[1].trim();
-    }
-    
-    // If this part has subject/preview, skip further section parsing for it
-    if (subjectMatch || previewMatch) continue;
-    
-    // Extract design notes
-    if (part.match(/^Design notes:|^Design Notes:|^\*\*Design notes:/i)) {
-      result.designNotes = part
-        .replace(/^\*\*Design notes:\*\*/i, '')
-        .replace(/^Design notes:/i, '')
-        .replace(/^Design Notes:/i, '')
-        .trim();
-      continue;
-    }
-    
-    // Parse sections - match ANY bracketed section marker like [HERO], [TEXT], [ANYTHING NEW]
-    // This ensures we gracefully handle any new section types the AI might create
-    const sectionMatches = part.matchAll(/\[([A-Z][A-Z0-9 _-]*)\]/gi);
-    const sectionPositions: Array<{type: string; start: number}> = [];
-    
-    for (const match of sectionMatches) {
-      sectionPositions.push({
-        type: match[1].toUpperCase(),
-        start: match.index!,
-      });
-    }
-    
-    // If no sections found in this part but it has content, check for standalone content
-    if (sectionPositions.length === 0 && part.trim()) {
-      // This could be a continuation or standalone content - skip for now
-      continue;
-    }
-    
-    // Extract each section's content
-    for (let i = 0; i < sectionPositions.length; i++) {
-      const current = sectionPositions[i];
-      const next = sectionPositions[i + 1];
-      const endPos = next ? next.start : part.length;
-      
-      const sectionContent = part.slice(current.start, endPos).trim();
-      const section = parseSectionContent(current.type, sectionContent);
-      
-      if (section) {
-        result.sections.push(section);
-      }
-    }
+  // Find all section markers and their positions
+  // CRITICAL: Only match FULLY UPPERCASE markers
+  // Pattern breakdown:
+  // \[ - literal opening bracket
+  // ([A-Z][A-Z0-9 _-]*) - capture group: starts with uppercase, then any uppercase/number/space/underscore/hyphen
+  // \] - literal closing bracket
+  const sectionPattern = /\[([A-Z][A-Z0-9 _-]*)\]/g;
+  const sectionMatches: Array<{name: string; start: number; end: number}> = [];
+  
+  let match;
+  while ((match = sectionPattern.exec(cleanContent)) !== null) {
+    sectionMatches.push({
+      name: match[1],
+      start: match.index,
+      end: match.index + match[0].length,
+    });
   }
   
-  // Only return result if we found meaningful content
-  if (!result.subjectLine && result.sections.length === 0) {
-    return null;
+  // If no sections found, return null to fall back to default rendering
+  if (sectionMatches.length === 0) return null;
+  
+  // Extract preamble (content before first section)
+  const firstSectionStart = sectionMatches[0].start;
+  if (firstSectionStart > 0) {
+    result.preamble = cleanContent.slice(0, firstSectionStart).trim();
+  }
+  
+  // Extract each section's content
+  for (let i = 0; i < sectionMatches.length; i++) {
+    const current = sectionMatches[i];
+    const next = sectionMatches[i + 1];
+    
+    // Get content from after the marker to the next section (or end)
+    const contentStart = current.end;
+    const contentEnd = next ? next.start : cleanContent.length;
+    let sectionContent = cleanContent.slice(contentStart, contentEnd).trim();
+    
+    // Check for postamble marker (--- followed by design notes)
+    // Only do this for the last section
+    if (!next) {
+      const postambleMatch = sectionContent.match(/\n---\n([\s\S]+)$/);
+      if (postambleMatch) {
+        result.postamble = postambleMatch[1].trim();
+        sectionContent = sectionContent.replace(/\n---\n[\s\S]+$/, '').trim();
+      }
+    }
+    
+    // Remove section separator (---) between sections
+    sectionContent = sectionContent.replace(/\n?---\s*$/, '').trim();
+    
+    // Parse the section content
+    const section = parseSectionContent(current.name, sectionContent);
+    result.sections.push(section);
   }
   
   return result;
 }
 
 /**
- * Parse individual section content
- * Handles both known and unknown section types gracefully
- * Uses a catch-all for any "Label: Value" patterns not explicitly handled
+ * Parse section content into fields, bullets, and unlabeled content
+ * BULLETPROOF: Captures everything, never drops content
  */
-function parseSectionContent(type: string, content: string): EmailSection | null {
-  // Remove ANY section marker (handles unknown types too)
-  const cleanContent = content
-    .replace(/^\[[A-Z][A-Z0-9 _-]*\]/i, '')
-    .trim();
-  
-  const mappedType = mapSectionType(type);
+function parseSectionContent(name: string, content: string): EmailSection {
   const section: EmailSection = {
-    type: mappedType,
-    // Store original type name for generic/unknown sections
-    originalType: mappedType === 'generic' ? type : undefined,
-    rawContent: cleanContent,
+    name,
+    fields: [],
+    bullets: [],
+    unlabeledContent: [],
+    rawContent: content,
   };
   
-  // Track which fields we've already extracted to avoid duplicates in extraFields
-  const extractedLabels = new Set<string>();
+  if (!content) return section;
   
-  // Extract headline (and variations)
-  const headlineMatch = cleanContent.match(/(?:Headline|Title):\s*(.+?)(?:\n|$)/i);
-  if (headlineMatch) {
-    section.headline = headlineMatch[1].trim();
-    extractedLabels.add('headline');
-    extractedLabels.add('title');
-  }
+  // Split content into lines for processing
+  const lines = content.split('\n');
+  let currentField: EmailField | null = null;
   
-  // Extract subhead/subheadline (and variations)
-  const subheadMatch = cleanContent.match(/(?:Subhead|Sub-head|Subheadline|Sub-headline|Subtitle|One-liner|Tagline):\s*(.+?)(?:\n|$)/i);
-  if (subheadMatch) {
-    section.subhead = subheadMatch[1].trim();
-    extractedLabels.add('subhead');
-    extractedLabels.add('sub-head');
-    extractedLabels.add('subheadline');
-    extractedLabels.add('sub-headline');
-    extractedLabels.add('subtitle');
-    extractedLabels.add('one-liner');
-    extractedLabels.add('tagline');
-  }
-  
-  // Extract body (and variations)
-  const bodyMatch = cleanContent.match(/(?:Body|Content|Copy|Description|Text):\s*(.+?)(?=(?:Headline:|Subhead:|Bullets:|CTA:|Products:|Price:|\n\n\[|$))/is);
-  if (bodyMatch) {
-    section.body = bodyMatch[1].trim();
-    extractedLabels.add('body');
-    extractedLabels.add('content');
-    extractedLabels.add('copy');
-    extractedLabels.add('description');
-    extractedLabels.add('text');
-  }
-  
-  // Extract CTA (and variations)
-  const ctaMatch = cleanContent.match(/(?:CTA|Call to Action|Button|Action):\s*(.+?)(?:\n|$)/i);
-  if (ctaMatch) {
-    section.cta = ctaMatch[1].trim();
-    extractedLabels.add('cta');
-    extractedLabels.add('call to action');
-    extractedLabels.add('button');
-    extractedLabels.add('action');
-  }
-  
-  // Extract bullets
-  const bulletsSection = cleanContent.match(/Bullets:\s*([\s\S]+?)(?=(?:CTA:|Headline:|Products:|Price:|\n\n\[|$))/i);
-  if (bulletsSection) {
-    const bullets = bulletsSection[1]
-      .split('\n')
-      .filter(line => line.trim().startsWith('-'))
-      .map(line => line.replace(/^-\s*/, '').trim())
-      .filter(b => b.length > 0);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
     
-    if (bullets.length > 0) {
-      section.bullets = bullets;
-      extractedLabels.add('bullets');
+    // Skip empty lines
+    if (!trimmedLine) continue;
+    
+    // Skip horizontal rules (but don't drop them silently)
+    if (trimmedLine === '---') continue;
+    
+    // Check for bullet items (lines starting with - or • or *)
+    if (/^[-•*]\s+/.test(trimmedLine)) {
+      const bulletContent = trimmedLine.replace(/^[-•*]\s+/, '').trim();
+      if (bulletContent) {
+        section.bullets.push(bulletContent);
+      }
+      currentField = null; // Reset current field
+      continue;
     }
-  }
-  
-  // Extract products for product grid sections
-  if (type.includes('PRODUCT') || type === 'PRODUCTS') {
-    const productsSection = cleanContent.match(/Products:\s*([\s\S]+?)(?=(?:CTA:|Headline:|\n\n\[|$))/i);
-    if (productsSection) {
-      const products = productsSection[1]
-        .split('\n')
-        .filter(line => line.trim().startsWith('-'))
-        .map(line => {
-          const productLine = line.replace(/^-\s*/, '').trim();
-          // Parse format: "Product Name | $Price | Description"
-          const parts = productLine.split('|').map(p => p.trim());
-          return {
-            name: parts[0] || productLine,
-            price: parts[1]?.startsWith('$') ? parts[1] : undefined,
-            description: parts.length > 2 ? parts.slice(2).join(' | ') : (parts[1] && !parts[1].startsWith('$') ? parts[1] : undefined),
-          };
-        })
-        .filter(p => p.name.length > 0);
+    
+    // Check for "Label: Value" pattern
+    // This regex captures:
+    // - Label: starts with a letter, can contain letters/numbers/spaces/hyphens/underscores
+    // - Must have a colon followed by at least one space or the value
+    // - Value: everything after the colon (handles colons in values like "Time: 10:00 AM")
+    const fieldMatch = trimmedLine.match(/^([A-Za-z][A-Za-z0-9 _-]*):\s*(.*)$/);
+    
+    if (fieldMatch) {
+      const label = fieldMatch[1].trim();
+      const value = fieldMatch[2].trim();
       
-      if (products.length > 0) {
-        section.products = products;
-        extractedLabels.add('products');
+      if (label) {
+        currentField = {
+          label,
+          value: value || '', // Value can be empty initially if it continues on next line
+          labelLower: label.toLowerCase().replace(/[^a-z0-9]/g, ''),
+        };
+        section.fields.push(currentField);
+        continue;
       }
     }
-  }
-  
-  // CATCH-ALL: Extract any remaining "Label: Value" patterns
-  // This ensures we don't lose any data even if AI uses unexpected field names
-  const fieldPattern = /^([A-Za-z][A-Za-z0-9 _-]*):\s*(.+?)$/gm;
-  const extraFields: Array<{label: string; value: string}> = [];
-  let match;
-  
-  while ((match = fieldPattern.exec(cleanContent)) !== null) {
-    const label = match[1].trim();
-    const value = match[2].trim();
-    const labelLower = label.toLowerCase();
     
-    // Skip if we've already extracted this field
-    if (extractedLabels.has(labelLower)) continue;
+    // Check if this line might be a continuation of the previous field
+    // (starts with whitespace and we have a current field, or is just text)
+    if (currentField && currentField.value && /^\s+/.test(line)) {
+      // Continuation of previous field value
+      currentField.value += ' ' + trimmedLine;
+      continue;
+    }
     
-    // Skip empty values
-    if (!value) continue;
-    
-    // Add to extraFields
-    extraFields.push({ label, value });
-    extractedLabels.add(labelLower);
-  }
-  
-  if (extraFields.length > 0) {
-    section.extraFields = extraFields;
+    // This line doesn't match any pattern - capture as unlabeled content
+    // This ensures we NEVER drop content
+    section.unlabeledContent.push(trimmedLine);
+    currentField = null; // Reset current field
   }
   
   return section;
 }
 
 /**
- * Map section type string to enum
- * Returns 'generic' for any unknown types - these will still render nicely
+ * Helper to get a field value by label (case-insensitive, ignores special chars)
  */
-function mapSectionType(type: string): EmailSection['type'] {
-  const normalizedType = type.toUpperCase().replace(/\s+/g, '_').replace(/-/g, '_');
-  
-  switch (normalizedType) {
-    case 'HERO':
-      return 'hero';
-    case 'TEXT':
-    case 'BODY':
-    case 'COPY':
-      return 'text';
-    case 'BULLETS':
-    case 'FEATURES':
-    case 'BENEFITS':
-    case 'LIST':
-      return 'bullets';
-    case 'PRODUCT_GRID':
-    case 'PRODUCTS':
-    case 'PRODUCT':
-      return 'product_grid';
-    case 'CTA_BLOCK':
-    case 'CTA':
-    case 'CALL_TO_ACTION':
-      return 'cta_block';
-    case 'SOCIAL_PROOF':
-    case 'REVIEWS':
-      return 'social_proof';
-    case 'TESTIMONIAL':
-    case 'QUOTE':
-      return 'testimonial';
-    default:
-      // Return 'generic' for any unknown type - will still render the content nicely
-      return 'generic';
-  }
+export function getFieldValue(section: EmailSection, ...labels: string[]): string | undefined {
+  const labelsNormalized = labels.map(l => l.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const field = section.fields.find(f => labelsNormalized.includes(f.labelLower));
+  return field?.value;
 }
 
 /**
- * Format a raw section type into a human-readable label
- * Used for unknown/generic section types
+ * Check if a field label matches known "headline" patterns
  */
-export function formatSectionLabel(type: string): string {
-  // Convert SNAKE_CASE or kebab-case to Title Case
-  return type
+export function isHeadlineField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['headline', 'title', 'header', 'heading', 'h1', 'maintitle'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "subhead" patterns
+ */
+export function isSubheadField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return [
+    'subhead', 'subheadline', 'subhead', 'subtitle', 'tagline', 
+    'oneliner', 'supporting', 'subheading', 'h2'
+  ].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "body" patterns
+ */
+export function isBodyField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['body', 'copy', 'content', 'text', 'description', 'paragraph', 'message'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "CTA" patterns
+ */
+export function isCtaField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['cta', 'calltoaction', 'button', 'action', 'link', 'buttontext'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "accent" patterns
+ */
+export function isAccentField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['accent', 'eyebrow', 'kicker', 'preheadline', 'label', 'tag'].includes(normalized);
+}
+
+/**
+ * Format a section name for display (Title Case)
+ */
+export function formatSectionName(name: string): string {
+  return name
     .replace(/[_-]/g, ' ')
     .toLowerCase()
     .split(' ')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
-
-/**
- * Check if content appears to be structured email copy
- */
-export function isStructuredEmailCopy(content: string): boolean {
-  if (!content) return false;
-  
-  return (
-    content.includes('SUBJECT LINE:') ||
-    content.includes('Subject Line:') ||
-    content.includes('[HERO]') ||
-    content.includes('[TEXT]') ||
-    content.includes('[BULLETS]') ||
-    content.includes('[PRODUCT GRID]')
-  );
-}
-

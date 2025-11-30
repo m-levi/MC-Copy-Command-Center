@@ -3,8 +3,9 @@
 import { useState, useRef, KeyboardEvent, useEffect, useCallback, DragEvent } from 'react';
 import { QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
 import { ConversationMode, EmailType, AIModel } from '@/types';
+import { AI_MODELS } from '@/lib/ai-models';
 import { SpeechButton } from './chat/SpeechButton';
-import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, SparklesIcon, Upload } from 'lucide-react';
+import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, SparklesIcon, Upload, Quote } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface ChatInputProps {
@@ -25,6 +26,9 @@ interface ChatInputProps {
   autoFocus?: boolean;
   // Flow-specific callback - called when user selects Flow to start the conversation
   onStartFlow?: () => void;
+  // Quoted text reference from email copy
+  quotedText?: string;
+  onClearQuote?: () => void;
 }
 
 export default function ChatInput({ 
@@ -43,7 +47,9 @@ export default function ChatInput({
   onEmailTypeChange,
   hasMessages = false,
   autoFocus = false,
-  onStartFlow
+  onStartFlow,
+  quotedText,
+  onClearQuote,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -75,12 +81,8 @@ export default function ChatInput({
     { command: '/cta', label: 'Improve CTAs', icon: '🎯' },
   ];
 
-  const models = [
-    { id: 'anthropic/claude-sonnet-4.5', name: 'Sonnet 4.5' },
-    { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    { id: 'anthropic/claude-opus-4', name: 'Opus 4' },
-    { id: 'openai/gpt-5.1-thinking', name: 'GPT 5.1' },
-  ];
+  // Use the first 4 primary models from the centralized AI_MODELS list
+  const models = AI_MODELS.slice(0, 4);
 
   const emailTypes = [
     { id: 'design' as const, name: 'Design Email', description: 'Full structured marketing email', icon: LayoutTemplate },
@@ -192,7 +194,7 @@ export default function ChatInput({
   }, []);
 
   const handleSend = () => {
-    if ((message.trim() || files.length > 0) && !disabled) {
+    if ((message.trim() || files.length > 0 || quotedText) && !disabled) {
       const trimmed = message.trim();
       let finalMessage = trimmed;
 
@@ -204,6 +206,13 @@ export default function ChatInput({
         else if (command === '/professional') finalMessage = QUICK_ACTION_PROMPTS.change_tone_professional;
         else if (command === '/proof') finalMessage = QUICK_ACTION_PROMPTS.add_social_proof;
         else if (command === '/cta') finalMessage = QUICK_ACTION_PROMPTS.improve_cta;
+      }
+
+      // Prepend quoted text if present
+      if (quotedText) {
+        const quoteBlock = `Regarding this copy:\n> "${quotedText}"\n\n`;
+        finalMessage = quoteBlock + finalMessage;
+        onClearQuote?.();
       }
 
       if (saveTimeoutRef.current) {
@@ -374,6 +383,44 @@ export default function ChatInput({
             </div>
           )}
           
+          {/* Quoted Text Reference */}
+          {quotedText && (
+            <div className="mx-3 mt-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="relative group">
+                {/* Subtle glow effect */}
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-indigo-500/5 rounded-xl blur-sm"></div>
+                
+                <div className="relative flex items-start gap-3 px-4 py-3 bg-gradient-to-br from-blue-50/80 to-indigo-50/50 dark:from-blue-950/40 dark:to-indigo-950/30 border border-blue-200/60 dark:border-blue-800/40 rounded-xl backdrop-blur-sm">
+                  {/* Quote icon with gradient background */}
+                  <div className="flex-shrink-0 mt-0.5">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
+                      <Quote className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  </div>
+                  
+                  {/* Quote content */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600/80 dark:text-blue-400/80 mb-1">
+                      Referencing copy
+                    </p>
+                    <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed line-clamp-3 italic">
+                      "{quotedText}"
+                    </p>
+                  </div>
+                  
+                  {/* Close button */}
+                  <button
+                    onClick={onClearQuote}
+                    className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60 transition-all duration-150 opacity-60 group-hover:opacity-100"
+                    title="Remove quote"
+                  >
+                    <XIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* File Previews */}
           {files.length > 0 && (
             <div className="px-4 pt-4 flex flex-wrap gap-2">

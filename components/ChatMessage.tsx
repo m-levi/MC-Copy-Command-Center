@@ -39,6 +39,8 @@ interface ChatMessageProps {
   onFlowModify?: (plan: FlowPlan) => void;
   isGeneratingFlow?: boolean;
   flowApprovalState?: 'pending' | 'approved' | 'rejected';
+  // Reference in chat - allows users to quote selected text in their next message
+  onReferenceInChat?: (selectedText: string) => void;
 }
 
 // Memoized component to prevent unnecessary re-renders
@@ -53,29 +55,18 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
     textLower: highlight.text.toLowerCase(),
   }));
 
-  // Log highlights being searched for
-  console.log('[Highlight Plugin] Created with highlights:', normalized.map(h => h.text));
-
   return () => (tree: any) => {
     if (!normalized.length) {
-      console.log('[Highlight Plugin] No highlights to process');
       return;
     }
 
-    console.log('[Highlight Plugin] Processing tree with', normalized.length, 'highlights');
     let matchCount = 0;
-    const textNodesFound: string[] = [];
 
     visit(tree, 'text', (node: any, index: number | undefined, parent: any) => {
       if (!parent || typeof node.value !== 'string') return;
 
       const originalValue = node.value as string;
       const lowerValue = originalValue.toLowerCase();
-      
-      // Log text nodes for debugging
-      if (originalValue.length > 5) {
-        textNodesFound.push(originalValue.substring(0, 50) + (originalValue.length > 50 ? '...' : ''));
-      }
       
       const newNodes: any[] = [];
       let cursor = 0;
@@ -110,8 +101,6 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
           nextMatch.start + nextMatch.highlight.text.length
         );
 
-        console.log('[Highlight Plugin] MATCH FOUND:', highlightText);
-
         newNodes.push({
           type: 'highlight',
           data: {
@@ -133,8 +122,6 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
         return (index as number) + newNodes.length;
       }
     });
-
-    console.log('[Highlight Plugin] Finished. Matches:', matchCount, 'Text nodes found:', textNodesFound.slice(0, 5));
   };
 };
 
@@ -161,6 +148,8 @@ const ChatMessage = memo(function ChatMessage({
   onFlowModify,
   isGeneratingFlow = false,
   flowApprovalState = 'pending',
+  // Reference in chat
+  onReferenceInChat,
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
@@ -201,18 +190,8 @@ const ChatMessage = memo(function ChatMessage({
   
   // Check if content has email version markers (version_a, version_b, version_c)
   const hasVersionedContent = useMemo(() => {
-    const hasVersions = messageContent && hasEmailVersionMarkers(messageContent);
-    console.log('[ChatMessage] Version check:', {
-      hasVersions,
-      isStreaming,
-      messageId: message.id,
-      contentLength: messageContent?.length || 0,
-      hasVersionA: messageContent?.includes('<version_a>'),
-      hasVersionAClose: messageContent?.includes('</version_a>'),
-      first100: messageContent?.substring(0, 100),
-    });
-    return hasVersions;
-  }, [messageContent, isStreaming, message.id]);
+    return messageContent && hasEmailVersionMarkers(messageContent);
+  }, [messageContent]);
   
   // Check if content is structured email copy (has [HERO], [TEXT], etc. markers)
   const hasStructuredEmailContent = useMemo(() => {
@@ -292,13 +271,7 @@ const ChatMessage = memo(function ChatMessage({
       }
     });
 
-    const highlights = Array.from(highlightMap.values());
-    
-    // Debug logging
-    console.log('[ChatMessage] commentsData received:', commentsData);
-    console.log('[ChatMessage] Generated highlights:', highlights.map(h => h.text));
-    
-    return highlights;
+    return Array.from(highlightMap.values());
   }, [commentsData]);
 
   const remarkPlugins = useMemo(() => {
@@ -443,9 +416,9 @@ const ChatMessage = memo(function ChatMessage({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Handle text selection for highlighting and commenting
+  // Handle text selection for highlighting, commenting, and referencing in chat
   const handleTextSelection = (e: React.MouseEvent) => {
-    if (!onCommentClick) return;
+    if (!onCommentClick && !onReferenceInChat) return;
     
     // Small delay to ensure selection is complete
     setTimeout(() => {
@@ -665,7 +638,7 @@ const ChatMessage = memo(function ChatMessage({
       )}
 
       {/* Floating selection menu - Premium pill design */}
-      {!showInlineCommentBox && selectionPosition && selectedText && onCommentClick && (
+      {!showInlineCommentBox && selectionPosition && selectedText && (onCommentClick || onReferenceInChat) && (
         <div
           className="floating-comment-btn fixed"
           style={{
@@ -689,17 +662,46 @@ const ChatMessage = memo(function ChatMessage({
               
               {/* Main pill */}
               <div className="relative bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl border border-stone-200/80 dark:border-gray-700/80 rounded-full shadow-xl shadow-stone-200/50 dark:shadow-gray-900/50 flex items-center p-1 gap-0.5">
+                {/* Reference in Chat button - Primary action */}
+                {onReferenceInChat && (
+                  <button
+                    onClick={() => {
+                      onReferenceInChat(selectedText);
+                      toast.success('Quote added – type your feedback below', { 
+                        icon: '💬',
+                        duration: 2500 
+                      });
+                      setSelectedText('');
+                      setSelectionPosition(null);
+                      window.getSelection()?.removeAllRanges();
+                    }}
+                    className="group flex items-center gap-2 pl-3 pr-4 py-2 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all duration-200 text-white font-medium text-sm shadow-sm hover:shadow-md"
+                    title="Reference this text in your next message"
+                  >
+                    <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                    </svg>
+                    <span>Quote</span>
+                  </button>
+                )}
+                
                 {/* Comment button */}
-                <button
-                  onClick={handleCommentOnHighlight}
-                  className="group flex items-center gap-2 pl-3 pr-4 py-2 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 transition-all duration-200 text-white font-medium text-sm shadow-sm hover:shadow-md"
-                  title="Add comment"
-                >
-                  <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                  </svg>
-                  <span>Comment</span>
-                </button>
+                {onCommentClick && (
+                  <button
+                    onClick={handleCommentOnHighlight}
+                    className={`group flex items-center gap-1.5 px-3 py-2 rounded-full transition-all duration-200 text-sm font-medium ${
+                      onReferenceInChat 
+                        ? 'text-stone-600 dark:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-700' 
+                        : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm hover:shadow-md pl-3 pr-4 gap-2'
+                    }`}
+                    title="Add comment"
+                  >
+                    <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                    </svg>
+                    <span>Comment</span>
+                  </button>
+                )}
                 
                 {/* Copy button */}
                 <button

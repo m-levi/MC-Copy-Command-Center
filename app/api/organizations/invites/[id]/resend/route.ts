@@ -73,26 +73,32 @@ export async function POST(
       .eq('user_id', user.id)
       .single();
 
-    // Send email
-    const emailResult = await sendInviteEmail({
-      to: invite.email,
-      inviteLink,
-      inviterName: inviterProfile?.full_name || user.email,
-      organizationName: userOrg.organization.name,
-      role: invite.role,
-    });
-
-    if (!emailResult.success) {
-      console.error('Failed to resend email:', emailResult.error);
-      return NextResponse.json({ 
-        error: 'Failed to send email', 
-        details: emailResult.error 
-      }, { status: 500 });
+    // Send email asynchronously (fire-and-forget)
+    // The expiration has already been updated, so we don't fail if email fails
+    let emailSent = false;
+    try {
+      const emailResult = await sendInviteEmail({
+        to: invite.email,
+        inviteLink,
+        inviterName: inviterProfile?.full_name || user.email,
+        organizationName: userOrg.organization.name,
+        role: invite.role,
+      });
+      emailSent = emailResult.success;
+      if (!emailResult.success) {
+        console.error('Failed to resend email:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Error sending invite email:', emailError);
     }
 
+    // Always return success since the expiration was extended
+    // Include email status so client knows if manual follow-up is needed
     return NextResponse.json({ 
       success: true, 
-      message: 'Invitation resent successfully' 
+      message: emailSent ? 'Invitation resent successfully' : 'Invitation renewed but email failed to send',
+      emailSent,
+      inviteLink: emailSent ? undefined : inviteLink, // Provide link if email failed
     });
   } catch (error: any) {
     console.error('Error resending invite:', error);

@@ -18,7 +18,7 @@ export async function PUT(
     const supabase = await createClient();
     const { brandId, memoryId } = await params;
     const body = await request.json();
-    const { title, content, category } = body;
+    const { title, content, category, created_at: originalCreatedAt } = body;
 
     if (!title || !content) {
       return NextResponse.json(
@@ -73,14 +73,14 @@ export async function PUT(
       category: category || 'general',
     });
 
-    // Return the updated memory
+    // Return the updated memory, preserving original created_at
     const memory = {
       id: result.id,
       brand_id: brandId,
       title,
       content,
       category: category || 'general',
-      created_at: new Date().toISOString(),
+      created_at: originalCreatedAt || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 

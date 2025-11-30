@@ -160,6 +160,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);
   const [conversationMode, setConversationMode] = useState<ConversationMode>('email_copy');
   const [draftContent, setDraftContent] = useState('');
+  const [quotedText, setQuotedText] = useState<string | null>(null);
   const [teamMembers, setTeamMembers] = useState<OrganizationMember[]>([]);
   const [currentFilter, setCurrentFilter] = useState<FilterType>('all');
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
@@ -862,7 +863,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     logger.log('[Outline Detection] Message preview:', lastMessage.content.substring(0, 300));
 
     // Try to detect and parse outline
-    const outline = detectFlowOutline(lastMessage.content, currentConversation.flow_type);
+    const outline = detectFlowOutline(lastMessage.content, currentConversation.flow_type || 'welcome_series');
     if (outline) {
       logger.log('✅ [Outline Detection] Successfully detected flow outline:', outline);
       setPendingOutlineApproval(outline);
@@ -2875,7 +2876,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         }
         
         userMessage = data;
-        logger.log('[Message] User message saved successfully:', { id: userMessage.id });
+        logger.log('[Message] User message saved successfully:', { id: data.id });
         
         // Replace temp user message with real saved one
         setMessages((prev) => prev.map(msg => 
@@ -3853,6 +3854,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                       loadCommentCounts(messages.map(m => m.id));
                     }
                   }}
+                  onReferenceInChat={(selectedText) => {
+                    // Set quoted text to show in chat input UI
+                    setQuotedText(selectedText);
+                  }}
                 />
               ))}
               
@@ -3978,6 +3983,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             hasMessages={messages.length > 0}
             autoFocus={messages.length === 0}
             onStartFlow={() => handleSendMessage("I want to create an email flow", false, 'flow')}
+            quotedText={quotedText || undefined}
+            onClearQuote={() => setQuotedText(null)}
           />
         )}
 
@@ -4056,8 +4063,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   highlightedText={highlightedTextForComment}
                   onHighlightedTextUsed={() => setHighlightedTextForComment(null)}
                   onSendToChat={(text) => {
-                    setDraftContent(prev => prev ? `${prev}\n\n${text}` : text);
-                    // Removed toast notification - text appears in input immediately
+                    // Use the visual quote UI instead of plain text
+                    setQuotedText(text);
                   }}
                 />
               </Suspense>

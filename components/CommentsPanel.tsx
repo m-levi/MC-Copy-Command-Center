@@ -496,6 +496,9 @@ function CommentThread({
               onResolve={onResolve}
               canResolve={canResolve}
               getInitials={getInitials}
+              onCopyLink={onCopyLink}
+              onDelete={onDelete}
+              canDelete={canDelete}
             />
           ))}
         </div>
