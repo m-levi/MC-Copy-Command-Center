@@ -1,6 +1,14 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy-initialize Resend client to avoid build errors when API key is not set
+let resend: Resend | null = null;
+
+function getResendClient(): Resend | null {
+  if (!resend && process.env.RESEND_API_KEY) {
+    resend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return resend;
+}
 
 const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -142,10 +150,16 @@ async function sendEmail(to: string, subject: string, html: string) {
     return { success: false, error: 'Email service not configured' };
   }
 
+  const client = getResendClient();
+  if (!client) {
+    console.warn('[Email Service] Skipping - Resend client not initialized');
+    return { success: false, error: 'Email service not configured' };
+  }
+
   console.log(`[Email Service] Sending from: ${EMAIL_FROM}`);
 
   try {
-    const data = await resend.emails.send({
+    const data = await client.emails.send({
       from: EMAIL_FROM,
       to,
       subject,

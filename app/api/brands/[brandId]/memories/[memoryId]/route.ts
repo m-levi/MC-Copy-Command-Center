@@ -73,7 +73,9 @@ export async function PUT(
       category: category || 'general',
     });
 
-    // Return the updated memory, preserving original created_at
+    // Return the updated memory with the NEW ID from Supermemory
+    // Important: Since we delete the old memory and create a new one,
+    // we must return result.id so the client can reference the correct memory
     const memory = {
       id: result.id,
       brand_id: brandId,
