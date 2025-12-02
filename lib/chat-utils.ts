@@ -18,6 +18,79 @@ export const stripControlMarkers = (value: string | undefined): string => {
 };
 
 /**
+ * Check if content looks like corrupted raw JSON streaming format
+ * This happens when raw API streaming chunks are saved instead of parsed content
+ * Format: {"type":"text","content":"..."} {"type":"thinking","content":"..."}
+ */
+export function isCorruptedJsonContent(content: string): boolean {
+  if (!content) return false;
+  
+  // Look for characteristic JSON streaming patterns
+  const hasJsonPattern = /\{"type"\s*:\s*"(text|thinking|status|thinking_start|thinking_end)"/i.test(content);
+  const hasMultipleJsonObjects = (content.match(/\{"type"\s*:/g) || []).length > 2;
+  
+  // If it starts with JSON and has multiple objects, it's likely corrupted
+  return hasJsonPattern && hasMultipleJsonObjects;
+}
+
+/**
+ * Extract clean content from corrupted raw JSON streaming format
+ * Used to fix messages that were incorrectly saved with raw API response
+ */
+export function extractContentFromCorruptedJson(rawContent: string): { content: string; thinking: string } {
+  let content = '';
+  let thinking = '';
+  
+  // Try to parse each JSON object (they might be separated by spaces or newlines)
+  // Handle both space-separated and newline-separated formats
+  const normalizedContent = rawContent
+    .replace(/\}\s*\{/g, '}\n{')  // Normalize space-separated to newline-separated
+    .split('\n');
+  
+  for (const line of normalizedContent) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+    
+    try {
+      const message = JSON.parse(trimmedLine);
+      
+      switch (message.type) {
+        case 'text':
+          content += message.content || '';
+          break;
+        case 'thinking':
+          thinking += message.content || '';
+          break;
+        // Ignore status, tool_use, thinking_start, thinking_end and other message types
+      }
+    } catch {
+      // If we can't parse as JSON, skip this line
+      // This handles partial JSON or other content
+    }
+  }
+  
+  return { content: content.trim(), thinking: thinking.trim() };
+}
+
+/**
+ * Clean message content, fixing corrupted JSON if detected
+ * Use this when displaying messages to handle legacy corrupted data
+ */
+export function cleanMessageContent(content: string | undefined): string {
+  if (!content) return '';
+  
+  // Check if this is corrupted JSON content
+  if (isCorruptedJsonContent(content)) {
+    logger.warn('[cleanMessageContent] Detected corrupted JSON content, extracting clean text');
+    const extracted = extractContentFromCorruptedJson(content);
+    return extracted.content || content; // Fall back to original if extraction fails
+  }
+  
+  // Normal content - just strip control markers
+  return stripControlMarkers(content);
+}
+
+/**
  * Sanitize AI-generated content before saving to database
  * Preserves email version tags (version_a, version_b, version_c) for the version switching UI
  */

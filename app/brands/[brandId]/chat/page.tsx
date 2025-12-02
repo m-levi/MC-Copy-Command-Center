@@ -21,7 +21,6 @@ import type { ImperativePanelHandle } from 'react-resizable-panels';
 
 // Lazy load heavy/optional components
 const VirtualizedMessageList = lazy(() => import('@/components/VirtualizedMessageList'));
-const MemorySettings = lazy(() => import('@/components/MemorySettings'));
 const FlowOutlineDisplay = lazy(() => import('@/components/FlowOutlineDisplay'));
 const FlowNavigation = lazy(() => import('@/components/FlowNavigation'));
 const ApproveOutlineButton = lazy(() => import('@/components/ApproveOutlineButton'));
@@ -160,13 +159,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);
   const [conversationMode, setConversationMode] = useState<ConversationMode>('email_copy');
   const [draftContent, setDraftContent] = useState('');
-  const [quotedText, setQuotedText] = useState<string | null>(null);
   const [teamMembers, setTeamMembers] = useState<OrganizationMember[]>([]);
   const [currentFilter, setCurrentFilter] = useState<FilterType>('all');
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState('');
   const [currentUserName, setCurrentUserName] = useState('');
-  const [showMemorySettings, setShowMemorySettings] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -178,22 +175,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   });
   const [focusedMessageIdForComments, setFocusedMessageIdForComments] = useState<string | null>(null);
   const [highlightedTextForComment, setHighlightedTextForComment] = useState<string | null>(null);
+  const [quotedText, setQuotedText] = useState<string>('');
   const [messageCommentCounts, setMessageCommentCounts] = useState<Record<string, number>>({});
   const [messageComments, setMessageComments] = useState<Record<string, Array<{ id: string; quoted_text?: string; content: string }>>>({});
   const [pendingConversationSelection, setPendingConversationSelection] = useState<string | null>(null);
   const [isCreatingEmail, setIsCreatingEmail] = useState(false);
   const isSelectingConversationRef = useRef(false);
-  
-  // CRITICAL: Track the target conversation ID we're trying to load
-  // This prevents race conditions where loadMessages checks stale state
-  const targetConversationIdRef = useRef<string | null>(null);
-  
-  // Track the last intentionally selected conversation ID
-  // This helps prevent URL effects from selecting wrong conversations during async operations
-  const lastIntentionalSelectionRef = useRef<string | null>(null);
-  
-  // Track if we're in the middle of a navigation operation (more robust than simple flag)
-  const navigationInProgressRef = useRef<{ active: boolean; conversationId: string | null }>({ active: false, conversationId: null });
   
   // Flow-related state
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
@@ -210,9 +197,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   
   // Pending prompt from Quick Start
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
-  
-  // Track if we've processed the initial URL params for QuickStart
-  const quickStartProcessedRef = useRef(false);
   
   // Starred emails cache - loaded once per brand to avoid N queries per message
   const [starredEmailContents, setStarredEmailContents] = useState<Set<string>>(new Set());
@@ -232,6 +216,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   
   // Create a ref for loadConversations to avoid dependency issues
   const loadConversationsRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  
+  // Track navigation in progress to prevent URL effects from interfering
+  const navigationInProgressRef = useRef<{ active: boolean; targetConversationId: string | null }>({ 
+    active: false, 
+    targetConversationId: null 
+  });
   
   // Enhanced sidebar state management (using ref to avoid initialization order issues)
   const sidebarState = useSidebarState({
@@ -316,83 +306,80 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   // Load conversation from URL parameter
   useEffect(() => {
     // Don't interfere if we're already selecting a conversation programmatically
-    if (isSelectingConversationRef.current) {
-      logger.log('[URL Effect] Skipping - selection in progress (ref)');
-      return;
-    }
-    
-    // Don't interfere if navigation is in progress
-    if (navigationInProgressRef.current.active) {
-      logger.log('[URL Effect] Skipping - navigation in progress for:', navigationInProgressRef.current.conversationId);
+    if (isSelectingConversationRef.current || navigationInProgressRef.current.active) {
       return;
     }
 
     const conversationIdFromUrl = searchParams.get('conversation');
+    
+    // Skip temp conversations in URL
+    if (conversationIdFromUrl?.startsWith('temp-')) {
+      return;
+    }
+    
     if (conversationIdFromUrl && conversations.length > 0) {
-      // Skip if this conversation was our last intentional selection
-      // This prevents the URL effect from re-selecting during async state updates
-      if (lastIntentionalSelectionRef.current === conversationIdFromUrl && currentConversation?.id === conversationIdFromUrl) {
-        logger.log('[URL Effect] Skipping - already at intentionally selected conversation:', conversationIdFromUrl);
-        return;
-      }
-      
-      // Only update if conversation is different from current AND different from target
-      if (currentConversation?.id !== conversationIdFromUrl && targetConversationIdRef.current !== conversationIdFromUrl) {
+      // Only update if conversation is different from current
+      if (currentConversation?.id !== conversationIdFromUrl) {
         const targetConversation = conversations.find(c => c?.id === conversationIdFromUrl);
         if (targetConversation?.id) {
           logger.log('[URL Effect] Loading conversation from URL:', conversationIdFromUrl);
           // Use handleSelectConversation to properly load the conversation
           handleSelectConversation(conversationIdFromUrl);
+        } else {
+          // Conversation not in list - might be a flow or other filtered conversation
+          // Try to load it directly from the database
+          logger.log('[URL Effect] Conversation not in list, fetching directly:', conversationIdFromUrl);
+          (async () => {
+            try {
+              const { data: conversation, error } = await supabase
+                .from('conversations')
+                .select('*')
+                .eq('id', conversationIdFromUrl)
+                .eq('brand_id', brandId)
+                .single();
+              
+              if (error || !conversation) {
+                // This is expected when a conversation was deleted or the URL is stale
+                logger.warn('[URL Effect] Conversation not found, clearing URL:', conversationIdFromUrl);
+                // Clear the URL if conversation doesn't exist
+                router.replace(pathname);
+                return;
+              }
+              
+              logger.log('[URL Effect] Fetched conversation from DB:', conversation.id, 'is_flow:', conversation.is_flow);
+              
+              // Add to conversations list and select it
+              setConversations(prev => {
+                const exists = prev.some(c => c.id === conversation.id);
+                if (exists) return prev;
+                return [conversation, ...prev];
+              });
+              
+              // Select the conversation
+              handleSelectConversation(conversation.id);
+            } catch (e) {
+              logger.error('[URL Effect] Error fetching conversation:', e);
+            }
+          })();
         }
       }
     } else if (!conversationIdFromUrl && currentConversation?.id) {
       // If URL doesn't have conversation param but we have one selected, update URL
-      // But only if we're not in the middle of a navigation operation
-      if (!navigationInProgressRef.current.active && !isSelectingConversationRef.current) {
-        updateConversationUrl(currentConversation.id);
-      }
+      updateConversationUrl(currentConversation.id);
     }
-  }, [searchParams, conversations, currentConversation?.id]);
+  }, [searchParams, conversations, currentConversation?.id, brandId, pathname, router]);
 
-  // Handle Quick Start params from URL
-  // This effect runs early and captures the initialPrompt from URL before other effects can modify it
+  // Handle Quick Start params
   useEffect(() => {
-    // Skip if already processed
-    if (quickStartProcessedRef.current) {
-      return;
-    }
-    
-    // Get params from searchParams (provided by Next.js useSearchParams)
     const initialPrompt = searchParams.get('initialPrompt');
     const mode = searchParams.get('mode') as ConversationMode;
-    const emailType = searchParams.get('emailType') as EmailType;
-    
-    // Skip if no initial prompt
-    if (!initialPrompt) {
-      return;
-    }
+    const type = searchParams.get('emailType') as EmailType;
 
-    // CRITICAL: Wait for currentUserId to be available before processing
-    // handleNewConversation requires authentication - without waiting, it fails silently
-    if (
-      !loading && 
-      currentUserId &&  // Must have user ID before creating conversation
-      !currentConversation && 
-      !isCreatingEmail && 
-      !pendingPrompt
-    ) {
-      // Mark as processed IMMEDIATELY to prevent any re-triggers
-      quickStartProcessedRef.current = true;
-      
-      console.log('[QuickStart] Processing initial prompt:', initialPrompt, 'mode:', mode, 'type:', emailType);
-      
-      // Set pending prompt first
+    if (initialPrompt && !loading && !currentConversation && !isCreatingEmail && !pendingPrompt) {
       setPendingPrompt(initialPrompt);
+      handleNewConversation(mode || 'email_copy', type || 'design');
       
-      // Then create the conversation with appropriate mode
-      handleNewConversation(mode || 'email_copy', emailType || 'design');
-      
-      // Clean URL to prevent confusion
+      // Clean URL to prevent re-triggering
       const newParams = new URLSearchParams(searchParams.toString());
       newParams.delete('initialPrompt');
       newParams.delete('mode');
@@ -400,39 +387,35 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       const paramString = newParams.toString();
       router.replace(paramString ? `${pathname}?${paramString}` : pathname);
     }
-  }, [searchParams, loading, currentConversation, isCreatingEmail, pendingPrompt, router, currentUserId, pathname]);
+  }, [searchParams, loading, currentConversation, isCreatingEmail, pendingPrompt, pathname, router]);
 
-  // Trigger pending prompt - sends the message once conversation is ready with a REAL UUID (not temp ID)
+  // Trigger pending prompt
   useEffect(() => {
-    // Wait for a real conversation ID (not temp-xxx) before sending the message
-    const hasRealConversationId = currentConversation?.id && !currentConversation.id.startsWith('temp-');
-    
-    if (pendingPrompt && hasRealConversationId && !sending && !loadingMessages) {
-      console.log('[QuickStart] Triggering pending prompt:', pendingPrompt, 'for conversation:', currentConversation.id);
-      // Store prompt locally before clearing state to ensure it's sent
-      const promptToSend = pendingPrompt;
+    if (pendingPrompt && currentConversation && !sending && !loadingMessages) {
+      // IMPORTANT: If the pending prompt is for a flow, make sure we're on a flow conversation
+      // This prevents sending flow prompts to non-flow conversations due to race conditions
+      const isFlowPrompt = pendingPrompt.toLowerCase().includes('flow') || 
+                           pendingPrompt.toLowerCase().includes('automation');
+      
+      if (isFlowPrompt && !currentConversation.is_flow) {
+        // Wait - the flow conversation hasn't been set yet
+        logger.log('[PendingPrompt] Flow prompt waiting for flow conversation. Current is_flow:', currentConversation.is_flow);
+        return;
+      }
+      
+      logger.log('[PendingPrompt] Sending prompt to conversation:', currentConversation.id, 'is_flow:', currentConversation.is_flow);
+      handleSendMessage(pendingPrompt);
       setPendingPrompt(null);
-      // Small delay to ensure state is settled and conversation is fully initialized
-      setTimeout(() => {
-        handleSendMessage(promptToSend);
-      }, 50);
     }
   }, [pendingPrompt, currentConversation, sending, loadingMessages]);
 
   // Handle pending conversation selection
   useEffect(() => {
     if (pendingConversationSelection && conversations.length > 0) {
-      // Don't process if a navigation is already in progress
-      if (navigationInProgressRef.current.active || isSelectingConversationRef.current) {
-        logger.log('[PendingSelection] Skipping - navigation in progress');
-        return;
-      }
-      
       const conversation = conversations.find((c) => c?.id === pendingConversationSelection);
       if (conversation?.id) {
-        logger.log('[PendingSelection] Processing pending selection:', pendingConversationSelection);
-        setPendingConversationSelection(null);
         handleSelectConversation(pendingConversationSelection);
+        setPendingConversationSelection(null);
       }
     }
   }, [pendingConversationSelection, conversations]);
@@ -448,20 +431,22 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         description: 'New conversation',
         action: () => handleNewConversation(),
       },
-      {
-        key: 'n',
-        meta: true,
-        ctrl: true,
-        shift: true,
-        description: 'New flow',
-        action: () => {
-          handleNewConversation();
-          setConversationMode('flow');
-          setEmailType('flow');
-          // Small delay to trigger flow conversation start - pass mode directly to avoid race condition
-          setTimeout(() => handleSendMessage("I want to create an email flow", false, 'flow'), 100);
-        },
-      },
+      // TEMPORARILY DISABLED: Flow feature is being reworked
+      // {
+      //   key: 'n',
+      //   meta: true,
+      //   ctrl: true,
+      //   shift: true,
+      //   description: 'New flow',
+      //   action: async () => {
+      //     logger.log('[onNewFlow] Starting flow creation via keyboard...');
+      //     await handleNewConversation('email_copy', 'flow');
+      //     logger.log('[onNewFlow] handleNewConversation completed, setting mode and prompt');
+      //     setConversationMode('flow');
+      //     setEmailType('flow');
+      //     setPendingPrompt("I want to create an email flow");
+      //   },
+      // },
       {
         key: 'b',
         meta: true,
@@ -624,62 +609,29 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
   // Auto-create a new conversation when opening a brand if none is selected
   useEffect(() => {
+    // Check if URL already has a conversation ID - if so, don't auto-create
+    const conversationIdInUrl = searchParams.get('conversation');
+    
     // Only auto-create if:
     // 1. Page has finished loading
-    // 2. No conversation is currently selected AND no target is pending
-    // 3. We're not already in the process of creating one or selecting one
+    // 2. No conversation is currently selected
+    // 3. We're not already in the process of creating one
     // 4. User ID is available
-    // 5. No navigation is in progress
-    // 6. CRITICAL: No QuickStart initialPrompt is pending (QuickStart will create its own conversation)
-    const hasQuickStartPending = searchParams.get('initialPrompt') && !quickStartProcessedRef.current;
-    
-    // Check if we're coming from home page with flow mode
-    const modeParam = searchParams.get('mode') as ConversationMode;
-    const autoCreateParam = searchParams.get('autoCreate');
-    const isFlowAutoCreate = modeParam === 'flow' && autoCreateParam === 'true';
-    
-    const shouldAutoCreate = !loading && 
-      !currentConversation && 
-      !targetConversationIdRef.current &&
-      !isCreatingEmail && 
-      !isCreatingFlow && 
-      !isSelectingConversationRef.current &&
-      !navigationInProgressRef.current.active &&
-      !hasQuickStartPending &&  // Don't auto-create if QuickStart will handle it
-      currentUserId;
-      
-    if (shouldAutoCreate) {
+    // 5. No conversation ID in URL (we should load that one instead)
+    // 6. Not navigating to a specific conversation
+    if (!loading && !currentConversation && !isCreatingEmail && !isCreatingFlow && currentUserId && !conversationIdInUrl && !navigationInProgressRef.current.active) {
       // Small delay to ensure everything is initialized
       const timer = setTimeout(() => {
-        // Double-check conditions haven't changed during the timeout
-        // Also re-check QuickStart in case it processed during the timeout
-        const quickStartNowPending = searchParams.get('initialPrompt') && !quickStartProcessedRef.current;
-        if (!isSelectingConversationRef.current && 
-            !navigationInProgressRef.current.active && 
-            !targetConversationIdRef.current &&
-            !quickStartNowPending) {
-          // If this is a flow auto-create, set up flow conversation
-          if (isFlowAutoCreate) {
-            handleNewConversation('flow', 'flow', { isFlow: true });
-            setConversationMode('flow');
-            setEmailType('flow');
-            // Send initial message to trigger AI flow creation
-            setTimeout(() => handleSendMessage("I want to create an email flow", false, 'flow'), 200);
-            // Clean URL to prevent re-creation
-            const newParams = new URLSearchParams(searchParams.toString());
-            newParams.delete('mode');
-            newParams.delete('autoCreate');
-            const paramString = newParams.toString();
-            router.replace(paramString ? `${pathname}?${paramString}` : pathname);
-          } else {
-            handleNewConversation();
-          }
+        // Double-check URL again inside the timeout to catch race conditions
+        const stillNoUrlConversation = !searchParams.get('conversation');
+        if (stillNoUrlConversation && !navigationInProgressRef.current.active && !isSelectingConversationRef.current) {
+          handleNewConversation();
         }
       }, 100);
       
       return () => clearTimeout(timer);
     }
-  }, [loading, currentConversation, isCreatingEmail, isCreatingFlow, currentUserId, searchParams, pathname, router]);
+  }, [loading, currentConversation, isCreatingEmail, isCreatingFlow, currentUserId, searchParams]);
 
   useEffect(() => {
     if (!currentConversation?.id) {
@@ -687,17 +639,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setMessages([]);
       setDraftContent('');
       setLoadingMessages(false);
-      targetConversationIdRef.current = null;
       return;
     }
 
     // Use conversation ID to prevent stale closures
     const conversationId = currentConversation.id;
-    logger.log('[MessagesEffect] Setting up for conversation:', conversationId);
+    logger.log('[MessagesEffect] Loading messages for conversation:', conversationId);
     
-    // NOTE: We do NOT call loadMessages() here anymore
-    // handleSelectConversation already handles message loading
-    // This effect is only for draft loading and real-time subscriptions
+    // Load messages and draft
+    loadMessages();
     
     // Load draft for this conversation
     const draft = loadDraft(conversationId);
@@ -718,12 +668,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          // CRITICAL: Verify this is still the target conversation
-          if (targetConversationIdRef.current !== conversationId) {
-            logger.log('[Realtime] Ignoring INSERT for old conversation:', conversationId);
-            return;
-          }
-          
           logger.log('[Realtime] New message received:', payload.new);
           const newMessage = payload.new as Message;
           
@@ -752,12 +696,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          // CRITICAL: Verify this is still the target conversation
-          if (targetConversationIdRef.current !== conversationId) {
-            logger.log('[Realtime] Ignoring UPDATE for old conversation:', conversationId);
-            return;
-          }
-          
           logger.log('[Realtime] Message updated:', payload.new);
           const updatedMessage = payload.new as Message;
           
@@ -780,12 +718,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          // CRITICAL: Verify this is still the target conversation
-          if (targetConversationIdRef.current !== conversationId) {
-            logger.log('[Realtime] Ignoring DELETE for old conversation:', conversationId);
-            return;
-          }
-          
           logger.log('[Realtime] Message deleted:', payload.old);
           const deletedId = (payload.old as any).id;
           
@@ -839,7 +771,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
   // Detect flow outline in AI responses
   useEffect(() => {
-    // Only require is_flow flag - flow_type will be detected from the outline itself
+    // Only require is_flow to be true - flow_type can be null for legacy conversations
+    // or conversations where the user hasn't selected a specific flow type yet
     if (!currentConversation?.is_flow) {
       logger.log('[Outline Detection] Not a flow conversation');
       return;
@@ -862,8 +795,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     logger.log('[Outline Detection] Attempting to detect outline in message...');
     logger.log('[Outline Detection] Message preview:', lastMessage.content.substring(0, 300));
 
+    // Ensure flow_type is set before attempting detection
+    // (flow_type can be null for legacy conversations or before user selects a type)
+    if (!currentConversation.flow_type) {
+      logger.log('[Outline Detection] No flow_type set, skipping detection');
+      return;
+    }
+
     // Try to detect and parse outline
-    const outline = detectFlowOutline(lastMessage.content, currentConversation.flow_type || 'welcome_series');
+    const outline = detectFlowOutline(lastMessage.content, currentConversation.flow_type);
     if (outline) {
       logger.log('✅ [Outline Detection] Successfully detected flow outline:', outline);
       setPendingOutlineApproval(outline);
@@ -916,6 +856,19 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       setCurrentUserId(user.id);
 
+      // Cleanup any accumulated empty conversations on page load
+      // This runs in the background and doesn't block page load
+      // IMPORTANT: Exclude the currently viewed conversation to prevent deleting it while user is on the page
+      const currentConversationId = searchParams.get('conversation');
+      bulkCleanupEmptyConversations(brandId, currentConversationId).catch(error => {
+        // Only log non-network errors to avoid console pollution
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (!errorMessage.includes('aborted') && !errorMessage.includes('Failed to fetch')) {
+          logger.error('[Init] Background cleanup failed:', error);
+        }
+        // Don't show error to user - this is a background optimization
+      });
+
       // Get user's profile
       const { data: profile } = await supabase
         .from('profiles')
@@ -967,20 +920,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       await loadAllBrands();
       await loadConversations();
       await loadStarredEmails();
-      
-      // Cleanup any accumulated empty conversations AFTER loading is complete
-      // This runs in the background and excludes the currently selected conversation
-      // to prevent race conditions where cleanup deletes the user's active conversation
-      setTimeout(() => {
-        bulkCleanupEmptyConversations(brandId, targetConversationIdRef.current).catch(error => {
-          // Only log non-network errors to avoid console pollution
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          if (!errorMessage.includes('aborted') && !errorMessage.includes('Failed to fetch')) {
-            logger.error('[Init] Background cleanup failed:', error);
-          }
-          // Don't show error to user - this is a background optimization
-        });
-      }, 1000); // Small delay to ensure UI is fully settled
     } catch (error) {
       logger.error('Error initializing page:', error);
       toast.error('Failed to load page. Please refresh and try again.', {
@@ -1147,7 +1086,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     
     if (!conversationId) {
       logger.log('[LoadMessages] No conversation ID available');
-      setLoadingMessages(false);
+      setLoadingMessages(false); // Reset loading state to prevent stuck UI
       return;
     }
 
@@ -1158,14 +1097,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setLoadingMessages(false);
       return;
     }
-    
-    // CRITICAL: Check if this is still the target conversation we want to load
-    // Use the ref to avoid race conditions with stale state
-    if (targetConversationIdRef.current !== conversationId) {
-      logger.log('[LoadMessages] Target conversation changed, aborting load for:', conversationId, 'current target:', targetConversationIdRef.current);
-      return;
-    }
-    
     const startTime = performance.now();
     
     logger.log('[LoadMessages] Loading messages for:', conversationId);
@@ -1174,9 +1105,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Check cache first for instant loading
       const cached = getCachedMessages(conversationId);
       if (cached && cached.length > 0) {
-        // Re-check target ref (conversation might have changed during cache lookup)
-        if (targetConversationIdRef.current !== conversationId) {
-          logger.log('[LoadMessages] Conversation changed during cache load, aborting');
+        // Verify we're still on the same conversation (prevent race condition)
+        // Use ref instead of state to avoid stale closure issues with async React state updates
+        const targetId = navigationInProgressRef.current.targetConversationId;
+        if (targetId && targetId !== conversationId) {
+          logger.log('[LoadMessages] Conversation changed during cache load, aborting. Target:', targetId, 'Loading:', conversationId);
+          setLoadingMessages(false); // IMPORTANT: Reset loading state even on abort
           return;
         }
         
@@ -1199,20 +1133,22 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         return;
       }
 
-      // If not cached, ensure loading state is shown
-      setLoadingMessages(true);
+      // If not cached, loading state is already set by handleSelectConversation
+      // No need to set it again here
       
-      // Clear any pending requests for different conversations
-      requestCoalescerRef.current.clear();
+      // Use request coalescer to prevent duplicate calls
+      await requestCoalescerRef.current.execute(
+        async () => {
+          // Verify we're still on the same conversation before loading
+          // Use ref instead of state to avoid stale closure issues
+          const targetId = navigationInProgressRef.current.targetConversationId;
+          if (targetId && targetId !== conversationId) {
+            logger.log('[LoadMessages] Conversation changed before DB load, aborting. Target:', targetId, 'Loading:', conversationId);
+            setLoadingMessages(false); // IMPORTANT: Reset loading state even on abort
+            return;
+          }
       
-      // Load from database (no coalescer - we want immediate load after clearing)
-      // Re-check target ref before making the API call
-      if (targetConversationIdRef.current !== conversationId) {
-        logger.log('[LoadMessages] Conversation changed before DB load, aborting');
-        setLoadingMessages(false);
-        return;
-      }
-      
+          // Load from database
       const { data, error } = await supabase
         .from('messages')
         .select('*')
@@ -1221,11 +1157,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       if (error) throw error;
       
-      // Final check: verify this is still the target conversation before setting state
-      if (targetConversationIdRef.current !== conversationId) {
-        logger.log('[LoadMessages] Conversation changed after DB load, aborting. Loaded:', conversationId, 'Current target:', targetConversationIdRef.current);
-        return;
-      }
+          // Final check: verify we're still on the same conversation before setting state
+          // Use ref instead of state to avoid stale closure issues
+          const finalTargetId = navigationInProgressRef.current.targetConversationId;
+          if (finalTargetId && finalTargetId !== conversationId) {
+            logger.log('[LoadMessages] Conversation changed after DB load, aborting. Target:', finalTargetId, 'Loading:', conversationId);
+            setLoadingMessages(false); // IMPORTANT: Reset loading state even on abort
+            return;
+          }
       
       if (data) {
         // Deduplicate messages from database
@@ -1245,8 +1184,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         loadCommentCounts(uniqueMessages.map(m => m.id));
       }
       
-      // IMPORTANT: Always hide loading state after database load
+          // IMPORTANT: Hide loading state after database load
       setLoadingMessages(false);
+        },
+        conversationId
+      );
     } catch (error) {
       // Better error logging with details
       const errorDetails = error instanceof Error 
@@ -1256,26 +1198,21 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         : { error };
       
       logger.error('[LoadMessages] Error loading messages:', errorDetails);
-      
-      // Only show error if this is still the target conversation
-      if (targetConversationIdRef.current === conversationId) {
         toast.error('Failed to load messages');
         setLoadingMessages(false);
-      }
     }
   };
 
   const handleNewConversation = async (
     initialMode: ConversationMode = 'email_copy',
-    initialEmailType: EmailType = 'design',
-    options?: { isFlow?: boolean; flowType?: FlowType }
+    initialEmailType: EmailType = 'design'
   ) => {
     try {
       setIsCreatingEmail(true);
       
-      // CRITICAL: Mark that we're creating a new conversation to prevent URL effect from interfering
+      // CRITICAL: Set navigation flags to prevent URL effect from interfering
       isSelectingConversationRef.current = true;
-      navigationInProgressRef.current = { active: true, conversationId: null };
+      navigationInProgressRef.current = { active: true, targetConversationId: null };
       
       // Abort any ongoing AI generation before switching
       if (abortControllerRef.current) {
@@ -1294,30 +1231,30 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (!user) {
         setIsCreatingEmail(false);
         isSelectingConversationRef.current = false;
-        navigationInProgressRef.current = { active: false, conversationId: null };
+        navigationInProgressRef.current = { active: false, targetConversationId: null };
         return;
       }
 
+      // Check if this is a flow conversation
+      const isFlowConversation = initialEmailType === 'flow';
+      const conversationTitle = isFlowConversation ? 'New Flow' : 'New Conversation';
+      
       // Optimistic UI: Create temporary conversation object immediately
-      // Note: Database constraint requires flow_type to be set when is_flow is true
       const tempId = `temp-${Date.now()}`;
       const optimisticConversation: Conversation = {
         id: tempId,
         brand_id: brandId,
         user_id: user.id,
         created_by_name: currentUserName,
-        title: options?.isFlow ? 'New Flow' : 'New Conversation',
+        title: conversationTitle,
         model: selectedModel,
         conversation_type: 'email',
         mode: initialMode,
-        is_flow: options?.isFlow || false,
-        flow_type: options?.isFlow ? (options?.flowType || 'welcome_series') : null,
+        is_flow: isFlowConversation,
+        flow_type: isFlowConversation ? 'welcome_series' : undefined,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-
-      // CRITICAL: Set target conversation ref to temp ID first
-      targetConversationIdRef.current = tempId;
 
       // Add to conversations list optimistically
       setConversations(prev => [optimisticConversation, ...prev]);
@@ -1326,30 +1263,33 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setCurrentConversation(optimisticConversation);
       setConversationMode(initialMode);
       setMessages([]);
-      setLoadingMessages(false); // New conversation has no messages
       setEmailType(initialEmailType);
       setDraftContent('');
       setDetectedCampaign(null);
       setPendingOutlineApproval(null);
       setIsGeneratingFlow(false);
       setFlowGenerationProgress(0);
-      setSelectedFlowType(null);
+      setSelectedFlowType(isFlowConversation ? 'welcome_series' : null);
 
-      // Now create in database
-      // Note: Database constraint requires flow_type to be set when is_flow is true
-      // Default to 'welcome_series' when creating a flow - actual type is determined via conversation
+      // Now create in database - include is_flow and flow_type for flow conversations
+      const insertData: Record<string, unknown> = {
+        brand_id: brandId,
+        user_id: user.id,
+        created_by_name: currentUserName,
+        title: conversationTitle,
+        model: selectedModel,
+        conversation_type: 'email',
+        mode: initialMode,
+      };
+      
+      if (isFlowConversation) {
+        insertData.is_flow = true;
+        insertData.flow_type = 'welcome_series';
+      }
+      
       const { data, error } = await supabase
         .from('conversations')
-        .insert({
-          brand_id: brandId,
-          user_id: user.id,
-          created_by_name: currentUserName,
-          title: options?.isFlow ? 'New Flow' : 'New Conversation',
-          model: selectedModel,
-          conversation_type: 'email',
-          mode: initialMode,
-          ...(options?.isFlow && { is_flow: true, flow_type: options?.flowType || 'welcome_series' }),
-        })
+        .insert(insertData)
         .select()
         .single();
 
@@ -1357,17 +1297,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         // Roll back optimistic update on error
         setConversations(prev => prev.filter(c => c.id !== tempId));
         setCurrentConversation(null);
-        targetConversationIdRef.current = null;
-        lastIntentionalSelectionRef.current = null;
-        isSelectingConversationRef.current = false;
-        navigationInProgressRef.current = { active: false, conversationId: null };
         throw error;
       }
-
-      // CRITICAL: Update target ref to real ID BEFORE state updates
-      targetConversationIdRef.current = data.id;
-      lastIntentionalSelectionRef.current = data.id;
-      navigationInProgressRef.current = { active: true, conversationId: data.id };
+      
+      // Update navigation ref with the real conversation ID
+      navigationInProgressRef.current = { active: true, targetConversationId: data.id };
       
       // Replace optimistic conversation with real one
       setConversations(prev => prev.map(c => c.id === tempId ? data : c));
@@ -1376,29 +1310,21 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Update URL to reflect the new conversation
       updateConversationUrl(data.id);
       
-      logger.log('[NewConversation] Created conversation:', data.id);
-      
-      // Use requestAnimationFrame + timeout to ensure URL update has propagated
-      // before clearing the navigation flags
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          isSelectingConversationRef.current = false;
-          navigationInProgressRef.current = { active: false, conversationId: null };
-          logger.log('[NewConversation] Navigation flags cleared for:', data.id);
-        }, 50);
-      });
-      
-      // DON'T call loadConversations() here - it causes race conditions!
-      // The optimistic update already handles the UI, and real-time subscriptions
-      // will sync any changes from other users.
-      
+      await loadConversations();
       toast.success('New conversation created');
       trackEvent('conversation_created', { conversationId: data.id });
+      
+      // Clear navigation flags after everything is settled
+      setTimeout(() => {
+        isSelectingConversationRef.current = false;
+        navigationInProgressRef.current = { active: false, targetConversationId: data.id };
+      }, 200);
     } catch (error) {
       logger.error('Error creating conversation:', error instanceof Error ? error.message : String(error), error);
       toast.error('Failed to create conversation');
+      // Clear navigation flags on error
       isSelectingConversationRef.current = false;
-      navigationInProgressRef.current = { active: false, conversationId: null };
+      navigationInProgressRef.current = { active: false, targetConversationId: null };
     } finally {
       setIsCreatingEmail(false);
     }
@@ -1431,11 +1357,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       return;
     }
 
-    // Prevent selecting the same conversation twice - check both state and refs
-    // Use lastIntentionalSelectionRef for the most accurate check
-    if (lastIntentionalSelectionRef.current === conversationId && 
-        targetConversationIdRef.current === conversationId) {
-      logger.log('[SelectConversation] Already selected this conversation, skipping:', conversationId);
+    // Prevent selecting the same conversation twice
+    if (currentConversation?.id === conversationId) {
+      logger.log('[SelectConversation] Already on this conversation, skipping');
       return;
     }
 
@@ -1446,12 +1370,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       return;
     }
 
-    // CRITICAL: Set ALL refs FIRST before any state changes
-    // This prevents race conditions with URL effects and other async operations
-    targetConversationIdRef.current = conversationId;
-    lastIntentionalSelectionRef.current = conversationId;
+    // Mark that we're selecting a conversation to prevent URL effect from interfering
     isSelectingConversationRef.current = true;
-    navigationInProgressRef.current = { active: true, conversationId };
+    
+    // CRITICAL: Set target conversation ID in ref BEFORE any async operations
+    // This prevents race conditions where loadMessages checks stale React state
+    navigationInProgressRef.current = { active: true, targetConversationId: conversationId };
 
     logger.log('[SelectConversation] Switching to conversation:', conversationId);
 
@@ -1496,23 +1420,39 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     setFocusedMessageIdForComments(null);
     setHighlightedTextForComment(null);
     
-    // Start with loading state - loadMessages will populate data
+    // Check for cached messages - if available, use them immediately (no loading state)
+    const cached = getCachedMessages(conversationId);
+    const hasCachedMessages = cached && cached.length > 0;
+    
+    if (hasCachedMessages) {
+      // Use cached messages immediately for instant switch
+      setMessages(cached!);
+      setLoadingMessages(false);
+    } else {
+      // Only show loading state if we DON'T have cached messages
     setLoadingMessages(true);
+    }
     
     // Update current conversation immediately (optimistic update)
     setCurrentConversation(conversation);
     updateConversationUrl(conversationId);
+    // Use normalizeModelId to handle legacy model ID formats (e.g., 'anthropic/claude-sonnet-4.5')
     setSelectedModel(normalizeModelId(conversation.model) as AIModel);
-    setConversationMode(conversation.mode || 'planning');
     
-    // Set email type based on conversation
+    // Set conversation mode based on conversation type
+    // IMPORTANT: Flow conversations MUST be in 'flow' mode regardless of the stored mode
     if (conversation.is_flow) {
+      logger.log('[SelectConversation] Setting flow mode for is_flow=true conversation');
+      setConversationMode('flow');
       setEmailType('flow');
       setSelectedFlowType(conversation.flow_type || null);
     } else if (conversation.parent_conversation_id) {
-      // Child email in a flow - default to 'design' email type
+      // Child email in a flow - use stored mode or default to 'email_copy'
+      setConversationMode(conversation.mode || 'email_copy');
       setEmailType('design');
     } else {
+      // Regular conversation - use stored mode or default to 'planning'
+      setConversationMode(conversation.mode || 'planning');
       // Regular conversation - keep current email type or default to 'design'
       // (only reset if coming from a flow conversation)
       if (emailType === 'flow') {
@@ -1533,24 +1473,22 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
       
       trackEvent('conversation_selected', { conversationId });
+      
+      // Clear the selection flag after URL has been updated
+      setTimeout(() => {
+          isSelectingConversationRef.current = false;
+          // Keep targetConversationId set - it's needed for loadMessages checks
+          // Only clear the active flag
+          navigationInProgressRef.current.active = false;
+      }, 100);
     });
 
-    // Load messages - this will check cache first and update state appropriately
+    // CRITICAL: If no cached messages, explicitly load them
     // Pass conversationId directly to avoid stale closure issues with React state
-    await loadMessages(conversationId);
-    
-    // CRITICAL: Clear navigation flags AFTER messages are loaded
-    // Use requestAnimationFrame to ensure DOM has updated
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        // Only clear if we're still on the same conversation
-        if (targetConversationIdRef.current === conversationId) {
-          isSelectingConversationRef.current = false;
-          navigationInProgressRef.current = { active: false, conversationId: null };
-          logger.log('[SelectConversation] Navigation flags cleared for:', conversationId);
-        }
-      }, 50);
-    });
+    if (!hasCachedMessages) {
+      // No setTimeout needed - pass ID directly instead of relying on state
+      loadMessages(conversationId);
+    }
   };
   
   const handlePrefetchConversation = (conversationId: string) => {
@@ -1568,12 +1506,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (error) throw error;
 
       if (currentConversation?.id === conversationId) {
-        targetConversationIdRef.current = null;
-        lastIntentionalSelectionRef.current = null;
-        navigationInProgressRef.current = { active: false, conversationId: null };
         setCurrentConversation(null);
         setMessages([]);
-        setLoadingMessages(false);
       }
 
       await loadConversations();
@@ -1590,12 +1524,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       // If we deleted the current conversation, clear it
       if (action === 'delete' && currentConversation && conversationIds.includes(currentConversation.id)) {
-        targetConversationIdRef.current = null;
-        lastIntentionalSelectionRef.current = null;
-        navigationInProgressRef.current = { active: false, conversationId: null };
         setCurrentConversation(null);
         setMessages([]);
-        setLoadingMessages(false);
         router.push(`/brands/${brandId}/chat`);
       }
       
@@ -1665,33 +1595,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   }, [commentsSidebarCollapsed]);
 
-  // Realtime subscription for comments - instantly update when comments change
-  useEffect(() => {
-    if (!currentConversation?.id || messages.length === 0) return;
-
-    const commentsChannel = supabase
-      .channel(`comments-realtime-${currentConversation.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // Listen to INSERT, UPDATE, DELETE
-          schema: 'public',
-          table: 'conversation_comments',
-          filter: `conversation_id=eq.${currentConversation.id}`,
-        },
-        () => {
-          // Reload comments when any comment changes
-          logger.log('[Comments Realtime] Comment changed, reloading...');
-          loadCommentCounts(messages.map(m => m.id));
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(commentsChannel);
-    };
-  }, [currentConversation?.id, messages.length, loadCommentCounts, supabase]);
-
   const handleRenameConversation = async (conversationId: string, newTitle: string) => {
     try {
       const response = await fetch(`/api/conversations/${conversationId}/name`, {
@@ -1723,13 +1626,84 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   };
 
   // Handle email type change - Flow mode is now conversational
-  const handleEmailTypeChange = (type: EmailType) => {
+  // Returns true if it handled the flow creation (to skip onStartFlow callback)
+  const handleEmailTypeChange = async (type: EmailType): Promise<boolean> => {
     if (type === 'flow') {
-      // Set flow mode - the onStartFlow callback from ChatInput will handle sending initial message
-      setConversationMode('flow');
-      setEmailType('flow');
+      // When switching to flow mode, we need to create a new flow conversation
+      // This ensures is_flow=true is set in the database from the start
+      logger.log('[EmailTypeChange] Switching to flow mode, creating new flow conversation');
+      
+      // Don't let URL effect interfere - mark that we're navigating
+      navigationInProgressRef.current = { active: true, targetConversationId: null };
+      
+      try {
+        // Get user info for conversation creation
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          logger.error('[EmailTypeChange] No user found');
+          navigationInProgressRef.current = { active: false, targetConversationId: null };
+          return false;
+        }
+
+        // Create flow conversation directly in database first
+        const { data: newFlowConversation, error } = await supabase
+          .from('conversations')
+          .insert({
+            brand_id: brandId,
+            user_id: user.id,
+            created_by_name: currentUserName,
+            title: 'New Flow',
+            model: selectedModel,
+            conversation_type: 'email',
+            mode: 'email_copy',
+            is_flow: true,
+            flow_type: 'welcome_series'
+          })
+          .select()
+          .single();
+
+        if (error || !newFlowConversation) {
+          logger.error('[EmailTypeChange] Error creating flow conversation:', error);
+          toast.error('Failed to create flow conversation');
+          navigationInProgressRef.current = { active: false, targetConversationId: null };
+          return false;
+        }
+
+        logger.log('[EmailTypeChange] Created flow conversation:', newFlowConversation.id);
+
+        // Update state with the new conversation
+        // IMPORTANT: Set conversationMode to 'flow' to match is_flow: true in database
+        // This ensures UI state matches DB state immediately without needing reselection
+        setConversations(prev => [newFlowConversation, ...prev]);
+        setCurrentConversation(newFlowConversation);
+        setConversationMode('flow');
+        setEmailType('flow');
+        setMessages([]);
+        setSelectedFlowType('welcome_series');
+
+        // Update URL to new conversation
+        updateConversationUrl(newFlowConversation.id);
+        navigationInProgressRef.current = { active: true, targetConversationId: newFlowConversation.id };
+
+        await loadConversations();
+        
+        // Use pendingPrompt mechanism - the effect will wait for currentConversation.is_flow to be true
+        // This is more reliable than trying to time the state updates
+        logger.log('[EmailTypeChange] Setting pending prompt for flow, conversation:', newFlowConversation.id);
+        setPendingPrompt("I want to create an email flow");
+        
+        toast.success('Flow conversation created! Describe your automation needs.');
+        
+        return true;
+      } finally {
+        // Clear navigation lock after a delay
+        setTimeout(() => {
+          navigationInProgressRef.current = { active: false, targetConversationId: null };
+        }, 500);
+      }
     } else {
       setEmailType(type);
+      return false;
     }
   };
 
@@ -2117,30 +2091,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     const userMessage = messages[userMessageIndex];
     if (userMessage.role !== 'user') return;
 
-    const aiMessageToRegenerate = messages[messageIndex];
-    setRegeneratingMessageId(aiMessageToRegenerate.id);
+    setRegeneratingMessageId(messages[messageIndex].id);
     setSending(true);
     setAiStatus('analyzing_brand');
 
     try {
-      // If regenerating a message that's not the last one, delete all subsequent messages
-      const isLastMessage = messageIndex === messages.length - 1;
-      if (!isLastMessage) {
-        const messagesToDelete = messages.slice(messageIndex + 1);
-        if (messagesToDelete.length > 0) {
-          // Delete subsequent messages from database
-          await supabase
-            .from('messages')
-            .delete()
-            .in('id', messagesToDelete.map(m => m.id));
-          
-          // Truncate local messages array immediately
-          setMessages(prev => prev.slice(0, messageIndex + 1));
-          logger.log('[Regenerate] Truncated messages after index:', messageIndex, 'Deleted:', messagesToDelete.length);
-        }
-      }
-
-      // Get all messages up to the user message (for context)
+      // Get all messages up to the user message
       const conversationHistory = messages.slice(0, userMessageIndex + 1);
 
       // Create abort controller
@@ -2488,26 +2444,26 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   };
 
   const handleEditMessage = async (messageIndex: number, newContent: string) => {
-    if (!currentConversation || !brand) return;
-
-    const messageToEdit = messages[messageIndex];
-    if (!messageToEdit || messageToEdit.role !== 'user') {
-      toast.error('Can only edit user messages');
-      return;
-    }
-
-    // Prevent editing while sending
+    if (!currentConversation) return;
+    
+    // Prevent editing while AI is actively generating to avoid race conditions
     if (sending) {
       toast.error('Please wait for the current response to complete');
       return;
     }
 
-    setSending(true);
-    setAiStatus('analyzing_brand');
-
     try {
-      // 1. Update the message in the database
-      const { error: updateError } = await supabase
+      const messageToEdit = messages[messageIndex];
+      
+      // Validate message exists (could be undefined due to race conditions)
+      if (!messageToEdit) {
+        logger.error('[EditMessage] Message not found at index:', messageIndex);
+        toast.error('Message not found. Please try again.');
+        return;
+      }
+      
+      // Update the message in the database
+      await supabase
         .from('messages')
         .update({ 
           content: newContent,
@@ -2515,195 +2471,35 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         })
         .eq('id', messageToEdit.id);
 
-      if (updateError) {
-        throw new Error(`Failed to update message: ${updateError.message}`);
-      }
-
-      // 2. Delete all messages after this one from database
+      // Delete all messages after this one
       const messagesToDelete = messages.slice(messageIndex + 1);
       if (messagesToDelete.length > 0) {
         await supabase
           .from('messages')
           .delete()
           .in('id', messagesToDelete.map(m => m.id));
-        logger.log('[EditMessage] Deleted subsequent messages:', messagesToDelete.length);
       }
 
-      // 3. Build the conversation history for the AI (messages up to and including the edited message)
-      const editedMessage: Message = { 
-        ...messageToEdit, 
-        content: newContent, 
-        edited_at: new Date().toISOString() 
-      };
-      const conversationHistory = [
-        ...messages.slice(0, messageIndex),
-        editedMessage
-      ];
+      // Compute the truncated messages array with updated content SYNCHRONOUSLY
+      // This is needed because setMessages is async and handleSendMessage would use stale state
+      const truncatedMessages = messages.slice(0, messageIndex + 1).map((msg, idx) =>
+        idx === messageIndex 
+          ? { ...msg, content: newContent, edited_at: new Date().toISOString() }
+          : msg
+      );
 
-      // 4. Update local state immediately (truncate and update edited message)
-      setMessages(conversationHistory);
+      // Update local state
+      setMessages(truncatedMessages);
 
+      // Automatically regenerate the AI response
       toast.success('Message edited. Regenerating response...');
 
-      // 5. Create placeholder for AI response
-      const tempAiMessage: Message = {
-        id: `temp-ai-${Date.now()}`,
-        conversation_id: currentConversation.id,
-        role: 'assistant',
-        content: '',
-        created_at: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, tempAiMessage]);
-
-      // 6. Create abort controller
-      abortControllerRef.current = new AbortController();
-
-      // 7. Call AI API with the conversation history
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: conversationHistory,
-          modelId: selectedModel,
-          brandContext: brand,
-          conversationMode: conversationMode,
-          conversationId: currentConversation.id,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = 'Failed to get AI response';
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.error || errorData.details || errorMessage;
-        } catch {
-          if (errorText) {
-            errorMessage = `${errorMessage}: ${errorText}`;
-          }
-        }
-        throw new Error(errorMessage);
-      }
-
-      // 8. Read streaming response
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let rawStreamContent = '';
-      let streamingContent = '';
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          rawStreamContent += chunk;
-          
-          // Parse status markers
-          const statusMatch = chunk.match(/\[STATUS:(\w+)\]/g);
-          if (statusMatch) {
-            statusMatch.forEach((match) => {
-              const status = match.replace('[STATUS:', '').replace(']', '') as AIStatus;
-              setAiStatus(status);
-            });
-          }
-
-          // Clean control markers for streaming display
-          let cleanChunk = chunk
-            .replace(/\[STATUS:\w+\]/g, '')
-            .replace(/\[TOOL:\w+:(START|END)\]/g, '')
-            .replace(/\[THINKING:START\]/g, '')
-            .replace(/\[THINKING:END\]/g, '')
-            .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
-            .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
-            .replace(/\[REMEMBER:[^\]]+\]/g, '');
-
-          if (cleanChunk) {
-            streamingContent += cleanChunk;
-
-            // Update AI message in real-time
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === tempAiMessage.id
-                  ? { ...msg, content: streamingContent }
-                  : msg
-              )
-            );
-          }
-        }
-      }
-
-      // 9. Parse final content
-      const parsed = parseStreamedContent(rawStreamContent);
-      const finalContent = stripControlMarkers(
-        parsed.responseType === 'clarification'
-          ? parsed.clarification
-          : parsed.responseType === 'other'
-            ? parsed.otherContent
-            : parsed.emailCopy || parsed.clarification || streamingContent.trim()
-      );
-
-      const metadataPayload: Record<string, any> = {
-        responseType: parsed.responseType,
-      };
-      if (parsed.productLinks.length > 0) {
-        metadataPayload.productLinks = parsed.productLinks;
-      }
-      if (parsed.responseType === 'clarification' && parsed.clarification) {
-        metadataPayload.clarification = parsed.clarification;
-      }
-
-      // 10. Save AI message to database
-      const { data: savedAiMessage, error: aiSaveError } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: currentConversation.id,
-          role: 'assistant',
-          content: sanitizeContent(finalContent),
-          thinking: parsed.thoughtContent ? sanitizeContent(parsed.thoughtContent) : null,
-          metadata: metadataPayload,
-        })
-        .select()
-        .single();
-
-      if (aiSaveError) {
-        logger.error('[EditMessage] Failed to save AI message:', aiSaveError);
-      }
-
-      // 11. Update local state with final content and saved ID
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === tempAiMessage.id
-            ? {
-                ...msg,
-                id: savedAiMessage?.id || msg.id,
-                content: finalContent,
-                thinking: parsed.thoughtContent,
-                metadata: metadataPayload,
-              }
-            : msg
-        )
-      );
-
-      logger.log('[EditMessage] Completed successfully');
-      setAiStatus('idle');
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        toast.error('Generation stopped');
-      } else {
+      // Trigger new AI response with the correctly computed messages
+      // Pass explicit messages to avoid stale state issues
+      await handleSendMessage(newContent, true, truncatedMessages);
+    } catch (error) {
         logger.error('Error editing message:', error);
-        toast.error(error.message || 'Failed to edit message');
-      }
-      // Reset status on error
-      setAiStatus('idle');
-    } finally {
-      setSending(false);
-      setAiStatus('idle');
-      abortControllerRef.current = null;
+      toast.error('Failed to edit message');
     }
   };
 
@@ -2727,14 +2523,20 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   };
 
-  const handleSendMessage = async (content: string, skipUserMessage: boolean = false, overrideMode?: ConversationMode, attachedFiles?: File[]) => {
+  // Wrapper to handle ChatInput's (message, files?) signature
+  // This converts the files parameter to the internal skipUserMessage flag
+  // Optional explicitMessages parameter allows passing pre-computed messages (e.g., for edit scenarios)
+  const handleSendMessage = async (content: string, filesOrSkip?: File[] | boolean, explicitMessages?: Message[]) => {
+    // Determine if this is a skipUserMessage call (boolean) or a normal send with files
+    // Note: Empty arrays are truthy in JS, so we explicitly check for boolean type
+    const skipUserMessage = typeof filesOrSkip === 'boolean' ? filesOrSkip : false;
+    const files = Array.isArray(filesOrSkip) ? filesOrSkip : undefined;
+    // Use explicit messages if provided (avoids stale state issues during edits)
+    const messagesToUse = explicitMessages || messages;
     if (!currentConversation || !brand) {
       toast.error('Please create a conversation first');
       return;
     }
-    
-    // Use override mode if provided (fixes race condition when starting flow)
-    const effectiveMode = overrideMode || conversationMode;
 
     // Check if offline
     if (!isOnline) {
@@ -2776,142 +2578,62 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       // Only save user message if not editing
       if (!skipUserMessage) {
-        // Validate content before sending
-        if (!content || content.trim().length === 0) {
-          throw new Error('Message content cannot be empty');
-        }
-        
         // Get current user for attribution
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        
-        if (authError) {
-          logger.error('Auth error getting user:', authError);
-          throw new Error('Authentication error. Please try logging in again.');
-        }
-        
-        if (!user) {
-          throw new Error('You must be logged in to send messages');
-        }
-        
-        // CRITICAL: Verify conversation exists before inserting message
-        // This prevents foreign key errors when conversation was deleted by cleanup
-        let activeConversationId = currentConversation.id;
-        
-        // Skip temp conversations - they haven't been saved to DB yet
-        if (!currentConversation.id.startsWith('temp-')) {
-          const { data: conversationExists, error: convCheckError } = await supabase
-            .from('conversations')
-            .select('id')
-            .eq('id', currentConversation.id)
-            .single();
-          
-          if (convCheckError || !conversationExists) {
-            // Conversation was deleted (likely by cleanup) - re-create it
-            logger.warn('[Message] Conversation was deleted, re-creating:', currentConversation.id);
-            
-            const { data: newConv, error: createError } = await supabase
-              .from('conversations')
-              .insert({
-                brand_id: brandId,
-                user_id: user.id,
-                created_by_name: currentUserName,
-                title: currentConversation.title || 'New Conversation',
-                model: selectedModel,
-                conversation_type: 'email',
-                mode: conversationMode,
-                ...(currentConversation.is_flow && { 
-                  is_flow: true, 
-                  flow_type: currentConversation.flow_type || 'welcome_series' 
-                }),
-              })
-              .select()
-              .single();
-            
-            if (createError || !newConv) {
-              logger.error('[Message] Failed to re-create conversation:', createError);
-              throw new Error('Conversation was deleted. Please create a new conversation.');
-            }
-            
-            // Update state with new conversation
-            activeConversationId = newConv.id;
-            setCurrentConversation(newConv);
-            setConversations(prev => prev.map(c => 
-              c.id === currentConversation.id ? newConv : c
-            ));
-            updateConversationUrl(newConv.id);
-            
-            logger.log('[Message] Re-created conversation:', newConv.id);
-            toast('Conversation restored', { icon: '✨' });
-          }
-        }
-        
-        logger.log('[Message] Inserting user message:', {
-          conversationId: activeConversationId,
-          contentLength: content.length,
-          userId: user.id
-        });
+        const { data: { user } } = await supabase.auth.getUser();
         
         const { data, error: userError } = await supabase
           .from('messages')
           .insert({
-            conversation_id: activeConversationId,
+            conversation_id: currentConversation.id,
             role: 'user',
             content,
-            user_id: user.id,
+            user_id: user?.id, // Add user_id for attribution
           })
           .select()
           .single();
 
+        // Handle foreign key constraint error (conversation was deleted)
         if (userError) {
-          logger.error('Supabase insert error:', userError);
-          throw new Error(`Failed to save message: ${userError.message}`);
+          if (userError.code === '23503' || userError.message?.includes('foreign key')) {
+            logger.error('[SendMessage] Conversation no longer exists:', currentConversation.id);
+            toast.error('This conversation no longer exists. Please create a new one.');
+            // Remove temp message and reset state
+            if (tempUserMessage) {
+              setMessages((prev) => prev.filter(msg => msg.id !== tempUserMessage.id));
+            }
+            setSending(false);
+            setAiStatus('idle');
+            sidebarState.updateConversationStatus(currentConversation.id, 'idle');
+            await loadConversations();
+            return;
+          }
+          throw userError;
         }
-        
-        if (!data) {
-          logger.error('Message insert returned no data - possible RLS policy issue', {
-            conversationId: currentConversation.id,
-            userId: user.id
-          });
-          throw new Error('Failed to save message. Please check your permissions.');
-        }
-        
         userMessage = data;
-        logger.log('[Message] User message saved successfully:', { id: data.id });
         
         // Replace temp user message with real saved one
         setMessages((prev) => prev.map(msg => 
           msg.id === tempUserMessage?.id ? userMessage! : msg
         ));
       } else {
-        // Use the last user message
-        userMessage = messages.filter(m => m.role === 'user').pop();
-        logger.log('[Message] Using existing user message:', { id: userMessage?.id });
+        // Use the last user message from the provided messages array
+        // When editing, messagesToUse contains the truncated array with updated content
+        userMessage = messagesToUse.filter(m => m.role === 'user').pop();
       }
 
       if (!userMessage) {
-        logger.error('No user message found after processing', {
-          skipUserMessage,
-          messagesCount: messages.length,
-          userMessagesCount: messages.filter(m => m.role === 'user').length
-        });
-        throw new Error('No user message found. Please try sending your message again.');
+        throw new Error('No user message found');
       }
 
-      // Update conversation title if it's the first message - NON-BLOCKING
-      // PERFORMANCE: Don't wait for AI title generation - run in background
-      if (messages.length === 0) {
-        // Fire and forget - generate title in background
-        generateTitle(content, currentConversation.id).then(title => {
-          setCurrentConversation(prev => prev ? { ...prev, title } : null);
-          loadConversations();
-        }).catch(err => logger.error('Background title generation failed:', err));
-        
-        // Set temporary title immediately for UX
-        const tempTitle = content.split(' ').slice(0, 5).join(' ') + '...';
-        setCurrentConversation({ ...currentConversation, title: tempTitle });
+      // Update conversation title if it's the first message
+      if (messagesToUse.length === 0) {
+        const title = await generateTitle(content, currentConversation.id);
+        // Update optimistically
+        setCurrentConversation({ ...currentConversation, title });
+        await loadConversations();
       } else {
-        // Update conversation timestamp - also non-blocking
-        supabase
+        // Update conversation timestamp
+        await supabase
           .from('conversations')
           .update({ updated_at: new Date().toISOString() })
           .eq('id', currentConversation.id);
@@ -2929,28 +2651,51 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         return;
       }
 
-      // Process attached files for AI
-      let attachments: { type: 'image' | 'file'; name: string; data: string; mimeType: string }[] = [];
-      if (attachedFiles && attachedFiles.length > 0) {
+      // Process file attachments if any
+      let attachments: { type: 'image' | 'file'; name: string; mimeType: string; data: string }[] = [];
+      if (files && files.length > 0) {
         attachments = await Promise.all(
-          attachedFiles.map(async (file) => {
+          files.map(async (file) => {
             const buffer = await file.arrayBuffer();
             const base64 = btoa(
               new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
             );
+            const isImage = file.type.startsWith('image/');
             return {
-              type: file.type.startsWith('image/') ? 'image' as const : 'file' as const,
+              type: isImage ? 'image' as const : 'file' as const,
               name: file.name,
-              data: base64,
               mimeType: file.type,
+              data: base64,
             };
           })
         );
-        logger.log('[Message] Processing attachments:', { count: attachments.length, types: attachments.map(a => a.type) });
+        logger.log('[SendMessage] Processed attachments:', attachments.length);
       }
 
-      // Create placeholder for AI message BEFORE API call
-      // This ensures users see the thinking UI immediately instead of "Preparing response"
+      // Determine if this is a flow request
+      // Check both database flag AND UI state to handle race conditions
+      const isFlowConversation = currentConversation.is_flow || 
+                                  conversationMode === 'flow' || 
+                                  emailType === 'flow';
+      const flowTypeToUse = currentConversation.flow_type || 
+                            (isFlowConversation ? 'welcome_series' : null);
+      
+      logger.log('[SendMessage] Flow detection:', {
+        'currentConversation.is_flow': currentConversation.is_flow,
+        'conversationMode': conversationMode,
+        'emailType': emailType,
+        'isFlowConversation': isFlowConversation,
+        'flowTypeToUse': flowTypeToUse,
+        'flowOutline?.approved': flowOutline?.approved
+      });
+
+      // Call AI API with streaming
+      // When skipUserMessage=true (edit case), userMessage is already in messagesToUse, don't duplicate
+      // When skipUserMessage=false (new message), userMessage was just created and needs to be appended
+      const messagesForApi = skipUserMessage ? messagesToUse : [...messagesToUse, userMessage];
+      
+      // Create AI placeholder IMMEDIATELY before fetch for instant user feedback
+      // This shows the thinking indicator right away instead of waiting for network response
       aiMessageId = crypto.randomUUID();
       const aiMessage: Message = {
         id: aiMessageId,
@@ -2959,35 +2704,33 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         content: '',
         created_at: new Date().toISOString(),
       };
-
       setMessages((prev) => [...prev, aiMessage]);
+      logger.log('[Stream] Created AI placeholder before fetch:', aiMessageId);
       
-      // Scroll to show the AI message placeholder
+      // Scroll to show the activity indicator at the top
       setTimeout(() => {
         requestAnimationFrame(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
       }, 100);
-
-      logger.log('[Stream] Created AI placeholder:', aiMessageId);
-
-      // Call AI API with streaming
+      
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: [...messages, userMessage],
+          messages: messagesForApi,
           modelId: selectedModel,
           brandContext: brand,
-          conversationMode: effectiveMode,
+          conversationMode: conversationMode,
           conversationId: currentConversation.id,
-          emailType: effectiveMode === 'flow' ? 'flow' : emailType,
+          emailType: emailType,
           // Add flow parameters if in flow mode
-          isFlowMode: currentConversation.is_flow && !flowOutline?.approved,
-          flowType: currentConversation.flow_type,
-          // Include file attachments for AI to review
+          // Check both database flag AND UI state to handle race conditions
+          isFlowMode: isFlowConversation && !flowOutline?.approved,
+          flowType: flowTypeToUse,
+          // Include file attachments
           attachments: attachments.length > 0 ? attachments : undefined,
         }),
         signal: abortControllerRef.current.signal,
@@ -3184,11 +2927,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             }
             
             // Create checkpoint periodically for recovery
+            // IMPORTANT: Save parsed content (not raw JSON) to avoid displaying JSON on recovery
             if (checkpointCounter % CHECKPOINT_INTERVAL === 0) {
               saveCheckpoint({
                 conversationId: currentConversation.id,
                 messageId: aiMessageId,
-                content: rawStreamContent,
+                content: allStreamedContent,
+                thinking: allThinkingContent,
+                rawContent: rawStreamContent, // Keep raw for debugging only
                 timestamp: Date.now(),
                 isComplete: false,
               });
@@ -3267,11 +3013,29 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           if (recovered) {
             logger.log('[Recovery] Recovered stream from checkpoint:', recovered.content.length, 'chars');
             
-            // Re-parse the recovered content to separate fields
-            rawStreamContent = recovered.content;
-            const parsed = parseStreamedContent(rawStreamContent);
+            // Check if this is the new checkpoint format (has thinking field)
+            // or old format (content might be raw JSON that needs parsing)
+            let recoveredContent = recovered.content;
+            let recoveredThinking = recovered.thinking || '';
+            
+            // Detect if content is raw JSON format (old checkpoint format bug)
+            // Raw JSON looks like: {"type":"text","content":"..."}\n{"type":"thinking","content":"..."}
+            if (recoveredContent.includes('{"type":') && !recoveredThinking) {
+              logger.log('[Recovery] Detected old checkpoint with raw JSON format, parsing...');
+              const { parseRawJsonStreamContent } = await import('@/lib/stream-recovery');
+              const parsedJson = parseRawJsonStreamContent(recoveredContent);
+              recoveredContent = parsedJson.content;
+              recoveredThinking = parsedJson.thinking;
+              logger.log('[Recovery] Parsed raw JSON:', {
+                contentLength: recoveredContent.length,
+                thinkingLength: recoveredThinking.length,
+              });
+            }
+            
+            // Parse the recovered content to separate fields (email copy, clarification, etc.)
+            const parsed = parseStreamedContent(recoveredContent);
 
-              finalThinking = parsed.thoughtContent;
+            finalThinking = recoveredThinking || parsed.thoughtContent;
             finalEmailCopy = parsed.emailCopy;
             finalClarification = parsed.clarification;
             finalResponseType = parsed.responseType;
@@ -3281,7 +3045,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             finalContent =
               finalResponseType === 'clarification'
                 ? (finalClarification || '')
-                : (finalEmailCopy || parsed.clarification || '');
+                : (finalEmailCopy || parsed.clarification || recoveredContent);
             finalContent = stripControlMarkers(finalContent);
 
             logger.log('[Recovery] Parsed recovered content:', {
@@ -3570,6 +3334,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         <FlowGuidanceCard
           flowType={(currentConversation.flow_type ?? selectedFlowType) || null}
           onPromptSelect={handleFlowPromptSelect}
+          isLoading={sending}
         />
       )
       : null;
@@ -3627,13 +3392,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               allBrands={allBrands}
               onBrandSwitch={(newBrandId) => router.push(`/brands/${newBrandId}/chat`)}
               onNavigateHome={() => router.push('/')}
-              onNewFlow={() => {
-                handleNewConversation('flow', 'flow', { isFlow: true });
-                setConversationMode('flow');
-                setEmailType('flow');
-                // Send initial message to trigger AI flow creation
-                setTimeout(() => handleSendMessage("I want to create an email flow", false, 'flow'), 200);
-              }}
+              // TEMPORARILY DISABLED: Flow feature is being reworked
+              // onNewFlow={async () => {
+              //   logger.log('[onNewFlow] Starting flow creation...');
+              //   await handleNewConversation('email_copy', 'flow');
+              //   logger.log('[onNewFlow] handleNewConversation completed, setting mode and prompt');
+              //   setConversationMode('flow');
+              //   setEmailType('flow');
+              //   setPendingPrompt("I want to create an email flow");
+              // }}
+              onNewFlow={undefined}
               isCreatingEmail={isCreatingEmail}
               isCreatingFlow={isCreatingFlow}
             />
@@ -3669,13 +3437,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             allBrands={allBrands}
             onBrandSwitch={(newBrandId) => router.push(`/brands/${newBrandId}/chat`)}
             onNavigateHome={() => router.push('/')}
-            onNewFlow={() => {
-              handleNewConversation('flow', 'flow', { isFlow: true });
-              setConversationMode('flow');
-              setEmailType('flow');
-              // Send initial message to trigger AI flow creation
-              setTimeout(() => handleSendMessage("I want to create an email flow", false, 'flow'), 200);
-            }}
+            // TEMPORARILY DISABLED: Flow feature is being reworked
+            // onNewFlow={async () => {
+            //   logger.log('[onNewFlow] Starting flow creation...');
+            //   await handleNewConversation('email_copy', 'flow');
+            //   logger.log('[onNewFlow] handleNewConversation completed, setting mode and prompt');
+            //   setConversationMode('flow');
+            //   setEmailType('flow');
+            //   setPendingPrompt("I want to create an email flow");
+            // }}
+            onNewFlow={undefined}
             isCreatingEmail={isCreatingEmail}
             isCreatingFlow={isCreatingFlow}
           />
@@ -3703,7 +3474,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           onToggleCommentsSidebar={() => setCommentsSidebarCollapsed(!commentsSidebarCollapsed)}
           onToggleConversationMenu={() => setShowConversationMenu(!showConversationMenu)}
           onShowShareModal={() => setShowShareModal(true)}
-          onShowMemorySettings={() => setShowMemorySettings(true)}
           onNavigateToParent={() => {
             const parent = conversations.find(c => c.id === currentConversation?.parent_conversation_id);
             if (parent) {
@@ -3819,14 +3589,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   mode={conversationMode}
                   isStarred={message.role === 'assistant' ? starredEmailContents.has(message.content) : false}
                   onRegenerate={
-                    // Allow regeneration on any AI message (not just the last one)
-                    message.role === 'assistant' && !sending
+                    message.role === 'assistant' && index === messages.length - 1 && !sending
                       ? () => handleRegenerateMessage(index)
                       : undefined
                   }
                   onRegenerateSection={handleRegenerateSection}
                   onEdit={
-                    // Allow editing any user message
                     message.role === 'user' && !sending
                       ? (newContent) => handleEditMessage(index, newContent)
                       : undefined
@@ -3854,10 +3622,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                       loadCommentCounts(messages.map(m => m.id));
                     }
                   }}
-                  onReferenceInChat={(selectedText) => {
-                    // Set quoted text to show in chat input UI
-                    setQuotedText(selectedText);
-                  }}
+                  onReferenceInChat={(text) => setQuotedText(text)}
                 />
               ))}
               
@@ -3964,10 +3729,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         {/* Input */}
         {currentConversation && (
           <ChatInput
-            onSend={(message: string, files?: File[]) => {
-              // Pass files through to handleSendMessage for AI processing
-              handleSendMessage(message, false, undefined, files);
-            }}
+            onSend={handleSendMessage}
             onStop={handleStopGeneration}
             disabled={sending}
             isGenerating={sending}
@@ -3982,9 +3744,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             onEmailTypeChange={handleEmailTypeChange}
             hasMessages={messages.length > 0}
             autoFocus={messages.length === 0}
-            onStartFlow={() => handleSendMessage("I want to create an email flow", false, 'flow')}
-            quotedText={quotedText || undefined}
-            onClearQuote={() => setQuotedText(null)}
+            onStartFlow={() => {
+              // Note: This callback is now mostly unused for flow type selection
+              // handleEmailTypeChange handles flow creation and sends the initial message
+              // This is only called if somehow the flow is already created
+              if (currentConversation?.is_flow) {
+                handleSendMessage("I want to create an email flow", false);
+              }
+            }}
+            quotedText={quotedText}
+            onClearQuote={() => setQuotedText('')}
           />
         )}
 
@@ -3997,16 +3766,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           <span className="text-sm font-medium">You're offline</span>
         </div>
       )}
-
-        {/* Memory Settings Modal */}
-        {showMemorySettings && currentConversation && (
-          <SectionErrorBoundary sectionName="memory settings">
-            <MemorySettings
-              conversationId={currentConversation.id}
-              onClose={() => setShowMemorySettings(false)}
-            />
-          </SectionErrorBoundary>
-        )}
 
         {/* Share Modal */}
         {showShareModal && currentConversation && (
@@ -4063,8 +3822,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   highlightedText={highlightedTextForComment}
                   onHighlightedTextUsed={() => setHighlightedTextForComment(null)}
                   onSendToChat={(text) => {
-                    // Use the visual quote UI instead of plain text
-                    setQuotedText(text);
+                    setDraftContent(prev => prev ? `${prev}\n\n${text}` : text);
+                    // Clear any existing quoted text to prevent duplication
+                    setQuotedText('');
                   }}
                 />
               </Suspense>

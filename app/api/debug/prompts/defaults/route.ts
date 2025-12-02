@@ -1,14 +1,16 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
-import { STANDARD_EMAIL_SYSTEM_PROMPT, STANDARD_EMAIL_USER_PROMPT } from '@/lib/prompts/standard-email.prompt';
+import { DESIGN_EMAIL_V2_SYSTEM_PROMPT, DESIGN_EMAIL_V2_USER_PROMPT } from '@/lib/prompts/design-email-v2.prompt';
 import { LETTER_EMAIL_PROMPT } from '@/lib/prompts/letter-email.prompt';
-import { FLOW_EMAIL_PROMPT_DESIGN, FLOW_EMAIL_PROMPT_LETTER } from '@/lib/prompts/flow-email.prompt';
 
 /**
  * GET /api/debug/prompts/defaults
  * 
  * Returns the built-in default prompts for reference.
  * Users can copy these as starting points for custom prompts.
+ * 
+ * NOTE: Design emails now use Design V2 as the SINGLE source of truth
+ * across all contexts (chat, flows, etc.)
  */
 export async function GET() {
   const supabase = await createClient();
@@ -20,10 +22,11 @@ export async function GET() {
 
   try {
     // Return the default prompts organized by type
+    // UNIFIED: All design emails (including flow emails) now use Design V2 prompt
     const defaults = {
       design_email: {
-        system: STANDARD_EMAIL_SYSTEM_PROMPT,
-        user: STANDARD_EMAIL_USER_PROMPT,
+        system: DESIGN_EMAIL_V2_SYSTEM_PROMPT,
+        user: DESIGN_EMAIL_V2_USER_PROMPT,
       },
       letter_email: {
         // Letter email uses a combined prompt
@@ -31,9 +34,9 @@ export async function GET() {
         user: LETTER_EMAIL_PROMPT,
       },
       flow_email: {
-        // Flow emails have design and letter variants
-        system: '',
-        user: FLOW_EMAIL_PROMPT_DESIGN,
+        // Flow design emails now use the same Design V2 prompt (single source of truth)
+        system: DESIGN_EMAIL_V2_SYSTEM_PROMPT,
+        user: DESIGN_EMAIL_V2_USER_PROMPT,
       },
     };
 
@@ -43,4 +46,5 @@ export async function GET() {
     return NextResponse.json({ error: error.message || 'Failed to fetch defaults' }, { status: 500 });
   }
 }
+
 

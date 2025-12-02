@@ -5,7 +5,8 @@ import { useState, useEffect, memo, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { AIReasoning } from './chat/AIReasoning';
 import InlineCommentBox from './InlineCommentBox';
-import { ChatMessageUser, ChatMessageActions, ProductLinksSection, FlowUIRenderer, EmailVersionRenderer, StructuredEmailRenderer, isStructuredEmailCopy } from './chat';
+import { ChatMessageUser, ChatMessageActions, ProductLinksSection, EmailVersionRenderer, StructuredEmailRenderer, isStructuredEmailCopy } from './chat';
+// Note: FlowUIRenderer temporarily removed - needs reconnection when flow feature is re-enabled
 import SubjectLineGeneratorInline from './SubjectLineGeneratorInline';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
@@ -828,19 +829,10 @@ const ChatMessage = memo(function ChatMessage({
                   
                   {/* Content area */}
                   <div className={`${messageContent.includes('```') && !hasFlowContent && !hasVersionedContent && !hasStructuredEmailContent ? 'px-6 sm:px-8 py-6' : 'py-1'}`}>
-                    {/* Render Flow UI for flow mode with markers */}
-                    {hasFlowContent ? (
-                      <div className="px-4 sm:px-6 py-4">
-                        <FlowUIRenderer
-                          content={messageContent}
-                          onSuggestionClick={onFlowSuggestionClick}
-                          onApprove={onFlowApprove}
-                          onModify={onFlowModify}
-                          isGenerating={isGeneratingFlow}
-                          approvalState={flowApprovalState}
-                        />
-                      </div>
-                    ) : hasVersionedContent ? (
+                    {/* NOTE: FlowUIRenderer temporarily disabled - component interface was refactored
+                        and needs to be reconnected when flow feature is re-enabled.
+                        The component now expects flowOutline: FlowOutline instead of content string. */}
+                    {hasVersionedContent ? (
                       /* Render Email Version UI for versioned email content (version_a, version_b, version_c) */
                       <div className="py-4">
                         <EmailVersionRenderer

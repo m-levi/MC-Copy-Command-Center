@@ -1,15 +1,15 @@
 'use client';
 
-import { useState, useRef, KeyboardEvent, useEffect, useCallback, DragEvent } from 'react';
+import { useState, useRef, KeyboardEvent, useEffect, useCallback, DragEvent, forwardRef, useImperativeHandle } from 'react';
 import { QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
 import { ConversationMode, EmailType, AIModel } from '@/types';
 import { AI_MODELS } from '@/lib/ai-models';
 import { SpeechButton } from './chat/SpeechButton';
-import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, SparklesIcon, Upload, Quote } from 'lucide-react';
+import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, Upload, Quote, ChevronDown, Pencil, Lightbulb, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface ChatInputProps {
-  onSend: (message: string, files?: File[]) => void;
+  onSend: (message: string, files?: File[]) => void | Promise<void>;
   onStop?: () => void;
   disabled?: boolean;
   isGenerating?: boolean;
@@ -21,7 +21,8 @@ interface ChatInputProps {
   selectedModel?: string;
   onModelChange?: (model: string) => void;
   emailType?: EmailType;
-  onEmailTypeChange?: (type: EmailType) => void;
+  // Async callback that returns true if flow creation was handled (to skip onStartFlow)
+  onEmailTypeChange?: (type: EmailType) => void | Promise<boolean>;
   hasMessages?: boolean;
   autoFocus?: boolean;
   // Flow-specific callback - called when user selects Flow to start the conversation
@@ -31,7 +32,13 @@ interface ChatInputProps {
   onClearQuote?: () => void;
 }
 
-export default function ChatInput({ 
+// Expose methods to parent components via ref
+export interface ChatInputHandle {
+  addFiles: (files: File[]) => void;
+  focus: () => void;
+}
+
+const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ 
   onSend, 
   onStop, 
   disabled, 
@@ -50,14 +57,17 @@ export default function ChatInput({
   onStartFlow,
   quotedText,
   onClearQuote,
-}: ChatInputProps) {
+}, ref) {
   const [message, setMessage] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState<string[]>([]);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [showModePicker, setShowModePicker] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showEmailTypePicker, setShowEmailTypePicker] = useState(false);
+  const [selectedModeIndex, setSelectedModeIndex] = useState(0);
+  const [selectedModelIndex, setSelectedModelIndex] = useState(0);
   const [selectedEmailTypeIndex, setSelectedEmailTypeIndex] = useState(0);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [interimVoiceText, setInterimVoiceText] = useState('');
@@ -66,11 +76,22 @@ export default function ChatInput({
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const modePickerRef = useRef<HTMLDivElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const emailTypePickerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const onDraftChangeRef = useRef(onDraftChange);
   const justSentRef = useRef(false);
+
+  // Expose addFiles method to parent components via ref
+  useImperativeHandle(ref, () => ({
+    addFiles: (newFiles: File[]) => {
+      setFiles(prev => [...prev, ...newFiles]);
+    },
+    focus: () => {
+      textareaRef.current?.focus();
+    },
+  }), []);
 
   const slashCommands = [
     { command: '/shorten', label: 'Make it shorter', icon: '📏' },
@@ -84,24 +105,32 @@ export default function ChatInput({
   // Use the first 4 primary models from the centralized AI_MODELS list
   const models = AI_MODELS.slice(0, 4);
 
-  const emailTypes = [
-    { id: 'design' as const, name: 'Design Email', description: 'Full structured marketing email', icon: LayoutTemplate },
-    { id: 'letter' as const, name: 'Letter Email', description: 'Short personal letter', icon: Mail },
-    { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation sequence', icon: GitMerge },
+  const modes = [
+    { id: 'planning' as const, name: 'Plan', description: 'Explore ideas & strategy', icon: Lightbulb },
+    { id: 'email_copy' as const, name: 'Write', description: 'Generate email copy', icon: Pencil },
   ];
 
-  const availableEmailTypes = emailTypes.filter(type => {
-    if (hasMessages && type.id === 'flow' && emailType !== 'flow') return false;
-    return true;
-  });
+  const emailTypes = [
+    { id: 'design' as const, name: 'Design', description: 'Full structured marketing email', icon: LayoutTemplate },
+    { id: 'letter' as const, name: 'Letter', description: 'Short personal letter', icon: Mail },
+    // TEMPORARILY HIDDEN: Flow feature is being reworked
+    // { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation', icon: GitMerge },
+  ];
+
+  // Note: Flow filtering is temporarily removed since flow type is hidden
+  // When flow is re-enabled, add back: if (hasMessages && type.id === 'flow' && emailType !== 'flow') return false;
+  const availableEmailTypes = emailTypes;
+
+  const getModeName = (modeId: string) => {
+    return modes.find(m => m.id === modeId)?.name || 'Write';
+  };
 
   const getModelName = (modelId: string) => {
     return models.find(m => m.id === modelId)?.name || 'Sonnet 4.5';
   };
 
   const getEmailTypeName = (type: string) => {
-    if (type === 'flow') return 'Flow';
-    return emailTypes.find(t => t.id === type)?.name || 'Design Email';
+    return emailTypes.find(t => t.id === type)?.name || 'Design';
   };
 
   useEffect(() => {
@@ -116,6 +145,19 @@ export default function ChatInput({
       textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
   }, [draftContent]);
+
+  // Close mode picker on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modePickerRef.current && !modePickerRef.current.contains(event.target as Node)) {
+        setShowModePicker(false);
+      }
+    };
+    if (showModePicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showModePicker]);
 
   // Close model picker on outside click
   useEffect(() => {
@@ -142,6 +184,106 @@ export default function ChatInput({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showEmailTypePicker]);
+
+  // Keyboard navigation for dropdowns
+  useEffect(() => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      // Mode picker keyboard nav
+      if (showModePicker) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedModeIndex(prev => {
+            if (e.key === 'ArrowDown') return prev < modes.length - 1 ? prev + 1 : 0;
+            return prev > 0 ? prev - 1 : modes.length - 1;
+          });
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const selected = modes[selectedModeIndex];
+          if (selected) {
+            onModeChange?.(selected.id);
+            setShowModePicker(false);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setShowModePicker(false);
+        }
+        return;
+      }
+      
+      // Model picker keyboard nav
+      if (showModelPicker) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedModelIndex(prev => {
+            if (e.key === 'ArrowDown') return prev < models.length - 1 ? prev + 1 : 0;
+            return prev > 0 ? prev - 1 : models.length - 1;
+          });
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const selected = models[selectedModelIndex];
+          if (selected) {
+            onModelChange?.(selected.id);
+            setShowModelPicker(false);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setShowModelPicker(false);
+        }
+        return;
+      }
+      
+      // Email type picker keyboard nav
+      if (showEmailTypePicker) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedEmailTypeIndex(prev => {
+            if (e.key === 'ArrowDown') return prev < availableEmailTypes.length - 1 ? prev + 1 : 0;
+            return prev > 0 ? prev - 1 : availableEmailTypes.length - 1;
+          });
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const selected = availableEmailTypes[selectedEmailTypeIndex];
+          if (selected) {
+            // Note: Flow-specific handling temporarily removed since flow type is hidden
+            // When flow is re-enabled, add back onStartFlow logic
+            onEmailTypeChange?.(selected.id);
+            setShowEmailTypePicker(false);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setShowEmailTypePicker(false);
+        }
+        return;
+      }
+    };
+
+    if (showModePicker || showModelPicker || showEmailTypePicker) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [showModePicker, showModelPicker, showEmailTypePicker, selectedModeIndex, selectedModelIndex, selectedEmailTypeIndex, modes, models, availableEmailTypes, onModeChange, onModelChange, onEmailTypeChange, onStartFlow]);
+
+  // Reset selected index when opening dropdowns
+  useEffect(() => {
+    if (showModePicker) {
+      const currentIndex = modes.findIndex(m => m.id === mode);
+      setSelectedModeIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+  }, [showModePicker, mode, modes]);
+
+  useEffect(() => {
+    if (showModelPicker) {
+      const currentIndex = models.findIndex(m => m.id === selectedModel);
+      setSelectedModelIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+  }, [showModelPicker, selectedModel, models]);
+
+  useEffect(() => {
+    if (showEmailTypePicker) {
+      const currentIndex = availableEmailTypes.findIndex(t => t.id === emailType);
+      setSelectedEmailTypeIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+  }, [showEmailTypePicker, emailType, availableEmailTypes]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -454,8 +596,8 @@ export default function ChatInput({
           </div>
           
           {/* Bottom Controls Bar */}
-          <div className="flex items-center justify-between px-3 sm:px-5 pb-3">
-            {/* Left: Attachments & Mode */}
+          <div className="flex items-center justify-between px-3 sm:px-4 pb-3">
+            {/* Left: Attachments & Options Pill */}
             <div className="flex items-center gap-2">
               <input 
                 type="file" 
@@ -466,155 +608,210 @@ export default function ChatInput({
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+                className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-md cursor-pointer"
                 title="Attach files"
               >
                 <PaperclipIcon className="w-4 h-4" />
               </button>
 
-              <div className="h-4 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
-
-              <div className="flex items-center bg-gray-100 dark:bg-gray-800/50 p-1 rounded-lg">
-                <button
-                  onClick={() => onModeChange?.('planning')}
-                  disabled={hasMessages}
-                  className={`
-                    px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200
-                    ${mode === 'planning'
-                      ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                      : hasMessages
-                      ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                    }
-                  `}
-                >
-                  Plan
-                </button>
-                <button
-                  onClick={() => onModeChange?.('email_copy')}
-                  disabled={hasMessages}
-                  className={`
-                    px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200
-                    ${mode === 'email_copy'
-                      ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                      : hasMessages
-                      ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                    }
-                  `}
-                >
-                  Write
-                </button>
-              </div>
-              
-              {/* Model Selector */}
-              {models.length > 1 && (
-                <div className="relative block" ref={modelPickerRef}>
+              {/* Options Pill Container */}
+              <div className="flex items-center bg-gray-50 dark:bg-gray-800/60 rounded-full px-1 py-0.5 border border-gray-100 dark:border-gray-700/50">
+                {/* Mode Dropdown (Plan/Write) */}
+                <div className="relative" ref={modePickerRef}>
                   <button
-                    onClick={() => setShowModelPicker(!showModelPicker)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    onClick={() => !hasMessages && setShowModePicker(!showModePicker)}
+                    disabled={hasMessages}
+                    className={cn(
+                      "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium select-none",
+                      hasMessages
+                        ? "text-gray-400 dark:text-gray-500 cursor-not-allowed"
+                        : "cursor-pointer",
+                      !hasMessages && showModePicker
+                        ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                        : !hasMessages && "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    )}
                   >
-                    <SparklesIcon className="w-3 h-3 text-blue-500" />
-                    <span className="hidden sm:inline">{getModelName(selectedModel)}</span>
+                    <span>{getModeName(mode)}</span>
+                    <ChevronDown className={cn("w-3 h-3", showModePicker && "rotate-180")} />
                   </button>
                   
-                  {showModelPicker && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden min-w-[140px] z-50 py-1 animate-in fade-in zoom-in-95 duration-100">
-                      {models.map((model) => (
+                  {showModePicker && (
+                    <div 
+                      className="absolute bottom-full left-0 mb-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg min-w-[90px] z-50 p-1 outline-none animate-in fade-in zoom-in-95 duration-75 origin-bottom-left"
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setSelectedModeIndex(prev => prev < modes.length - 1 ? prev + 1 : 0);
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setSelectedModeIndex(prev => prev > 0 ? prev - 1 : modes.length - 1);
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault();
+                          onModeChange?.(modes[selectedModeIndex].id);
+                          setShowModePicker(false);
+                        } else if (e.key === 'Escape') {
+                          setShowModePicker(false);
+                        }
+                      }}
+                      tabIndex={0}
+                      ref={(el) => el?.focus()}
+                    >
+                      {modes.map((m, index) => (
                         <button
-                          key={model.id}
+                          key={m.id}
                           onClick={() => {
-                            onModelChange?.(model.id);
-                            setShowModelPicker(false);
+                            onModeChange?.(m.id);
+                            setShowModePicker(false);
                           }}
-                          className={`
-                            w-full px-3 py-2 text-left text-xs font-medium transition-colors
-                            ${selectedModel === model.id
-                              ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                            }
-                          `}
-                        >
-                          {model.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Email Type Selector */}
-              {mode === 'email_copy' && (
-                <div className="relative block" ref={emailTypePickerRef}>
-                  <button
-                    onClick={() => setShowEmailTypePicker(!showEmailTypePicker)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    {(() => {
-                      const activeType = emailTypes.find(t => t.id === emailType);
-                      const Icon = activeType?.icon || LayoutTemplate;
-                      return <Icon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />;
-                    })()}
-                    <span className="hidden sm:inline">{getEmailTypeName(emailType)}</span>
-                  </button>
-                  
-                  {showEmailTypePicker && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[280px] z-50 py-1.5 animate-in fade-in zoom-in-95 duration-100">
-                      {availableEmailTypes.map((type, index) => (
-                        <button
-                          key={type.id}
-                          onClick={() => {
-                            onEmailTypeChange?.(type.id);
-                            setShowEmailTypePicker(false);
-                            // When Flow is selected, trigger the flow conversation start
-                            if (type.id === 'flow' && onStartFlow) {
-                              // Small delay to allow mode change to propagate
-                              setTimeout(() => onStartFlow(), 50);
-                            }
-                          }}
-                          onMouseEnter={() => setSelectedEmailTypeIndex(index)}
-                          className={`
-                            w-full px-3 py-2.5 text-left transition-all flex items-start gap-3 group
-                            ${index === selectedEmailTypeIndex
-                              ? 'bg-blue-50 dark:bg-blue-900/20' 
-                              : ''
-                            }
-                          `}
-                        >
-                          <div className={`mt-0.5 p-1.5 rounded-md transition-colors ${
-                            index === selectedEmailTypeIndex || emailType === type.id
-                              ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' 
-                              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
-                          }`}>
-                            <type.icon className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1">
-                            <div className={`text-sm font-medium ${
-                              emailType === type.id 
-                                ? 'text-blue-700 dark:text-blue-300' 
-                                : 'text-gray-900 dark:text-gray-100'
-                            }`}>
-                              {type.name}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
-                              {type.description}
-                            </div>
-                          </div>
-                          {emailType === type.id && (
-                            <div className="mt-2 w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 flex-shrink-0" />
+                          onMouseEnter={() => setSelectedModeIndex(index)}
+                          className={cn(
+                            "w-full px-2.5 py-1.5 text-left text-[11px] font-medium rounded-md cursor-pointer select-none",
+                            index === selectedModeIndex 
+                              ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" 
+                              : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
                           )}
+                        >
+                          {m.name}
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
-              )}
+
+                <span className="text-gray-300 dark:text-gray-600 text-[8px] mx-0.5">•</span>
+                
+                {/* Model Dropdown */}
+                {models.length > 1 && (
+                  <>
+                    <div className="relative" ref={modelPickerRef}>
+                      <button
+                        onClick={() => setShowModelPicker(!showModelPicker)}
+                        className={cn(
+                          "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium cursor-pointer select-none",
+                          showModelPicker
+                            ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                            : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        )}
+                      >
+                        <span>{getModelName(selectedModel)}</span>
+                        <ChevronDown className={cn("w-3 h-3", showModelPicker && "rotate-180")} />
+                      </button>
+                      
+                      {showModelPicker && (
+                        <div 
+                          className="absolute bottom-full left-0 mb-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg min-w-[120px] z-50 p-1 outline-none animate-in fade-in zoom-in-95 duration-75 origin-bottom-left"
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setSelectedModelIndex(prev => prev < models.length - 1 ? prev + 1 : 0);
+                            } else if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setSelectedModelIndex(prev => prev > 0 ? prev - 1 : models.length - 1);
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault();
+                              onModelChange?.(models[selectedModelIndex].id);
+                              setShowModelPicker(false);
+                            } else if (e.key === 'Escape') {
+                              setShowModelPicker(false);
+                            }
+                          }}
+                          tabIndex={0}
+                          ref={(el) => el?.focus()}
+                        >
+                          {models.map((model, index) => (
+                            <button
+                              key={model.id}
+                              onClick={() => {
+                                onModelChange?.(model.id);
+                                setShowModelPicker(false);
+                              }}
+                              onMouseEnter={() => setSelectedModelIndex(index)}
+                              className={cn(
+                                "w-full px-2.5 py-1.5 text-left text-[11px] font-medium rounded-md cursor-pointer select-none",
+                                index === selectedModelIndex 
+                                  ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" 
+                                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                              )}
+                            >
+                              {model.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-gray-300 dark:text-gray-600 text-[8px] mx-0.5">•</span>
+                  </>
+                )}
+
+                {/* Email Type Dropdown */}
+                {mode === 'email_copy' && (
+                  <div className="relative" ref={emailTypePickerRef}>
+                    <button
+                      onClick={() => setShowEmailTypePicker(!showEmailTypePicker)}
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium cursor-pointer select-none",
+                        showEmailTypePicker
+                          ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                          : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      )}
+                    >
+                      <span>{getEmailTypeName(emailType)}</span>
+                      <ChevronDown className={cn("w-3 h-3", showEmailTypePicker && "rotate-180")} />
+                    </button>
+                    
+                    {showEmailTypePicker && (
+                      <div 
+                        className="absolute bottom-full left-0 mb-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg min-w-[90px] z-50 p-1 outline-none animate-in fade-in zoom-in-95 duration-75 origin-bottom-left"
+                        onKeyDown={async (e) => {
+                          if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            setSelectedEmailTypeIndex(prev => prev < availableEmailTypes.length - 1 ? prev + 1 : 0);
+                          } else if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            setSelectedEmailTypeIndex(prev => prev > 0 ? prev - 1 : availableEmailTypes.length - 1);
+                          } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const selected = availableEmailTypes[selectedEmailTypeIndex];
+                            // Note: Flow-specific handling temporarily removed since flow type is hidden
+                            onEmailTypeChange?.(selected.id);
+                            setShowEmailTypePicker(false);
+                          } else if (e.key === 'Escape') {
+                            setShowEmailTypePicker(false);
+                          }
+                        }}
+                        tabIndex={0}
+                        ref={(el) => el?.focus()}
+                      >
+                        {availableEmailTypes.map((type, index) => (
+                          <button
+                            key={type.id}
+                            onClick={() => {
+                              // Note: Flow-specific handling temporarily removed since flow type is hidden
+                              onEmailTypeChange?.(type.id);
+                              setShowEmailTypePicker(false);
+                            }}
+                            onMouseEnter={() => setSelectedEmailTypeIndex(index)}
+                            className={cn(
+                              "w-full px-2.5 py-1.5 text-left text-[11px] font-medium rounded-md cursor-pointer select-none",
+                              index === selectedEmailTypeIndex 
+                                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" 
+                                : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                            )}
+                          >
+                            {type.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Right: Voice & Send */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               {lastSavedTime && !isGenerating && message.length > 0 && (
-                <span className="text-[10px] text-muted-foreground hidden sm:inline mr-2">
+                <span className="text-[10px] text-gray-400 hidden sm:inline mr-1">
                   Saved {lastSavedTime}
                 </span>
               )}
@@ -640,25 +837,26 @@ export default function ChatInput({
                 isGenerating && onStop ? (
                   <button
                     onClick={onStop}
-                    className="flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 rounded-full transition-colors"
+                    className="flex items-center justify-center w-7 h-7 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer"
                     title="Stop generating"
                   >
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                      <rect x="6" y="6" width="12" height="12" />
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
                     </svg>
                   </button>
                 ) : (
                   <button
                     onClick={handleSend}
-                    disabled={(!message.trim() && files.length === 0) || disabled}
-                    className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
-                      (!message.trim() && files.length === 0) || disabled
-                        ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                        : 'text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/20'
-                    }`}
+                    disabled={(!message.trim() && files.length === 0 && !quotedText) || disabled}
+                    className={cn(
+                      "flex items-center justify-center w-7 h-7 rounded-full",
+                      (!message.trim() && files.length === 0 && !quotedText) || disabled
+                        ? "text-gray-300 dark:text-gray-600 cursor-not-allowed"
+                        : "text-white bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 cursor-pointer"
+                    )}
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75" />
                     </svg>
                   </button>
                 )
@@ -669,4 +867,6 @@ export default function ChatInput({
       </div>
     </div>
   );
-}
+});
+
+export default ChatInput;

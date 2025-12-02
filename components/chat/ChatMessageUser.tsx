@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, memo } from 'react';
-import { Message, Profile } from '@/types';
+import { Message, Profile, MessageAttachment } from '@/types';
 import MessageEditor from '../MessageEditor';
 import toast from 'react-hot-toast';
+import { FileTextIcon, ImageIcon, FileIcon } from 'lucide-react';
 
 interface ChatMessageUserProps {
   message: Message;
@@ -18,10 +19,30 @@ const ChatMessageUserBase = function ChatMessageUser({
   const [copied, setCopied] = useState(false);
   
   const messageContent = message.content ?? '';
+  const attachments = message.metadata?.attachments || [];
   const formattedTimestamp = new Date(message.created_at).toLocaleTimeString([], { 
     hour: '2-digit', 
     minute: '2-digit' 
   });
+
+  // Get icon for attachment type
+  const getAttachmentIcon = (attachment: MessageAttachment) => {
+    if (attachment.type === 'image') {
+      return <ImageIcon className="w-3.5 h-3.5" />;
+    }
+    if (attachment.mimeType === 'application/pdf') {
+      return <FileTextIcon className="w-3.5 h-3.5" />;
+    }
+    return <FileIcon className="w-3.5 h-3.5" />;
+  };
+
+  // Format file size
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   const getInitials = (email: string, fullName?: string) => {
     if (fullName) return fullName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
@@ -63,6 +84,22 @@ const ChatMessageUserBase = function ChatMessageUser({
         )}
         
         <div className="bg-blue-600 dark:bg-blue-700 text-white rounded-2xl rounded-tr-sm px-5 py-3.5 transition-all shadow-sm">
+          {/* Attachment indicators */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2.5 pb-2.5 border-b border-blue-500/30">
+              {attachments.map((attachment, index) => (
+                <div 
+                  key={index}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-500/40 rounded-lg text-xs font-medium"
+                  title={`${attachment.name}${attachment.size ? ` (${formatFileSize(attachment.size)})` : ''}`}
+                >
+                  {getAttachmentIcon(attachment)}
+                  <span className="max-w-[120px] truncate">{attachment.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          
           {isEditing ? (
             <MessageEditor
               initialContent={messageContent}

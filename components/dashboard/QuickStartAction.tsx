@@ -28,13 +28,6 @@ export default function QuickStartAction({ brands }: QuickStartActionProps) {
   const modePickerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  const suggestions = [
-    "Black Friday Sale Announcement",
-    "Welcome Series Email #1",
-    "Product Launch Teaser",
-    "Winback Campaign"
-  ];
-
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
@@ -98,13 +91,6 @@ export default function QuickStartAction({ brands }: QuickStartActionProps) {
     }
   };
 
-  const handleSuggestionClick = (suggestion: string) => {
-    setPrompt(suggestion);
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
-  };
-
   const getModeLabel = (m: WritingMode) => {
     switch (m) {
       case 'email_design': return 'Design Email';
@@ -153,19 +139,6 @@ export default function QuickStartAction({ brands }: QuickStartActionProps) {
           style={{ border: 'none', outline: 'none', boxShadow: 'none' }}
         />
         
-        {!prompt && !interimVoiceText && (
-          <div className="flex flex-wrap gap-2 mt-4 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {suggestions.map((suggestion) => (
-              <button
-                key={suggestion}
-                onClick={() => handleSuggestionClick(suggestion)}
-                className="px-3 py-1.5 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 text-xs text-gray-600 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600 transition-colors"
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Bottom Controls Bar */}

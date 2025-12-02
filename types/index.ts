@@ -153,6 +153,14 @@ export interface ProductLink {
   image_url?: string;
 }
 
+// Attachment info stored with messages
+export interface MessageAttachment {
+  name: string;
+  type: 'image' | 'file';
+  mimeType: string;
+  size?: number;
+}
+
 export interface MessageMetadata {
   sections?: EmailSection[];
   hasEmailStructure?: boolean;
@@ -161,6 +169,7 @@ export interface MessageMetadata {
   productLinks?: ProductLink[]; // Products mentioned in the message
   responseType?: 'email_copy' | 'clarification' | 'other';
   clarification?: string;
+  attachments?: MessageAttachment[]; // Files attached to this message
 }
 
 export interface Message {

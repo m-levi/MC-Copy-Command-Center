@@ -26,3 +26,7 @@ DROP TABLE IF EXISTS brand_memories;
 
 -- Done! Brand memories are now managed by Supermemory.
 
+
+
+
+

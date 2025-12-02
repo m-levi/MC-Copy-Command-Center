@@ -12,7 +12,6 @@
 import type OpenAI from 'openai';
 import type Anthropic from '@anthropic-ai/sdk';
 import { Message } from '@/types';
-import { parseMemoryInstructions, saveMemory } from '@/lib/conversation-memory-store';
 import { extractProductMentions, constructProductUrl } from '@/lib/web-search';
 import { smartExtractProductLinks, extractURLsFromSearchContext, convertToProductLinks } from '@/lib/url-extractor';
 import { cleanWithLogging } from '@/lib/content-cleaner';
@@ -505,36 +504,6 @@ async function extractProductLinks(
   }
 }
 
-/**
- * Handle memory instruction saving
- */
-async function saveMemoryInstructions(
-  conversationId: string,
-  content: string
-): Promise<void> {
-  try {
-    const instructions = parseMemoryInstructions(content);
-    if (instructions.length === 0) return;
-    
-    logger.log(`[Memory] Found ${instructions.length} instructions`);
-    
-    for (const instruction of instructions) {
-      try {
-        await saveMemory(
-          conversationId,
-          instruction.key,
-          instruction.value,
-          instruction.category
-        );
-        logger.log(`[Memory] Saved: ${instruction.key} = ${instruction.value}`);
-      } catch (error) {
-        logger.error('[Memory] Error saving:', error);
-      }
-    }
-  } catch (error) {
-    logger.error('[Memory] Error processing instructions:', error);
-  }
-}
 
 /**
  * Unified stream handler - works for both OpenAI and Anthropic
@@ -788,11 +757,6 @@ export async function handleUnifiedStream(options: StreamOptions): Promise<Respo
           webSearchContent: webSearchContent.length,
           totalChunks: chunkCount
         });
-        
-        // Save memory instructions
-        if (conversationId && fullResponse) {
-          await saveMemoryInstructions(conversationId, fullResponse);
-        }
         
         // Extract and send product links (ONLY real URLs, no fake construction)
         // Include thinking content and web search content for better URL extraction

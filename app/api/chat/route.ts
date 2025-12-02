@@ -3,14 +3,6 @@ import { gateway, getToolsForModel, getProviderOptionsWithWebSearch, MODELS } fr
 import { getModelById, normalizeModelId } from '@/lib/ai-models';
 import { Message, FlowType } from '@/types';
 import { extractConversationContext } from '@/lib/conversation-memory';
-import { 
-  loadMemories, 
-  buildMemoryContext, 
-  formatMemoryForPrompt,
-  parseMemoryInstructions,
-  saveMemory,
-} from '@/lib/conversation-memory-store';
-import { loadMemoryContext as loadClaudeMemoryContext } from '@/lib/claude-memory-tool';
 import { buildFlowOutlinePrompt, buildConversationalFlowPrompt } from '@/lib/flow-prompts';
 import { buildSystemPrompt, buildBrandInfo, buildContextInfo } from '@/lib/chat-prompts';
 import { buildDesignEmailV2Prompt } from '@/lib/prompts/design-email-v2.prompt';
@@ -61,41 +53,17 @@ export async function POST(req: Request) {
     const supabase = createEdgeClient();
 
     // PERFORMANCE: Run ALL async operations in parallel
-    // This includes: user auth, memory loading, and debug prompts
-    // NOTE: RAG removed for performance - was adding 200-500ms latency
+    // This includes: user auth and debug prompts
+    // NOTE: Memory is now handled by Supermemory (external service)
     const effectiveEmailType = emailType || 'design';
     const promptType = determinePromptType(effectiveEmailType as 'design' | 'letter', isFlowMode);
     
     const [
       userResult,
-      memories, 
-      claudeMemoryContext,
       debugPromptResult
     ] = await Promise.all([
-      // User authentication (needed for debug prompts and queue mode)
+      // User authentication (needed for debug prompts, queue mode, and Supermemory)
       supabase.auth.getUser(),
-      
-      // Conversation memories (only if conversation exists)
-      (async () => {
-        if (!conversationId) return [];
-        try {
-          return await loadMemories(conversationId);
-        } catch (error) {
-          logger.error('[Memory] Failed to load:', error);
-          return [];
-        }
-      })(),
-      
-      // Claude memory context (only if conversation exists)
-      (async () => {
-        if (!conversationId) return '';
-        try {
-          return await loadClaudeMemoryContext(conversationId);
-        } catch (error) {
-          logger.error('[Claude Memory] Failed to load:', error);
-          return '';
-        }
-      })(),
       
       // Debug prompts - uses optimized single-query function
       getActiveDebugPromptFast(supabase, promptType),
@@ -103,12 +71,6 @@ export async function POST(req: Request) {
     
     // Extract user from result
     const user = userResult.data?.user;
-
-    // Build memory context
-    const isClaudeModel = modelId.startsWith('anthropic/');
-    const memoryPrompt = isClaudeModel 
-      ? claudeMemoryContext 
-      : formatMemoryForPrompt(buildMemoryContext(memories));
 
     // Build system prompt with brand context, RAG, and memory
     let systemPrompt: string;
@@ -166,7 +128,6 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
           regenerateSection,
           conversationContext,
           conversationMode,
-          memoryContext: memoryPrompt,
           emailType
         });
         processedMessages = messages;
@@ -176,7 +137,6 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         regenerateSection,
         conversationContext,
         conversationMode,
-        memoryContext: memoryPrompt,
         emailType
       });
     }
@@ -208,7 +168,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
           // Context placeholders
           .replace(/{{RAG_CONTEXT}}/g, '') // RAG disabled for performance
           .replace(/{{CONTEXT_INFO}}/g, contextInfo)
-          .replace(/{{MEMORY_CONTEXT}}/g, memoryPrompt)
+          .replace(/{{MEMORY_CONTEXT}}/g, '') // Memory now handled by Supermemory
           .replace(/{{WEBSITE_URL}}/g, websiteUrl || '')
           // User input placeholders
           .replace(/{{COPY_BRIEF}}/g, copyBrief || 'No copy brief provided.')
@@ -289,34 +249,69 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
     }
 
     // Format messages for AI SDK, including attachments for the last user message
+    // Supports: images (type: 'image'), PDFs/documents (type: 'file'), and text (type: 'text')
     const formattedMessages: CoreMessage[] = processedMessages.map((msg: Message, index: number) => {
       const isLastUserMessage = msg.role === 'user' && index === processedMessages.length - 1;
       
       // If this is the last user message and we have attachments, format as multi-modal
       if (isLastUserMessage && attachments && attachments.length > 0) {
-        const contentParts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string; mimeType?: string }> = [];
+        // AI SDK UserContent supports: TextPart | ImagePart | FilePart
+        // Note: AI SDK uses 'mediaType' not 'mimeType' for IANA media types
+        const contentParts: Array<
+          | { type: 'text'; text: string }
+          | { type: 'image'; image: string; mediaType?: string }
+          | { type: 'file'; data: string; mediaType: string; filename?: string }
+        > = [];
         
-        // Add text content
-        if (msg.content) {
-          contentParts.push({ type: 'text', text: msg.content });
-        }
+        // Add text content first (required - AI needs some text context)
+        const textContent = msg.content?.trim() || 'Please analyze the attached file(s).';
+        contentParts.push({ type: 'text', text: textContent });
         
-        // Add image attachments
+        // Add attachments based on their type
         for (const attachment of attachments) {
+          // Validate attachment has required fields
+          if (!attachment.data || !attachment.mimeType) {
+            logger.warn('[Chat API] Skipping invalid attachment:', { 
+              name: attachment.name,
+              hasData: !!attachment.data,
+              hasMimeType: !!attachment.mimeType 
+            });
+            continue;
+          }
+          
+          // Convert raw base64 to data URL format for AI SDK compatibility
+          const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`;
+          
           if (attachment.type === 'image') {
+            // Images use 'image' part type with data URL
             contentParts.push({
               type: 'image',
-              image: attachment.data, // base64 data
-              mimeType: attachment.mimeType,
+              image: dataUrl,
+              mediaType: attachment.mimeType,
+            });
+            logger.log('[Chat API] Added image attachment:', { 
+              name: attachment.name, 
+              mediaType: attachment.mimeType,
+              dataLength: attachment.data?.length || 0 
             });
           } else {
-            // For non-image files, include as text context
+            // PDFs, text files, Word docs, etc. use 'file' part type
+            // The AI SDK and models (Claude, GPT-4o, Gemini) can read these directly
             contentParts.push({
-              type: 'text',
-              text: `\n[Attached file: ${attachment.name}]\n`,
+              type: 'file',
+              data: dataUrl,
+              mediaType: attachment.mimeType,
+              filename: attachment.name,
+            });
+            logger.log('[Chat API] Added file attachment:', { 
+              name: attachment.name, 
+              mediaType: attachment.mimeType,
+              dataLength: attachment.data?.length || 0 
             });
           }
         }
+        
+        logger.log('[Chat API] Final content parts count:', contentParts.length);
         
         return {
           role: msg.role as 'user' | 'assistant',
@@ -355,19 +350,33 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
     logger.log(`[Chat API] Messages count: ${formattedMessages.length}`);
     logger.log(`[Chat API] Web search enabled: ${model.provider === 'anthropic' ? 'via tool' : 'via provider options'}`);
     logger.log(`[Chat API] Supermemory enabled: ${isSupermemoryConfigured() && brandContext?.id && user?.id}`);
+    
+    // Log attachment details for debugging
+    if (attachments && attachments.length > 0) {
+      logger.log('[Chat API] Attachments being sent:', attachments.map((a: { type: string; name: string; mimeType: string }) => ({
+        type: a.type,
+        name: a.name,
+        mimeType: a.mimeType,
+      })));
+    }
 
     // Use Vercel AI SDK streamText with AI Gateway
-    const result = await streamText({
-      model: aiModel,
-      system: systemPrompt,
-      messages: formattedMessages,
-      tools,
-      maxRetries: 2,
-      // Extended thinking/reasoning + web search for all supported providers
-      providerOptions: getProviderOptionsWithWebSearch(modelId, 10000, websiteUrl),
-    });
-
-    logger.log('[Chat API] streamText result received');
+    let result;
+    try {
+      result = await streamText({
+        model: aiModel,
+        system: systemPrompt,
+        messages: formattedMessages,
+        tools,
+        maxRetries: 2,
+        // Extended thinking/reasoning + web search for all supported providers
+        providerOptions: getProviderOptionsWithWebSearch(modelId, 10000, websiteUrl),
+      });
+      logger.log('[Chat API] streamText result received successfully');
+    } catch (streamError) {
+      logger.error('[Chat API] streamText failed:', streamError);
+      throw streamError;
+    }
 
     // Create custom streaming response with our JSON format for client compatibility
     const encoder = new TextEncoder();
@@ -461,23 +470,6 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
               }
             } catch (error) {
               logger.error('[Chat API] Product link extraction error:', error);
-            }
-          }
-
-          // Save memory instructions
-          if (conversationId && fullText) {
-            try {
-              const instructions = parseMemoryInstructions(fullText);
-              for (const instruction of instructions) {
-                await saveMemory(
-                  conversationId,
-                  instruction.key,
-                  instruction.value,
-                  instruction.category
-                );
-              }
-            } catch (error) {
-              logger.error('[Chat API] Memory save error:', error);
             }
           }
 

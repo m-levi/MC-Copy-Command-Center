@@ -16,7 +16,6 @@ interface ChatHeaderProps {
   onToggleCommentsSidebar: () => void;
   onToggleConversationMenu: () => void;
   onShowShareModal: () => void;
-  onShowMemorySettings: () => void;
   onNavigateToParent: () => void;
   onMobileMenuOpen: () => void;
 }
@@ -30,7 +29,6 @@ export default function ChatHeader({
   onToggleCommentsSidebar,
   onToggleConversationMenu,
   onShowShareModal,
-  onShowMemorySettings,
   onNavigateToParent,
   onMobileMenuOpen,
 }: ChatHeaderProps) {
@@ -118,7 +116,6 @@ export default function ChatHeader({
           <ConversationOptionsMenu
             conversationId={currentConversation.id}
             conversationTitle={currentConversation.title || 'Conversation'}
-            onShowMemory={onShowMemorySettings}
             onToggleTheme={() => {
               const themeButton = document.querySelector('[data-theme-toggle]');
               if (themeButton instanceof HTMLElement) {
@@ -132,6 +129,9 @@ export default function ChatHeader({
     </div>
   );
 }
+
+
+
 
 
 

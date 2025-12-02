@@ -1,9 +1,20 @@
 /**
  * FLOW EMAIL PROMPT
  * 
- * For generating individual emails within a multi-email automation flow
+ * @deprecated These prompts are no longer used. Design V2 is now the single source of truth.
+ * 
+ * IMPORTANT: As of the prompt unification update, all design emails (including flow emails)
+ * now use `design-email-v2.prompt.ts` as the single source of truth. Letter-style emails
+ * use `letter-email.prompt.ts`.
+ * 
+ * These prompts are kept for backwards compatibility but should not be used in new code.
+ * If you need to customize prompts, do so via the Debug Prompt Lab which now uses the V2 prompts.
  */
 
+/**
+ * @deprecated Use DESIGN_EMAIL_V2_SYSTEM_PROMPT and DESIGN_EMAIL_V2_USER_PROMPT instead
+ * This prompt is no longer used in production code.
+ */
 export const FLOW_EMAIL_PROMPT_DESIGN = `⚠️ CRITICAL INSTRUCTION - READ FIRST ⚠️
 
 Your response has TWO COMPLETELY SEPARATE parts:
@@ -113,6 +124,10 @@ CRITICAL: Follow this structure EXACTLY. Do not deviate from this format.
 
 Write the email now.`;
 
+/**
+ * @deprecated Use LETTER_EMAIL_PROMPT from letter-email.prompt.ts instead
+ * This prompt is no longer used in production code.
+ */
 export const FLOW_EMAIL_PROMPT_LETTER = `⚠️ CRITICAL INSTRUCTION - READ FIRST ⚠️
 
 Your response has TWO COMPLETELY SEPARATE parts:

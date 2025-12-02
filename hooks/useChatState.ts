@@ -57,7 +57,6 @@ export interface ChatState {
   
   // UI state
   loading: boolean;
-  showMemorySettings: boolean;
   isMobileSidebarOpen: boolean;
   showConversationMenu: boolean;
   showShareModal: boolean;
@@ -107,7 +106,6 @@ export interface ChatStateSetters {
   setCurrentFilter: (filter: FilterType) => void;
   setSelectedPersonId: (id: string | null) => void;
   setLoading: (loading: boolean) => void;
-  setShowMemorySettings: (show: boolean) => void;
   setIsMobileSidebarOpen: (open: boolean) => void;
   setShowConversationMenu: (show: boolean) => void;
   setShowShareModal: (show: boolean) => void;
@@ -181,7 +179,6 @@ export function useChatState(): [ChatState, ChatStateSetters, ChatRefs] {
   
   // UI state
   const [loading, setLoading] = useState(true);
-  const [showMemorySettings, setShowMemorySettings] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -245,7 +242,6 @@ export function useChatState(): [ChatState, ChatStateSetters, ChatRefs] {
     currentFilter,
     selectedPersonId,
     loading,
-    showMemorySettings,
     isMobileSidebarOpen,
     showConversationMenu,
     showShareModal,
@@ -291,7 +287,6 @@ export function useChatState(): [ChatState, ChatStateSetters, ChatRefs] {
     setCurrentFilter,
     setSelectedPersonId,
     setLoading,
-    setShowMemorySettings,
     setIsMobileSidebarOpen,
     setShowConversationMenu,
     setShowShareModal,

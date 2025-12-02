@@ -1,15 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateText } from 'ai';
-import { gateway, MODELS, FLOW_EMAIL_OPTIONS } from '@/lib/ai-providers';
 import { createClient } from '@/lib/supabase/server';
 import { FlowOutlineData, AIModel, FlowOutlineEmail } from '@/types';
 import { buildFlowEmailPrompt } from '@/lib/flow-prompts';
 import { getActiveDebugPrompt } from '@/lib/debug-prompts';
 import { generateMermaidChart } from '@/lib/mermaid-generator';
-import { logger } from '@/lib/logger';
+import Anthropic from '@anthropic-ai/sdk';
 
-export const runtime = 'edge';
+// Note: Cannot use edge runtime because Anthropic SDK requires Node.js APIs
+// export const runtime = 'edge';
 export const maxDuration = 300; // 5 minutes for generating multiple emails
+
+// Flow email generation currently only supports Anthropic models
+// If OpenAI/Google support is needed, this will need to be refactored
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  // Add beta headers for web search and memory tools
+  defaultHeaders: {
+    'anthropic-beta': 'web-search-2025-03-05,context-management-2025-06-27'
+  }
+});
+
+/**
+ * Check if a model is supported for flow generation
+ * Currently only Anthropic models are supported for flow email generation
+ */
+function isModelSupportedForFlows(aiGatewayModelId: string | undefined): boolean {
+  if (!aiGatewayModelId) return true; // Will use default
+  return aiGatewayModelId.startsWith('anthropic/') || aiGatewayModelId.startsWith('claude');
+}
+
+/**
+ * Map AI Gateway model IDs to Anthropic SDK model names
+ * AI Gateway format: 'anthropic/claude-sonnet-4.5'
+ * Anthropic SDK format: 'claude-sonnet-4-20250514'
+ * 
+ * @throws Error if a non-Anthropic model is requested
+ */
+function getAnthropicModelName(aiGatewayModelId: string | undefined): string {
+  const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+  
+  if (!aiGatewayModelId) return DEFAULT_MODEL;
+  
+  // Map AI Gateway model IDs to Anthropic SDK model names
+  const modelMap: Record<string, string> = {
+    'anthropic/claude-sonnet-4.5': 'claude-sonnet-4-20250514',
+    'anthropic/claude-opus-4.5': 'claude-opus-4-20250514',
+    'anthropic/claude-haiku-4.5': 'claude-haiku-4-20250514',
+    // Legacy model IDs
+    'claude-3-5-sonnet-20241022': 'claude-sonnet-4-20250514',
+    'claude-3-opus-20240229': 'claude-opus-4-20250514',
+    'claude-3-haiku-20240307': 'claude-haiku-4-20250514',
+  };
+  
+  // If it's a known AI Gateway model, map it
+  if (modelMap[aiGatewayModelId]) {
+    return modelMap[aiGatewayModelId];
+  }
+  
+  // If it's not an Anthropic model (e.g., OpenAI, Google), throw an error
+  // Don't silently fall back - user should know their model choice isn't supported
+  if (!aiGatewayModelId.startsWith('anthropic/') && !aiGatewayModelId.startsWith('claude')) {
+    throw new Error(
+      `Flow email generation currently only supports Anthropic (Claude) models. ` +
+      `The selected model "${aiGatewayModelId}" is not supported. ` +
+      `Please select a Claude model (e.g., Claude Sonnet, Claude Opus) for flow generation.`
+    );
+  }
+  
+  // If it's already in Anthropic SDK format, use it directly
+  if (aiGatewayModelId.startsWith('claude-')) {
+    return aiGatewayModelId;
+  }
+  
+  // Try to extract model name from AI Gateway format
+  const modelName = aiGatewayModelId.replace('anthropic/', '');
+  console.log(`[Flow Generator] Using extracted model name: ${modelName}`);
+  return modelName;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,6 +95,19 @@ export async function POST(request: NextRequest) {
       outline: FlowOutlineData;
       model: AIModel;
     };
+
+    // Validate model is supported for flow generation (only Anthropic/Claude models)
+    if (!isModelSupportedForFlows(model)) {
+      return NextResponse.json(
+        { 
+          error: 'Unsupported model for flow generation',
+          message: `Flow email generation currently only supports Anthropic (Claude) models. ` +
+                   `The selected model "${model}" is not supported. ` +
+                   `Please switch to a Claude model (e.g., Claude Sonnet, Claude Opus) to generate flow emails.`
+        }, 
+        { status: 400 }
+      );
+    }
 
     // Validate conversation exists and user has access
     const { data: conversation, error: convError } = await supabase
@@ -60,7 +140,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (outlineError) {
-      logger.error('Error creating flow outline:', outlineError);
+      console.error('Error creating flow outline:', outlineError);
       return NextResponse.json({ error: 'Failed to save outline' }, { status: 500 });
     }
 
@@ -73,18 +153,21 @@ Copywriting Style Guide: ${conversation.brands.copywriting_style_guide || 'N/A'}
 ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}` : ''}
 `.trim();
 
-    // Generate each email with progress updates
+    // Generate each email sequentially with progress updates
     const results = [];
     const startTime = Date.now();
     
-    logger.log(`[Flow Generator] Starting generation of ${outline.emails.length} emails`);
+    console.log(`[Flow Generator] Starting generation of ${outline.emails.length} emails for flow: ${outline.flowName}`);
     
     const generateEmail = async (emailOutline: FlowOutlineEmail) => {
       const emailStartTime = Date.now();
 
       try {
-        logger.log(`[Flow Generator] Email ${emailOutline.sequence}/${outline.emails.length}: ${emailOutline.title}`);
+        console.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} START =====`);
+        console.log(`[Flow Generator] Title: ${emailOutline.title}`);
+        console.log(`[Flow Generator] Purpose: ${emailOutline.purpose}`);
 
+        console.log(`[Flow Generator] Creating child conversation...`);
         const { data: childConversation, error: childError } = await supabase
           .from('conversations')
           .insert({
@@ -102,52 +185,91 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           .select()
           .single();
 
-        if (childError || !childConversation) {
-          throw new Error(`Failed to create child conversation: ${childError?.message}`);
+        if (childError) {
+          console.error(`[Flow Generator] Database error creating conversation:`, childError);
+          throw new Error(`Failed to create child conversation: ${childError.message}`);
         }
+
+        if (!childConversation) {
+          throw new Error(`Failed to create child conversation: No data returned`);
+        }
+
+        console.log(`[Flow Generator] Child conversation created: ${childConversation.id}`);
+        console.log(`[Flow Generator] Generating email content using ${emailOutline.emailType} format...`);
 
         let prompt = buildFlowEmailPrompt(
           emailOutline,
           outline,
           brandInfo,
-          '',
+          '', // RAG context - can be added later
           emailOutline.emailType
         );
 
         // DEBUG MODE: Check for custom prompt overrides
+        // For flows, we use single 'flow_email' type
         const customPrompt = await getActiveDebugPrompt(supabase, user.id, 'flow_email');
 
-        if (customPrompt?.user_prompt) {
-          logger.log(`[Flow Generator] Using custom prompt: ${customPrompt.name}`);
-          prompt = customPrompt.user_prompt
-            .replace(/{{EMAIL_SEQUENCE}}/g, emailOutline.sequence.toString())
-            .replace(/{{TOTAL_EMAILS}}/g, outline.emails.length.toString())
-            .replace(/{{FLOW_NAME}}/g, outline.flowName)
-            .replace(/{{BRAND_INFO}}/g, brandInfo)
-            .replace(/{{RAG_CONTEXT}}/g, '')
-            .replace(/{{FLOW_GOAL}}/g, outline.goal)
-            .replace(/{{TARGET_AUDIENCE}}/g, outline.targetAudience)
-            .replace(/{{EMAIL_TITLE}}/g, emailOutline.title)
-            .replace(/{{EMAIL_TIMING}}/g, emailOutline.timing)
-            .replace(/{{EMAIL_PURPOSE}}/g, emailOutline.purpose)
-            .replace(/{{KEY_POINTS}}/g, emailOutline.keyPoints.map(p => `- ${p}`).join('\n'))
-            .replace(/{{PRIMARY_CTA}}/g, emailOutline.cta)
-            .replace(/{{SUBJECT_LINE_GUIDANCE}}/g, emailOutline.emailType === 'design' ? 'Compelling subject line' : 'Personal subject line')
-            .replace(/{{POSITION_GUIDANCE}}/g, `This is email ${emailOutline.sequence} of ${outline.emails.length}`);
+        if (customPrompt && customPrompt.user_prompt) {
+           console.log(`[Flow Generator] 🐛 DEBUG MODE: Overriding flow prompt with custom prompt: ${customPrompt.name}`);
+           // Replace variables manually since we are bypassing the builder
+           prompt = customPrompt.user_prompt
+              .replace(/{{EMAIL_SEQUENCE}}/g, emailOutline.sequence.toString())
+              .replace(/{{TOTAL_EMAILS}}/g, outline.emails.length.toString())
+              .replace(/{{FLOW_NAME}}/g, outline.flowName)
+              .replace(/{{BRAND_INFO}}/g, brandInfo)
+              .replace(/{{RAG_CONTEXT}}/g, '') // RAG context empty for now
+              .replace(/{{FLOW_GOAL}}/g, outline.goal)
+              .replace(/{{TARGET_AUDIENCE}}/g, outline.targetAudience)
+              .replace(/{{EMAIL_TITLE}}/g, emailOutline.title)
+              .replace(/{{EMAIL_TIMING}}/g, emailOutline.timing)
+              .replace(/{{EMAIL_PURPOSE}}/g, emailOutline.purpose)
+              .replace(/{{KEY_POINTS}}/g, emailOutline.keyPoints.map(p => `- ${p}`).join('\n'))
+              .replace(/{{PRIMARY_CTA}}/g, emailOutline.cta)
+              // Specific variables
+              .replace(/{{SUBJECT_LINE_GUIDANCE}}/g, emailOutline.emailType === 'design' ? 'Compelling subject line' : 'Personal subject line')
+              .replace(/{{POSITION_GUIDANCE}}/g, `This is email ${emailOutline.sequence} of ${outline.emails.length}`);
         }
 
-        // Use Vercel AI SDK generateText via AI Gateway
-        const { text: emailContent } = await generateText({
-          model: gateway.languageModel(MODELS.CLAUDE_SONNET),
-          prompt,
-          ...FLOW_EMAIL_OPTIONS,
-          maxRetries: 2,
+        console.log(
+          `[Flow Generator] Using ${
+            (customPrompt && customPrompt.user_prompt) ? `CUSTOM_DEBUG_PROMPT (${customPrompt.name})` : (emailOutline.emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT')
+          } for Email ${emailOutline.sequence}`
+        );
+
+        // Map user's selected model to Anthropic SDK format
+        const anthropicModel = getAnthropicModelName(model);
+        console.log(`[Flow Generator] Calling Claude API with model: ${anthropicModel} (requested: ${model})`);
+        let emailContent = '';
+
+        const response = await anthropic.messages.create({
+          model: anthropicModel,
+          max_tokens: 4000,
+          thinking: {
+            type: 'enabled',
+            budget_tokens: 2000
+          },
+          messages: [{
+            role: 'user',
+            content: prompt
+          }]
         });
+
+        console.log(`[Flow Generator] Claude API response received`);
+        console.log(`[Flow Generator] Response contains ${response.content.length} blocks`);
+
+        for (const block of response.content) {
+          if (block.type === 'text') {
+            emailContent += block.text;
+          }
+        }
+
+        console.log(`[Flow Generator] Extracted ${emailContent.length} characters of content`);
 
         if (!emailContent || emailContent.length === 0) {
           throw new Error(`No content generated for email ${emailOutline.sequence}`);
         }
 
+        console.log(`[Flow Generator] Saving message to database...`);
         const { error: messageError } = await supabase
           .from('messages')
           .insert({
@@ -157,11 +279,13 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           });
 
         if (messageError) {
+          console.error(`[Flow Generator] Database error saving message:`, messageError);
           throw new Error(`Failed to save message: ${messageError.message}`);
         }
 
         const emailDuration = Date.now() - emailStartTime;
-        logger.log(`[Flow Generator] Email ${emailOutline.sequence} completed in ${emailDuration}ms`);
+        console.log(`[Flow Generator] ✅ Email ${emailOutline.sequence} completed in ${emailDuration}ms`);
+        console.log(`[Flow Generator] ===== EMAIL ${emailOutline.sequence}/${outline.emails.length} END =====\n`);
 
         return {
           success: true as const,
@@ -170,7 +294,9 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         };
       } catch (error) {
         const emailDuration = Date.now() - emailStartTime;
-        logger.error(`[Flow Generator] Email ${emailOutline.sequence} FAILED after ${emailDuration}ms:`, error);
+        console.error(`[Flow Generator] ❌ Email ${emailOutline.sequence} FAILED after ${emailDuration}ms`);
+        console.error(`[Flow Generator] Error details:`, error);
+        console.error(`[Flow Generator] Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
 
         return {
           success: false as const,
@@ -180,7 +306,6 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
       }
     };
 
-    // Process emails with concurrency limit
     const concurrencyLimit = 2;
     for (let i = 0; i < outline.emails.length; i += concurrencyLimit) {
       const batch = outline.emails.slice(i, i + concurrencyLimit);
@@ -189,10 +314,14 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
     }
     
     const totalDuration = Date.now() - startTime;
+    console.log(`[Flow Generator] ===== FLOW GENERATION COMPLETE =====`);
+    console.log(`[Flow Generator] Total time: ${totalDuration}ms (${(totalDuration / 1000).toFixed(1)}s)`);
+    console.log(`[Flow Generator] Successful: ${results.filter(r => r.success).length}/${outline.emails.length}`);
+    console.log(`[Flow Generator] Failed: ${results.filter(r => !r.success).length}/${outline.emails.length}`);
+    
+    // Check for failures
     const failures = results.filter(r => !r.success);
     const successes = results.filter(r => r.success);
-
-    logger.log(`[Flow Generator] Complete: ${successes.length}/${outline.emails.length} in ${totalDuration}ms`);
 
     return NextResponse.json({
       success: successes.length > 0,
@@ -204,10 +333,11 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
     });
 
   } catch (error) {
-    logger.error('Error in generate-emails:', error);
+    console.error('Error in generate-emails:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
+

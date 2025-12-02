@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { trackEvent } from '@/lib/analytics';
 import { logger } from '@/lib/logger';
@@ -23,14 +23,6 @@ export function useConversationCleanup({
   shouldAutoDelete = true
 }: UseConversationCleanupOptions) {
   const supabase = createClient();
-  
-  // Store values in refs to avoid stale closures
-  const cleanupDataRef = useRef({ conversationId, messageCount, isFlow, isChild });
-  
-  // Update refs when values change
-  useEffect(() => {
-    cleanupDataRef.current = { conversationId, messageCount, isFlow, isChild };
-  }, [conversationId, messageCount, isFlow, isChild]);
 
   /**
    * Check if a conversation is empty and delete it if appropriate
@@ -46,8 +38,22 @@ export function useConversationCleanup({
         return false;
       }
 
+      // IMPORTANT: Check the TARGET conversation's is_flow status from database
+      // Don't use the hook's isFlow/isChild as those track the CURRENT conversation
+      const { data: targetConv, error: convError } = await supabase
+        .from('conversations')
+        .select('is_flow, parent_conversation_id')
+        .eq('id', targetConversationId)
+        .single();
+      
+      if (convError) {
+        // Conversation doesn't exist or error - don't try to delete
+        logger.log('[Cleanup] Could not fetch conversation:', targetConversationId, convError.message);
+        return false;
+      }
+      
       // NEVER auto-delete flow conversations or child conversations
-      if (isFlow || isChild) {
+      if (targetConv?.is_flow || targetConv?.parent_conversation_id) {
         logger.log('[Cleanup] Skipping auto-delete for flow/child conversation:', targetConversationId);
         return false;
       }
@@ -94,24 +100,29 @@ export function useConversationCleanup({
 
   /**
    * Cleanup on unmount (with delay to avoid blocking navigation)
+   * CRITICAL: Capture conversationId at effect setup time to prevent race conditions
+   * when switching conversations rapidly
    */
   useEffect(() => {
-    if (!shouldAutoDelete) return;
+    if (!shouldAutoDelete || !conversationId) return;
+
+    // Capture current values at effect setup time (not from ref)
+    const capturedConversationId = conversationId;
+    const capturedMessageCount = messageCount;
 
     return () => {
-      const { conversationId: id, messageCount: count, isFlow: flow, isChild: child } = cleanupDataRef.current;
-      
-      // Only cleanup if conversation exists, is empty, and is not a flow/child
-      if (id && count === 0 && !flow && !child) {
+      // Only cleanup if conversation was empty when this effect was set up
+      // This prevents deleting a newly created conversation when rapidly switching
+      if (capturedConversationId && capturedMessageCount === 0) {
         // Small delay to avoid blocking navigation
         setTimeout(() => {
           (async () => {
-            await checkAndDeleteIfEmpty(id, 'empty_on_unmount');
+            await checkAndDeleteIfEmpty(capturedConversationId, 'empty_on_unmount');
           })();
         }, 100);
       }
     };
-  }, [shouldAutoDelete]);
+  }, [shouldAutoDelete, conversationId, messageCount]);
 
   return {
     /**

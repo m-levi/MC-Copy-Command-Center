@@ -11,8 +11,6 @@ import { searchRelevantDocuments, buildRAGContext } from '@/lib/rag-service';
 jest.mock('@/lib/ai-models');
 jest.mock('@/lib/conversation-memory');
 jest.mock('@/lib/rag-service');
-jest.mock('@/lib/conversation-memory-store');
-jest.mock('@/lib/claude-memory-tool');
 jest.mock('@/lib/flow-prompts');
 jest.mock('@/lib/chat-prompts');
 jest.mock('@/lib/unified-stream-handler');

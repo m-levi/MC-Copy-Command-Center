@@ -8,8 +8,9 @@ import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
 import { stripCampaignTags } from '@/lib/campaign-parser';
 import { logger } from '@/lib/logger';
+import { cleanMessageContent } from '@/lib/chat-utils';
 import { cn } from '@/lib/utils';
-import { CopyIcon, RefreshCwIcon, ThumbsUpIcon, ThumbsDownIcon, CheckIcon, MessageSquareIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
+import { CopyIcon, RefreshCwIcon, ThumbsUpIcon, ThumbsDownIcon, CheckIcon, MessageSquareIcon, ChevronLeftIcon, ChevronRightIcon, Quote } from 'lucide-react';
 
 // AI Elements imports
 import {
@@ -65,6 +66,8 @@ interface ChatMessageModernProps {
   previousVersions?: MessageVersion[];
   /** Callback when a branch is selected */
   onBranchSelect?: (version: MessageVersion) => void;
+  /** Callback when user wants to quote selected text */
+  onQuote?: (quotedText: string) => void;
 }
 
 type CommentHighlight = {
@@ -91,6 +94,7 @@ const ChatMessageModern = memo(function ChatMessageModern({
   commentsData = [],
   previousVersions = [],
   onBranchSelect,
+  onQuote,
 }: ChatMessageModernProps) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
@@ -113,7 +117,11 @@ const ChatMessageModern = memo(function ChatMessageModern({
   }, [isStarredProp]);
 
   const isUser = message.role === 'user';
-  const messageContent = message.content ?? '';
+  // Clean message content to handle any corrupted JSON streaming data
+  // This fixes messages that were incorrectly saved with raw API response
+  const messageContent = useMemo(() => {
+    return cleanMessageContent(message.content);
+  }, [message.content]);
   const productLinks = message.metadata?.productLinks || [];
   const formattedTimestamp = new Date(message.created_at).toLocaleTimeString([], { 
     hour: '2-digit', 
@@ -172,9 +180,9 @@ const ChatMessageModern = memo(function ChatMessageModern({
     setTimeout(() => setCopied(false), 2000);
   }, [messageContent]);
 
-  // Handle text selection for commenting
+  // Handle text selection for commenting or quoting
   const handleTextSelection = useCallback((e: React.MouseEvent) => {
-    if (!onCommentClick) return;
+    if (!onCommentClick && !onQuote) return;
     
     setTimeout(() => {
       const selection = window.getSelection();
@@ -205,7 +213,7 @@ const ChatMessageModern = memo(function ChatMessageModern({
         setSelectionPosition(null);
       }
     }, 50);
-  }, [onCommentClick]);
+  }, [onCommentClick, onQuote]);
 
   const handleCommentOnHighlight = useCallback(() => {
     if (selectedText) {
@@ -290,7 +298,7 @@ const ChatMessageModern = memo(function ChatMessageModern({
       )}
 
       {/* Floating selection menu */}
-      {!showInlineCommentBox && selectionPosition && selectedText && onCommentClick && (
+      {!showInlineCommentBox && selectionPosition && selectedText && (onCommentClick || onQuote) && (
         <div
           className="floating-comment-btn fixed"
           style={{
@@ -310,14 +318,37 @@ const ChatMessageModern = memo(function ChatMessageModern({
               <div className="absolute inset-0 bg-gradient-to-r from-amber-400/20 to-orange-400/20 rounded-full blur-lg" />
               
               <div className="relative bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl border border-stone-200/80 dark:border-gray-700/80 rounded-full shadow-xl shadow-stone-200/50 dark:shadow-gray-900/50 flex items-center p-1 gap-0.5">
-                <button
-                  onClick={handleCommentOnHighlight}
-                  className="group flex items-center gap-2 pl-3 pr-4 py-2 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 transition-all duration-200 text-white font-medium text-sm shadow-sm hover:shadow-md"
-                  title="Add comment"
-                >
-                  <MessageSquareIcon className="w-4 h-4 transition-transform group-hover:scale-110" />
-                  <span>Comment</span>
-                </button>
+                {onQuote && (
+                  <button
+                    onClick={() => {
+                      onQuote(selectedText);
+                      setSelectedText('');
+                      setSelectionPosition(null);
+                      window.getSelection()?.removeAllRanges();
+                      toast.success('Text quoted - type your follow-up!');
+                    }}
+                    className="group flex items-center gap-2 pl-3 pr-4 py-2 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all duration-200 text-white font-medium text-sm shadow-sm hover:shadow-md"
+                    title="Quote in chat"
+                  >
+                    <Quote className="w-4 h-4 transition-transform group-hover:scale-110" />
+                    <span>Quote</span>
+                  </button>
+                )}
+                
+                {onCommentClick && (
+                  <button
+                    onClick={handleCommentOnHighlight}
+                    className={`group flex items-center gap-2 pl-3 pr-4 py-2 rounded-full transition-all duration-200 font-medium text-sm ${
+                      onQuote 
+                        ? 'text-stone-600 dark:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-700'
+                        : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm hover:shadow-md'
+                    }`}
+                    title="Add comment"
+                  >
+                    <MessageSquareIcon className="w-4 h-4 transition-transform group-hover:scale-110" />
+                    <span>Comment</span>
+                  </button>
+                )}
                 
                 <button
                   onClick={async () => {

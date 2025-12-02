@@ -6,8 +6,53 @@ export interface StreamCheckpoint {
   conversationId: string;
   messageId: string;
   content: string;
+  thinking?: string;  // Thinking content for recovery
+  rawContent?: string; // Optional: raw JSON for debugging (not used in recovery)
   timestamp: number;
   isComplete: boolean;
+}
+
+/**
+ * Parse raw JSON streaming content into text
+ * This handles the case where checkpoint content is raw JSON chunks
+ * Format: {"type":"text","content":"..."}\n{"type":"thinking","content":"..."}\n...
+ */
+export function parseRawJsonStreamContent(rawContent: string): { content: string; thinking: string } {
+  let content = '';
+  let thinking = '';
+  
+  // Check if this looks like JSON streaming format
+  if (!rawContent.includes('{"type":')) {
+    // Not JSON format, return as-is
+    return { content: rawContent, thinking: '' };
+  }
+  
+  // Split by newlines and parse each JSON object
+  const lines = rawContent.split('\n');
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+    
+    try {
+      const message = JSON.parse(trimmedLine);
+      
+      switch (message.type) {
+        case 'text':
+          content += message.content || '';
+          break;
+        case 'thinking':
+          thinking += message.content || '';
+          break;
+        // Ignore status, tool_use, and other message types
+      }
+    } catch {
+      // If we can't parse as JSON, it might be partial or corrupted
+      // Skip this line
+    }
+  }
+  
+  return { content, thinking };
 }
 
 const CHECKPOINT_INTERVAL = 100; // Save checkpoint every N chunks

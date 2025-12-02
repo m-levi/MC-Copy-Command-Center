@@ -2,7 +2,7 @@ import { FlowType, FlowOutlineEmail, FlowOutlineData, EmailType } from '@/types'
 import { getFlowTemplate } from './flow-templates';
 import { FLOW_OUTLINE_PROMPT } from './prompts/flow-outline.prompt';
 import { FLOW_BEST_PRACTICES } from './prompts/flow-best-practices';
-import { STANDARD_EMAIL_PROMPT } from './prompts/standard-email.prompt';
+import { buildDesignEmailV2Prompt } from './prompts/design-email-v2.prompt';
 import { LETTER_EMAIL_PROMPT } from './prompts/letter-email.prompt';
 
 // Re-export conversational flow prompt for convenience
@@ -53,24 +53,6 @@ function extractBrandVoiceGuidelines(brandInfo: string): string {
 }
 
 /**
- * Build the additional context block for standard email prompts within flows
- */
-function buildAdditionalContextForFlow(brandInfo: string, ragContext: string): string {
-  const sections = [
-    `<brand_details>
-${brandInfo}
-</brand_details>`,
-    ragContext
-      ? `<rag_context>
-${ragContext}
-</rag_context>`
-      : '',
-  ].filter(Boolean);
-
-  return sections.join('\n\n').trim();
-}
-
-/**
  * Build the system prompt for creating a flow outline
  * This guides the AI through a conversational process to build a comprehensive outline
  */
@@ -93,18 +75,13 @@ export function buildFlowOutlinePrompt(
 }
 
 /**
- * Build the system prompt for generating an individual email within a flow
- * Uses the standard email prompt to ensure consistent quality and format
+ * Build the copy brief for a flow email based on its outline
  */
-export function buildFlowEmailPrompt(
+function buildFlowEmailBrief(
   emailOutline: FlowOutlineEmail,
-  flowOutline: FlowOutlineData,
-  brandInfo: string,
-  ragContext: string,
-  emailType: EmailType
+  flowOutline: FlowOutlineData
 ): string {
-  // Build the email brief based on the outline
-  const emailBrief = `
+  return `
 You are writing Email ${emailOutline.sequence} of ${flowOutline.emails.length} in a ${flowOutline.flowName} automation.
 
 **Flow Context:**
@@ -128,28 +105,51 @@ ${emailOutline.sequence === flowOutline.emails.length ? '- Final email - create 
 - Ensure this email works as part of the larger sequence
 - Maintain consistency with brand voice throughout
 `.trim();
+}
 
+/**
+ * Build the system and user prompts for generating an individual email within a flow
+ * 
+ * UNIFIED: Uses Design Email V2 as the single source of truth for design emails
+ * This ensures flow emails use the exact same prompt as the main chat API
+ */
+export function buildFlowEmailPrompts(
+  emailOutline: FlowOutlineEmail,
+  flowOutline: FlowOutlineData,
+  brandInfo: string,
+  ragContext: string,
+  emailType: EmailType
+): { systemPrompt: string; userPrompt: string } {
+  // Build the email brief based on the outline
+  const emailBrief = buildFlowEmailBrief(emailOutline, flowOutline);
+  
+  // Extract brand voice guidelines for the prompt
+  const brandVoiceGuidelines = extractBrandVoiceGuidelines(brandInfo);
+
+  if (emailType === 'design') {
+    // UNIFIED: Use Design Email V2 prompt (single source of truth)
+    // This matches how the main chat API handles design emails
+    const { systemPrompt, userPrompt } = buildDesignEmailV2Prompt({
+      brandInfo,
+      brandVoiceGuidelines,
+      copyBrief: emailBrief,
+    });
+
+    return {
+      systemPrompt,
+      userPrompt,
+    };
+  }
+  
+  // For letter emails, use the letter prompt (which is a combined prompt)
   // Extract website URL from brandInfo string
   const websiteMatch = brandInfo.match(/Website:\s*(.+)/);
   const websiteUrl = websiteMatch ? websiteMatch[1].trim() : '';
-  
-  const brandVoiceGuidelines = extractBrandVoiceGuidelines(brandInfo);
-  const additionalContext = buildAdditionalContextForFlow(brandInfo, ragContext || '');
-
-  if (emailType === 'design') {
-    return replacePlaceholders(STANDARD_EMAIL_PROMPT, {
-      BRAND_VOICE_GUIDELINES: brandVoiceGuidelines,
-      ADDITIONAL_CONTEXT: additionalContext,
-      COPY_BRIEF: emailBrief,
-    });
-  }
-  
-  // Generate website hint if we have a URL
   const websiteHint = websiteUrl 
     ? ` (especially the brand's website: ${websiteUrl})` 
     : '';
 
-  return replacePlaceholders(LETTER_EMAIL_PROMPT, {
+  const letterPrompt = replacePlaceholders(LETTER_EMAIL_PROMPT, {
     BRAND_INFO: brandInfo,
     RAG_CONTEXT: ragContext || '',
     CONTEXT_INFO: '', // No additional context needed for flows
@@ -158,4 +158,36 @@ ${emailOutline.sequence === flowOutline.emails.length ? '- Final email - create 
     WEBSITE_URL: websiteUrl,
     WEBSITE_HINT: websiteHint,
   });
+
+  // Letter emails use a combined prompt approach
+  return {
+    systemPrompt: letterPrompt,
+    userPrompt: `Please write the email described above following all the guidelines.`,
+  };
+}
+
+/**
+ * LEGACY: Build the system prompt for generating an individual email within a flow
+ * 
+ * @deprecated Use buildFlowEmailPrompts instead for proper system/user prompt separation
+ */
+export function buildFlowEmailPrompt(
+  emailOutline: FlowOutlineEmail,
+  flowOutline: FlowOutlineData,
+  brandInfo: string,
+  ragContext: string,
+  emailType: EmailType
+): string {
+  // For backwards compatibility, return the user prompt
+  // Note: This loses the system prompt context - use buildFlowEmailPrompts instead
+  const { systemPrompt, userPrompt } = buildFlowEmailPrompts(
+    emailOutline,
+    flowOutline,
+    brandInfo,
+    ragContext,
+    emailType
+  );
+  
+  // Combine them for legacy callers (not ideal, but maintains compatibility)
+  return `${systemPrompt}\n\n---\n\n${userPrompt}`;
 }

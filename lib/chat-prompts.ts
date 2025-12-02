@@ -6,10 +6,8 @@
 import { PLANNING_MODE_PROMPT } from './prompts/planning-mode.prompt';
 import { LETTER_EMAIL_PROMPT } from './prompts/letter-email.prompt';
 import { 
-  STANDARD_EMAIL_PROMPT,
   STANDARD_EMAIL_SYSTEM_PROMPT,
   STANDARD_EMAIL_USER_PROMPT,
-  buildStandardEmailPrompt as buildStandardEmailPromptFromModule
 } from './prompts/standard-email.prompt';
 import { buildDesignEmailV2Prompt } from './prompts/design-email-v2.prompt';
 import { SECTION_REGENERATION_PROMPTS } from './prompts/section-regeneration.prompt';
@@ -179,19 +177,21 @@ export function buildLetterEmailPrompt(context: PromptContext): string {
 /**
  * Standard email copy prompt (design emails)
  * 
- * Uses the new API-first prompt with proper variable substitution
+ * UNIFIED: Now uses Design Email V2 as the single source of truth
+ * This ensures consistent output format across all design email contexts
  */
 export function buildStandardEmailPrompt(context: PromptContext): string {
   const brandVoiceGuidelines = extractBrandVoiceGuidelines(context.brandInfo);
-  const additionalContext = buildAdditionalContextBlock(context);
   
-  // The copy brief comes from the user's last message in the conversation
-  // For system prompts, we return the user prompt template with variables filled in
-  return buildStandardEmailPromptFromModule({
-    copyBrief: '{{USER_MESSAGE}}', // This will be replaced by the actual user message
+  // Use the Design V2 prompt for ALL design emails (single source of truth)
+  const { systemPrompt } = buildDesignEmailV2Prompt({
+    brandInfo: context.brandInfo,
     brandVoiceGuidelines,
-    additionalContext,
+    websiteUrl: context.websiteUrl,
+    copyBrief: '{{USER_MESSAGE}}', // This will be replaced by the actual user message
   });
+  
+  return systemPrompt;
 }
 
 /**

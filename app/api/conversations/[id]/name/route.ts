@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createEdgeClient } from '@/lib/supabase/edge';
 import { generateText } from 'ai';
 import { gateway, MODELS } from '@/lib/ai-providers';
 
@@ -6,7 +6,9 @@ export const runtime = 'edge';
 
 /**
  * Auto-generate conversation title using a low-cost AI model
- * Uses GPT-4o-mini (OpenAI) or Claude Haiku (Anthropic) for cost efficiency
+ * Uses GPT-5 mini (OpenAI) or Claude Haiku (Anthropic) for cost efficiency
+ * 
+ * This runs asynchronously in the background after the first message is sent.
  */
 export async function POST(
   req: Request,
@@ -23,8 +25,10 @@ export async function POST(
       );
     }
 
+    // Use Edge-compatible Supabase client
+    const supabase = createEdgeClient();
+    
     // Verify conversation exists
-    const supabase = await createClient();
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .select('id')
@@ -32,6 +36,7 @@ export async function POST(
       .single();
 
     if (convError || !conversation) {
+      console.error('[Title Generation] Conversation not found:', { id, error: convError?.message });
       return new Response(
         JSON.stringify({ error: 'Conversation not found' }),
         { status: 404, headers: { 'Content-Type': 'application/json' } }
@@ -41,41 +46,48 @@ export async function POST(
     // Generate title using low-cost model via AI Gateway
     let title: string;
 
-    // Try GPT-5 mini first (very cheap)
+    // Try GPT-5 mini first (very cheap and fast)
     try {
       const { text } = await generateText({
         model: gateway.languageModel(MODELS.GPT_5_MINI),
-        system: 'Generate a concise, descriptive 3-6 word title for this conversation. Be specific about the topic. Do not use quotes or punctuation at the end.',
-        prompt: userMessage.substring(0, 500), // Limit input for cost
+        system: `You are a title generator. Output ONLY a short title, nothing else.
+Rules:
+- Exactly 4-5 words maximum
+- No sentences, no explanations
+- No quotes or punctuation
+- Just the title words`,
+        prompt: `Create a 4-5 word title for: ${userMessage.substring(0, 300)}`,
       });
 
-      title = text?.trim() || 'New Conversation';
+      title = sanitizeTitle(text);
+      console.log('[Title Generation] Generated with GPT-5 mini:', { id, title });
     } catch (error) {
-      console.error('GPT-5 mini title generation failed:', error);
+      console.error('[Title Generation] GPT-5 mini failed, trying Claude Haiku:', error);
       // Fallback to Claude Haiku
       title = await generateWithAnthropic(userMessage);
     }
 
-    // Update conversation title
+    // Update conversation title in database
     const { error: updateError } = await supabase
       .from('conversations')
       .update({ title })
       .eq('id', id);
 
     if (updateError) {
-      console.error('Error updating conversation title:', updateError);
+      console.error('[Title Generation] Database update failed:', updateError);
       return new Response(
         JSON.stringify({ error: 'Failed to update title' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
+    console.log('[Title Generation] Success:', { id, title });
     return new Response(
       JSON.stringify({ title }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (error) {
-    console.error('Error generating conversation title:', error);
+    console.error('[Title Generation] Unexpected error:', error);
     return new Response(
       JSON.stringify({ 
         error: 'Failed to generate title',
@@ -87,7 +99,7 @@ export async function POST(
 }
 
 /**
- * Manually update conversation title
+ * Manually update conversation title (for user renaming)
  */
 export async function PATCH(
   req: Request,
@@ -106,8 +118,9 @@ export async function PATCH(
 
     const trimmedTitle = title.trim().substring(0, 100); // Max 100 chars
 
-    // Update conversation title
-    const supabase = await createClient();
+    // Use Edge-compatible Supabase client
+    const supabase = createEdgeClient();
+    
     const { data, error } = await supabase
       .from('conversations')
       .update({ title: trimmedTitle })
@@ -116,7 +129,7 @@ export async function PATCH(
       .single();
 
     if (error) {
-      console.error('Error updating conversation title:', error);
+      console.error('[Title Update] Database error:', error);
       return new Response(
         JSON.stringify({ error: 'Failed to update title' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -128,7 +141,7 @@ export async function PATCH(
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (error) {
-    console.error('Error updating conversation title:', error);
+    console.error('[Title Update] Unexpected error:', error);
     return new Response(
       JSON.stringify({ 
         error: 'Failed to update title',
@@ -143,25 +156,54 @@ async function generateWithAnthropic(userMessage: string): Promise<string> {
   try {
     const { text } = await generateText({
       model: gateway.languageModel(MODELS.CLAUDE_HAIKU),
-      prompt: `Generate a concise, descriptive 3-6 word title for this conversation. Be specific about the topic. Do not use quotes or punctuation at the end.\n\nMessage: ${userMessage.substring(0, 500)}`,
+      system: `Output ONLY a 4-5 word title. No explanations, no quotes, no punctuation.`,
+      prompt: `Title for: ${userMessage.substring(0, 300)}`,
     });
 
-    return text?.trim() || 'New Conversation';
+    return sanitizeTitle(text);
   } catch (error) {
     console.error('Claude Haiku title generation failed:', error);
     return generateFallbackTitle(userMessage);
   }
 }
 
+/**
+ * Sanitize and truncate the AI-generated title to ensure it's short
+ */
+function sanitizeTitle(text: string | undefined): string {
+  if (!text) return 'New Conversation';
+  
+  // Clean up the text
+  let title = text
+    .trim()
+    .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+    .replace(/[.!?:;,]+$/g, '')  // Remove trailing punctuation
+    .replace(/^(Title:|Here's|The title is|I suggest)/i, '') // Remove common prefixes
+    .trim();
+  
+  // Split into words and take only first 5
+  const words = title.split(/\s+/).filter(w => w.length > 0);
+  if (words.length > 5) {
+    title = words.slice(0, 5).join(' ');
+  }
+  
+  // Final length check (max 50 chars)
+  if (title.length > 50) {
+    title = title.substring(0, 47) + '...';
+  }
+  
+  return title || 'New Conversation';
+}
+
 function generateFallbackTitle(userMessage: string): string {
-  // Extract first 5-6 words as title
+  // Extract first 4-5 words as title
   const words = userMessage
     .replace(/[^\w\s]/g, '')
     .split(/\s+/)
     .filter(w => w.length > 0)
-    .slice(0, 6);
+    .slice(0, 5);
   
   return words.length > 0 
-    ? words.join(' ').substring(0, 50) + (words.length >= 6 ? '...' : '')
+    ? words.join(' ').substring(0, 50)
     : 'New Conversation';
 }

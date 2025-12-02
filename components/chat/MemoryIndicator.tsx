@@ -149,3 +149,7 @@ export function MemoryBadge({ type, className }: MemoryBadgeProps) {
 
 export default MemoryIndicator;
 
+
+
+
+

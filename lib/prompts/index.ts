@@ -11,6 +11,8 @@ export { STANDARD_EMAIL_PROMPT } from './standard-email.prompt';
 export { SECTION_REGENERATION_PROMPTS } from './section-regeneration.prompt';
 export { FLOW_OUTLINE_PROMPT } from './flow-outline.prompt';
 export { FLOW_BEST_PRACTICES } from './flow-best-practices';
+// @deprecated - These prompts are no longer used. Design V2 is now the single source of truth.
+// Kept for backwards compatibility only. Use DESIGN_EMAIL_V2_* and LETTER_EMAIL_PROMPT instead.
 export { FLOW_EMAIL_PROMPT_DESIGN, FLOW_EMAIL_PROMPT_LETTER } from './flow-email.prompt';
 export { CONVERSATIONAL_FLOW_PROMPT, buildConversationalFlowPrompt } from './conversational-flow.prompt';
 
