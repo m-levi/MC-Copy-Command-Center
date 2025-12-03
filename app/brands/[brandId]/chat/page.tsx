@@ -1394,22 +1394,33 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Update navigation ref with the real conversation ID
       navigationInProgressRef.current = { active: true, targetConversationId: data.id };
       
-      // Replace optimistic conversation with real one
-      setConversations(prev => prev.map(c => c.id === tempId ? data : c));
+      // Replace optimistic conversation with real one and update cache
+      setConversations(prev => {
+        const updated = prev.map(c => c.id === tempId ? data : c);
+        // Update cache with the new conversation to prevent stale cache issues
+        cacheConversations(brandId, updated);
+        return updated;
+      });
       setCurrentConversation(data);
       
       // Update URL to reflect the new conversation
       updateConversationUrl(data.id);
       
-      await loadConversations();
+      // NOTE: We intentionally do NOT call loadConversations() here because:
+      // 1. We already added the new conversation optimistically above
+      // 2. The realtime subscription will handle any updates from other tabs
+      // 3. Calling loadConversations() can overwrite with stale cached data,
+      //    causing the new conversation to disappear and triggering unwanted effects
+      
       toast.success('New conversation created');
       trackEvent('conversation_created', { conversationId: data.id });
       
       // Clear navigation flags after everything is settled
-        setTimeout(() => {
-          isSelectingConversationRef.current = false;
+      // Using 500ms to ensure all state updates and effects have completed
+      setTimeout(() => {
+        isSelectingConversationRef.current = false;
         navigationInProgressRef.current = { active: false, targetConversationId: data.id };
-      }, 200);
+      }, 500);
     } catch (error) {
       logger.error('Error creating conversation:', error instanceof Error ? error.message : String(error), error);
       toast.error('Failed to create conversation');
@@ -1566,12 +1577,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       trackEvent('conversation_selected', { conversationId });
       
       // Clear the selection flag after URL has been updated
+      // Using 500ms to ensure all state updates and effects have completed
       setTimeout(() => {
           isSelectingConversationRef.current = false;
           // Keep targetConversationId set - it's needed for loadMessages checks
           // Only clear the active flag
           navigationInProgressRef.current.active = false;
-      }, 100);
+      }, 500);
     });
 
     // CRITICAL: If no cached messages, explicitly load them
