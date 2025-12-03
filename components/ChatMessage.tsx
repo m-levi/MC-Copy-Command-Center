@@ -42,6 +42,8 @@ interface ChatMessageProps {
   flowApprovalState?: 'pending' | 'approved' | 'rejected';
   // Reference in chat - allows users to quote selected text in their next message
   onReferenceInChat?: (selectedText: string) => void;
+  // Message grouping - for consecutive messages from same user
+  isGrouped?: boolean;
 }
 
 // Memoized component to prevent unnecessary re-renders
@@ -151,6 +153,8 @@ const ChatMessage = memo(function ChatMessage({
   flowApprovalState = 'pending',
   // Reference in chat
   onReferenceInChat,
+  // Message grouping
+  isGrouped = false,
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
@@ -738,6 +742,7 @@ const ChatMessage = memo(function ChatMessage({
       <ChatMessageUser 
         message={message}
         onEdit={onEdit}
+        isGrouped={isGrouped}
       />
     );
   }
@@ -996,6 +1001,7 @@ const ChatMessage = memo(function ChatMessage({
     prevProps.message.thinking === nextProps.message.thinking &&
     JSON.stringify(prevProps.message.metadata) === JSON.stringify(nextProps.message.metadata) &&
     prevProps.isRegenerating === nextProps.isRegenerating &&
+    prevProps.isGrouped === nextProps.isGrouped &&
     prevProps.mode === nextProps.mode &&
     prevProps.brandId === nextProps.brandId &&
     prevProps.commentCount === nextProps.commentCount &&

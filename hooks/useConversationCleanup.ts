@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { trackEvent } from '@/lib/analytics';
 import { logger } from '@/lib/logger';
@@ -23,6 +23,16 @@ export function useConversationCleanup({
   shouldAutoDelete = true
 }: UseConversationCleanupOptions) {
   const supabase = createClient();
+  
+  // CRITICAL: Use a ref to always track the CURRENT conversation ID
+  // This prevents race conditions where cleanup scheduled for an old conversation
+  // accidentally deletes the new current conversation
+  const currentConversationIdRef = useRef<string | null>(conversationId);
+  
+  // Keep the ref updated with the latest conversation ID
+  useEffect(() => {
+    currentConversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   /**
    * Check if a conversation is empty and delete it if appropriate
@@ -35,6 +45,17 @@ export function useConversationCleanup({
       // Skip temporary conversations that haven't been saved to database yet
       if (targetConversationId.startsWith('temp-')) {
         logger.log('[Cleanup] Skipping temporary conversation:', targetConversationId);
+        return false;
+      }
+      
+      // CRITICAL SAFETY CHECK: For automatic unmount cleanup, NEVER delete the currently selected conversation
+      // This prevents race conditions where cleanup scheduled for an old conversation
+      // runs while the user is already on a new conversation (but with same ID due to rapid changes)
+      // We use the ref to get the LATEST value, not the value captured at effect setup time
+      // NOTE: We only apply this check for 'empty_on_unmount' because manual cleanup calls
+      // (empty_on_new_click, empty_on_switch) are intentional and should proceed
+      if (reason === 'empty_on_unmount' && currentConversationIdRef.current === targetConversationId) {
+        logger.log('[Cleanup] Skipping currently selected conversation (unmount cleanup):', targetConversationId);
         return false;
       }
 

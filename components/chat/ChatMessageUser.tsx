@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, memo } from 'react';
-import { Message, Profile, MessageAttachment } from '@/types';
+import { Message, MessageAttachment } from '@/types';
 import MessageEditor from '../MessageEditor';
 import toast from 'react-hot-toast';
 import { FileTextIcon, ImageIcon, FileIcon } from 'lucide-react';
@@ -9,11 +9,13 @@ import { FileTextIcon, ImageIcon, FileIcon } from 'lucide-react';
 interface ChatMessageUserProps {
   message: Message;
   onEdit?: (newContent: string) => void;
+  isGrouped?: boolean; // Is this message grouped with previous from same user
 }
 
 const ChatMessageUserBase = function ChatMessageUser({
   message,
-  onEdit
+  onEdit,
+  isGrouped = false,
 }: ChatMessageUserProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -24,6 +26,9 @@ const ChatMessageUserBase = function ChatMessageUser({
     hour: '2-digit', 
     minute: '2-digit' 
   });
+  
+  // Get user display name - fallback to "You" if no profile
+  const userName = message.user?.full_name || message.user?.email?.split('@')[0] || 'You';
 
   // Get icon for attachment type
   const getAttachmentIcon = (attachment: MessageAttachment) => {
@@ -42,11 +47,6 @@ const ChatMessageUserBase = function ChatMessageUser({
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  const getInitials = (email: string, fullName?: string) => {
-    if (fullName) return fullName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
-    return email?.substring(0, 2).toUpperCase() || '??';
   };
 
   const handleCopy = async () => {
@@ -70,19 +70,18 @@ const ChatMessageUserBase = function ChatMessageUser({
   };
 
   return (
-    <div className="flex w-full justify-end mb-6 sm:mb-8 group animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards">
+    <div className={`flex w-full justify-end group animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-backwards ${isGrouped ? 'mb-1' : 'mb-6 sm:mb-8'}`}>
       <div className="flex flex-col items-end max-w-[85%] sm:max-w-[70%]">
-        {message.user && (
-          <div className="flex items-center gap-2 mb-1.5 px-1 opacity-80">
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-              {message.user.full_name || message.user.email?.split('@')[0]}
+        {/* Small sender name above message */}
+        {!isGrouped && (
+          <div className="flex items-center gap-2 mb-1 px-1">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              {userName}
             </span>
-            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[9px] font-bold shadow-sm">
-              {getInitials(message.user.email || '', message.user.full_name)}
-            </div>
           </div>
         )}
         
+        {/* Message bubble - consistent blue color */}
         <div className="bg-blue-600 dark:bg-blue-700 text-white rounded-2xl rounded-tr-sm px-5 py-3.5 transition-all shadow-sm">
           {/* Attachment indicators */}
           {attachments.length > 0 && (
@@ -137,7 +136,7 @@ const ChatMessageUserBase = function ChatMessageUser({
                 title="Edit message"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5h2m-1-1v2m-7 7h2m-1-1v2m10.586-7.414l-6.172 6.172a2 2 0 00-.586 1.414V17h1.828a2 2 0 001.414-.586l6.172-6.172a2 2 0 00-2.828-2.828z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                 </svg>
                 Edit
               </button>

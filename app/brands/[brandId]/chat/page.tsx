@@ -167,6 +167,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState('');
   const [currentUserName, setCurrentUserName] = useState('');
+  const [currentUserProfile, setCurrentUserProfile] = useState<{ user_id: string; email: string; full_name?: string; avatar_url?: string; created_at: string } | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -693,9 +694,22 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           table: 'messages',
           filter: `conversation_id=eq.${conversationId}`,
         },
-        (payload) => {
+        async (payload) => {
           logger.log('[Realtime] New message received:', payload.new);
-          const newMessage = payload.new as Message;
+          let newMessage = payload.new as Message;
+          
+          // Fetch user profile for user messages (collaboration feature)
+          if (newMessage.role === 'user' && newMessage.user_id) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('user_id, email, full_name, avatar_url, created_at')
+              .eq('user_id', newMessage.user_id)
+              .single();
+              
+            if (profile) {
+              newMessage = { ...newMessage, user: profile };
+            }
+          }
           
           // Only add if not already in state (avoid duplicates from own sends)
           setMessages((prev) => {
@@ -898,12 +912,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Get user's profile
       const { data: profile } = await supabase
         .from('profiles')
-        .select('full_name, email')
+        .select('user_id, email, full_name, avatar_url, created_at')
         .eq('user_id', user.id)
         .single();
 
       if (profile) {
         setCurrentUserName(profile.full_name || profile.email || 'Unknown');
+        setCurrentUserProfile(profile);
       }
 
       // Load team members
@@ -1144,17 +1159,42 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         const uniqueMessages = cached.filter((message, index, self) => 
           index === self.findIndex(m => m.id === message.id)
         );
-        setMessages(uniqueMessages);
+        
+        // Fetch user profiles for cached messages that don't have them
+        const messagesNeedingProfiles = uniqueMessages.filter(m => m.role === 'user' && m.user_id && !m.user);
+        const userIds = [...new Set(messagesNeedingProfiles.map(m => m.user_id))].filter(Boolean) as string[];
+        
+        let messagesWithUsers = uniqueMessages;
+        if (userIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('user_id, email, full_name, avatar_url, created_at')
+            .in('user_id', userIds);
+            
+          if (profiles && profiles.length > 0) {
+            const profileMap = new Map(profiles.map(p => [p.user_id, p]));
+            messagesWithUsers = uniqueMessages.map(msg => {
+              if (msg.role === 'user' && msg.user_id && !msg.user && profileMap.has(msg.user_id)) {
+                return { ...msg, user: profileMap.get(msg.user_id) };
+              }
+              return msg;
+            });
+            // Update cache with profiles
+            cacheMessages(conversationId, messagesWithUsers);
+          }
+        }
+        
+        setMessages(messagesWithUsers);
         setLoadingMessages(false);
         
         trackPerformance('load_messages', performance.now() - startTime, { 
           source: 'cache',
-          count: uniqueMessages.length,
+          count: messagesWithUsers.length,
           originalCount: cached.length
         });
         
         // Load comment counts for messages
-        loadCommentCounts(uniqueMessages.map(m => m.id));
+        loadCommentCounts(messagesWithUsers.map(m => m.id));
         
         return;
       }
@@ -1198,16 +1238,41 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           index === self.findIndex(m => m.id === message.id)
         );
         
-        cacheMessages(conversationId, uniqueMessages);
-        setMessages(uniqueMessages);
+        // Fetch user profiles for user messages (collaboration feature)
+        const userIds = [...new Set(uniqueMessages
+          .filter(m => m.role === 'user' && m.user_id)
+          .map(m => m.user_id)
+        )].filter(Boolean) as string[];
+        
+        let messagesWithUsers = uniqueMessages;
+        
+        if (userIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('user_id, email, full_name, avatar_url, created_at')
+            .in('user_id', userIds);
+            
+          if (profiles && profiles.length > 0) {
+            const profileMap = new Map(profiles.map(p => [p.user_id, p]));
+            messagesWithUsers = uniqueMessages.map(msg => {
+              if (msg.role === 'user' && msg.user_id && profileMap.has(msg.user_id)) {
+                return { ...msg, user: profileMap.get(msg.user_id) };
+              }
+              return msg;
+            });
+          }
+        }
+        
+        cacheMessages(conversationId, messagesWithUsers);
+        setMessages(messagesWithUsers);
         trackPerformance('load_messages', performance.now() - startTime, { 
           source: 'database',
-          count: uniqueMessages.length,
+          count: messagesWithUsers.length,
           originalCount: data.length
         });
         
         // Load comment counts for messages
-        loadCommentCounts(uniqueMessages.map(m => m.id));
+        loadCommentCounts(messagesWithUsers.map(m => m.id));
       }
       
           // IMPORTANT: Hide loading state after database load
@@ -2541,6 +2606,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       role: 'user',
       content,
       created_at: new Date().toISOString(),
+      user_id: currentUserId || undefined,
+      user: currentUserProfile || undefined,
     } : null;
     
     if (tempUserMessage) {
@@ -3581,20 +3648,36 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
                 
                 {/* Messages */}
-                {messages
-                  // Deduplicate messages by ID (in case of race conditions)
-                  .filter((message, index, self) => 
+                {(() => {
+                  // Deduplicate messages by ID
+                  const deduped = messages.filter((message, index, self) => 
                     index === self.findIndex(m => m.id === message.id)
-                  )
-                  .map((message, index) => (
+                  );
+                  
+                  // Helper to check if message should be grouped with previous
+                  const isMessageGrouped = (message: Message, index: number): boolean => {
+                    if (index === 0) return false;
+                    if (message.role !== 'user') return false;
+                    
+                    const prev = deduped[index - 1];
+                    if (prev.role !== 'user') return false;
+                    if (prev.user_id !== message.user_id) return false;
+                    
+                    // Group if within 5 minutes
+                    const timeDiff = new Date(message.created_at).getTime() - new Date(prev.created_at).getTime();
+                    return timeDiff < 5 * 60 * 1000; // 5 minutes
+                  };
+                  
+                  return deduped.map((message, index) => (
                 <ChatMessage
                   key={message.id}
                   message={message}
                   brandId={brandId}
                   mode={conversationMode}
                   isStarred={message.role === 'assistant' ? starredEmailContents.has(message.content) : false}
+                  isGrouped={isMessageGrouped(message, index)}
                   onRegenerate={
-                    message.role === 'assistant' && index === messages.length - 1 && !sending
+                    message.role === 'assistant' && index === deduped.length - 1 && !sending
                       ? () => handleRegenerateMessage(index)
                       : undefined
                   }
@@ -3610,7 +3693,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                       : undefined
                   }
                   isRegenerating={regeneratingMessageId === message.id}
-                  isStreaming={message.role === 'assistant' && index === messages.length - 1 && sending}
+                  isStreaming={message.role === 'assistant' && index === deduped.length - 1 && sending}
                   aiStatus={aiStatus}
                   commentCount={messageCommentCounts[message.id] || 0}
                   commentsData={messageComments[message.id] || []}
@@ -3629,7 +3712,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   }}
                   onReferenceInChat={(text) => setQuotedText(text)}
                 />
-              ))}
+                  ));
+                })()}
               
               {/* Inline Flow Outline Approval UI - shows after messages */}
               {currentConversation?.is_flow && pendingOutlineApproval && !isOutlineApproved && flowState.status !== 'complete' && !sending && !isGeneratingFlow && (
