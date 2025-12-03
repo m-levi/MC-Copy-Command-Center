@@ -5,8 +5,8 @@ import { FLOW_BEST_PRACTICES } from './prompts/flow-best-practices';
 import { buildDesignEmailV2Prompt } from './prompts/design-email-v2.prompt';
 import { LETTER_EMAIL_PROMPT } from './prompts/letter-email.prompt';
 
-// Re-export conversational flow prompt for convenience
-export { buildConversationalFlowPrompt } from './prompts/conversational-flow.prompt';
+// Re-export conversational flow prompts for convenience
+export { buildConversationalFlowPrompt, buildFlowTypeSelectedPrompt } from './prompts/conversational-flow.prompt';
 
 /**
  * Replace placeholders in a prompt template

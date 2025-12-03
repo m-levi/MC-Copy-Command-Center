@@ -8,7 +8,7 @@ This directory contains all AI prompt templates used in the Command Center appli
 lib/prompts/
 ├── README.md                           # This file
 ├── index.ts                           # Exports all prompts
-├── planning-mode.prompt.ts            # Planning/brainstorming mode
+├── planning-mode.prompt.ts            # Chat mode (flexible marketing assistant)
 ├── letter-email.prompt.ts             # Short, personal letter emails
 ├── standard-email.prompt.ts           # Structured design emails
 ├── section-regeneration.prompt.ts     # Email section regeneration
@@ -21,14 +21,14 @@ lib/prompts/
 
 ### Chat/Email Generation Prompts
 
-#### **1. Planning Mode** (`planning-mode.prompt.ts`)
-- **Purpose**: Flexible conversation space for strategy, questions, and brainstorming
-- **Use Case**: When users want to explore ideas, ask questions, or plan campaigns (not write copy)
+#### **1. Chat Mode** (`planning-mode.prompt.ts`)
+- **Purpose**: Flexible marketing expert for any questions, strategy, or brainstorming
+- **Use Case**: General marketing help - strategy, questions, ideation, advice
 - **Features**: 
   - Web search integration
   - Memory system
-  - Strategic guidance
-  - Natural conversation flow
+  - Marketing expertise across all areas
+  - Natural, helpful conversation
 
 #### **2. Letter Email** (`letter-email.prompt.ts`)
 - **Purpose**: Short, personal, direct response emails (3-5 paragraphs)
@@ -104,16 +104,14 @@ Common variables:
 
 ### Example Edit
 
-To change the planning mode greeting:
+To change the chat mode behavior:
 
 ```typescript
 // In planning-mode.prompt.ts
-export const PLANNING_MODE_PROMPT = `You are an expert email marketing strategist...
+export const PLANNING_MODE_PROMPT = `You are a knowledgeable marketing expert...
 
-// Change this section:
-## YOUR ROLE IN PLANNING MODE
-
-You are in **PLANNING MODE**...
+// The prompt is designed to be flexible and helpful
+// without restrictive rules that prevent the AI from assisting
 ```
 
 ## 🔄 How Prompts Are Used

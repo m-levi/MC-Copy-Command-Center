@@ -55,7 +55,10 @@ import {
 } from '@/lib/stream-recovery';
 import { ChatPageSkeleton, SidebarLoadingSkeleton, MessageSkeleton } from '@/components/SkeletonLoader';
 import { detectFlowOutline, isOutlineApprovalMessage } from '@/lib/flow-outline-parser';
-import { buildFlowOutlinePrompt } from '@/lib/flow-prompts';
+import { buildFlowOutlinePrompt, buildFlowTypeSelectedPrompt } from '@/lib/flow-prompts';
+import { useFlowMode, FlowStatus } from '@/hooks/useFlowMode';
+import FlowTypeCards from '@/components/chat/FlowTypeCards';
+import FlowOutlineMessage from '@/components/chat/FlowOutlineMessage';
 import { extractCampaignIdea, stripCampaignTags } from '@/lib/campaign-parser';
 import { logger } from '@/lib/logger';
 import { ErrorBoundary, SectionErrorBoundary } from '@/components/ErrorBoundary';
@@ -182,15 +185,38 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [isCreatingEmail, setIsCreatingEmail] = useState(false);
   const isSelectingConversationRef = useRef(false);
   
-  // Flow-related state
+  // Flow-related state - centralized in useFlowMode hook
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
-  const [selectedFlowType, setSelectedFlowType] = useState<FlowType | null>(null);
-  const [flowOutline, setFlowOutline] = useState<FlowOutline | null>(null);
-  const [flowChildren, setFlowChildren] = useState<Conversation[]>([]);
   const [parentFlow, setParentFlow] = useState<FlowConversation | null>(null);
   const [pendingOutlineApproval, setPendingOutlineApproval] = useState<FlowOutlineData | null>(null);
-  const [isGeneratingFlow, setIsGeneratingFlow] = useState(false);
-  const [flowGenerationProgress, setFlowGenerationProgress] = useState(0);
+  
+  // Centralized flow state management
+  const flowState = useFlowMode({
+    brandId,
+    conversationId: currentConversation?.id || null,
+    currentConversation
+  });
+  
+  // Destructure commonly used flow state for convenience
+  const { 
+    status: flowStatus,
+    flowType: selectedFlowType,
+    outline: flowOutline,
+    outlineData: flowOutlineData,
+    children: flowChildren,
+    generationProgress,
+    isFlowConversation,
+    isOutlineApproved,
+    pendingAction: flowPendingAction,
+    // Legacy compatibility - these delegate to the hook
+    setFlowType: setSelectedFlowType,
+    setFlowOutline,
+    setFlowChildren,
+    isGeneratingFlow,
+    setIsGeneratingFlow,
+    flowGenerationProgress,
+    setFlowGenerationProgress
+  } = flowState;
   
   // Campaign detection state (for Planning mode)
   const [detectedCampaign, setDetectedCampaign] = useState<{ title: string; brief: string } | null>(null);
@@ -314,17 +340,17 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     
     // Skip temp conversations in URL
     if (conversationIdFromUrl?.startsWith('temp-')) {
-      return;
-    }
-    
+        return;
+      }
+      
     if (conversationIdFromUrl && conversations.length > 0) {
       // Only update if conversation is different from current
       if (currentConversation?.id !== conversationIdFromUrl) {
-        const targetConversation = conversations.find(c => c?.id === conversationIdFromUrl);
-        if (targetConversation?.id) {
-          logger.log('[URL Effect] Loading conversation from URL:', conversationIdFromUrl);
-          // Use handleSelectConversation to properly load the conversation
-          handleSelectConversation(conversationIdFromUrl);
+      const targetConversation = conversations.find(c => c?.id === conversationIdFromUrl);
+      if (targetConversation?.id) {
+        logger.log('[URL Effect] Loading conversation from URL:', conversationIdFromUrl);
+        // Use handleSelectConversation to properly load the conversation
+        handleSelectConversation(conversationIdFromUrl);
         } else {
           // Conversation not in list - might be a flow or other filtered conversation
           // Try to load it directly from the database
@@ -365,8 +391,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
     } else if (!conversationIdFromUrl && currentConversation?.id) {
       // If URL doesn't have conversation param but we have one selected, update URL
-      updateConversationUrl(currentConversation.id);
-    }
+        updateConversationUrl(currentConversation.id);
+      }
   }, [searchParams, conversations, currentConversation?.id, brandId, pathname, router]);
 
   // Handle Quick Start params
@@ -625,7 +651,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         // Double-check URL again inside the timeout to catch race conditions
         const stillNoUrlConversation = !searchParams.get('conversation');
         if (stillNoUrlConversation && !navigationInProgressRef.current.active && !isSelectingConversationRef.current) {
-          handleNewConversation();
+            handleNewConversation();
         }
       }, 100);
       
@@ -1145,8 +1171,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           if (targetId && targetId !== conversationId) {
             logger.log('[LoadMessages] Conversation changed before DB load, aborting. Target:', targetId, 'Loading:', conversationId);
             setLoadingMessages(false); // IMPORTANT: Reset loading state even on abort
-            return;
-          }
+        return;
+      }
       
           // Load from database
       const { data, error } = await supabase
@@ -1163,8 +1189,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           if (finalTargetId && finalTargetId !== conversationId) {
             logger.log('[LoadMessages] Conversation changed after DB load, aborting. Target:', finalTargetId, 'Loading:', conversationId);
             setLoadingMessages(false); // IMPORTANT: Reset loading state even on abort
-            return;
-          }
+        return;
+      }
       
       if (data) {
         // Deduplicate messages from database
@@ -1238,7 +1264,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Check if this is a flow conversation
       const isFlowConversation = initialEmailType === 'flow';
       const conversationTitle = isFlowConversation ? 'New Flow' : 'New Conversation';
-      
+
       // Optimistic UI: Create temporary conversation object immediately
       const tempId = `temp-${Date.now()}`;
       const optimisticConversation: Conversation = {
@@ -1273,13 +1299,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       // Now create in database - include is_flow and flow_type for flow conversations
       const insertData: Record<string, unknown> = {
-        brand_id: brandId,
-        user_id: user.id,
-        created_by_name: currentUserName,
+          brand_id: brandId,
+          user_id: user.id,
+          created_by_name: currentUserName,
         title: conversationTitle,
-        model: selectedModel,
-        conversation_type: 'email',
-        mode: initialMode,
+          model: selectedModel,
+          conversation_type: 'email',
+          mode: initialMode,
       };
       
       if (isFlowConversation) {
@@ -1299,7 +1325,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         setCurrentConversation(null);
         throw error;
       }
-      
+
       // Update navigation ref with the real conversation ID
       navigationInProgressRef.current = { active: true, targetConversationId: data.id };
       
@@ -1315,8 +1341,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       trackEvent('conversation_created', { conversationId: data.id });
       
       // Clear navigation flags after everything is settled
-      setTimeout(() => {
-        isSelectingConversationRef.current = false;
+        setTimeout(() => {
+          isSelectingConversationRef.current = false;
         navigationInProgressRef.current = { active: false, targetConversationId: data.id };
       }, 200);
     } catch (error) {
@@ -1343,7 +1369,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
       setConversationMode(newMode);
       setCurrentConversation({ ...currentConversation, mode: newMode });
-      toast.success(`Switched to ${newMode === 'planning' ? 'Planning' : 'Writing'} mode`);
+      toast.success(`Switched to ${newMode === 'planning' ? 'Chat' : 'Writing'} mode`);
     } catch (error) {
       logger.error('Error updating mode:', error);
       toast.error('Failed to update mode');
@@ -1625,12 +1651,12 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   };
 
-  // Handle email type change - Flow mode is now conversational
+  // Handle email type change - Flow mode now uses centralized flow state
   // Returns true if it handled the flow creation (to skip onStartFlow callback)
   const handleEmailTypeChange = async (type: EmailType): Promise<boolean> => {
     if (type === 'flow') {
-      // When switching to flow mode, we need to create a new flow conversation
-      // This ensures is_flow=true is set in the database from the start
+      // When switching to flow mode, create a new flow conversation
+      // flow_type is null - user will select type via FlowTypeCards
       logger.log('[EmailTypeChange] Switching to flow mode, creating new flow conversation');
       
       // Don't let URL effect interfere - mark that we're navigating
@@ -1645,7 +1671,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           return false;
         }
 
-        // Create flow conversation directly in database first
+        // Create flow conversation with default flow_type
+        // DB constraint requires flow_type when is_flow=true
+        // FlowTypeCards will show and user can select a different type
         const { data: newFlowConversation, error } = await supabase
           .from('conversations')
           .insert({
@@ -1657,7 +1685,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             conversation_type: 'email',
             mode: 'email_copy',
             is_flow: true,
-            flow_type: 'welcome_series'
+            flow_type: 'welcome_series' // Default type, user can change via FlowTypeCards
           })
           .select()
           .single();
@@ -1672,14 +1700,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         logger.log('[EmailTypeChange] Created flow conversation:', newFlowConversation.id);
 
         // Update state with the new conversation
-        // IMPORTANT: Set conversationMode to 'flow' to match is_flow: true in database
-        // This ensures UI state matches DB state immediately without needing reselection
         setConversations(prev => [newFlowConversation, ...prev]);
         setCurrentConversation(newFlowConversation);
-        setConversationMode('flow');
-        setEmailType('flow');
+      setConversationMode('flow');
+      setEmailType('flow');
         setMessages([]);
-        setSelectedFlowType('welcome_series');
 
         // Update URL to new conversation
         updateConversationUrl(newFlowConversation.id);
@@ -1687,12 +1712,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
         await loadConversations();
         
-        // Use pendingPrompt mechanism - the effect will wait for currentConversation.is_flow to be true
-        // This is more reliable than trying to time the state updates
-        logger.log('[EmailTypeChange] Setting pending prompt for flow, conversation:', newFlowConversation.id);
-        setPendingPrompt("I want to create an email flow");
-        
-        toast.success('Flow conversation created! Describe your automation needs.');
+        // No pending prompt - FlowTypeCards will be shown for user to select type
+        toast.success('Select a flow type to get started!');
         
         return true;
       } finally {
@@ -1712,103 +1733,56 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     scrollToBottom();
   };
 
-  // Handle flow type selection
+  // Handle flow type selection from FlowTypeCards
+  // At this point, flow conversation already exists with is_flow=true but flow_type=null
   const handleSelectFlowType = async (flowType: FlowType) => {
-    try {
-      logger.log('[Flow] Creating flow conversation for type:', flowType);
-      setIsCreatingFlow(true);
-      setSelectedFlowType(flowType);
-      
-      // Create new flow conversation
-      const { data: user } = await supabase.auth.getUser();
-      if (!user.user) {
-        logger.error('[Flow] No user found');
-        setIsCreatingFlow(false);
+    if (!currentConversation?.is_flow) {
+      logger.error('[Flow] Cannot select flow type - not a flow conversation');
         return;
       }
 
-      const flowTitle = `New ${flowType.replace(/_/g, ' ')} Flow`;
-      const flowData = {
-        brand_id: brandId,
-        user_id: user.user.id,
-        title: flowTitle,
-        model: selectedModel,
-        conversation_type: 'email' as const,
-        mode: 'email_copy' as const,
-        is_flow: true,
-        flow_type: flowType
-      };
-
-      // Optimistic UI: Create temporary flow conversation immediately
-      const tempId = `temp-flow-${Date.now()}`;
-      const optimisticFlow: Conversation = {
-        id: tempId,
-        brand_id: brandId,
-        user_id: user.user.id,
-        created_by_name: currentUserName,
-        title: flowTitle,
-        model: selectedModel,
-        conversation_type: 'email',
-        mode: 'email_copy',
-        is_flow: true,
-        flow_type: flowType,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      // Add to conversations list optimistically
-      setConversations(prev => [optimisticFlow, ...prev]);
+    try {
+      logger.log('[Flow] User selected flow type:', flowType);
+      setIsCreatingFlow(true);
       
-      // Select it immediately
-      setCurrentConversation(optimisticFlow);
-      setEmailType('flow');
-      setMessages([]);
-      setPendingOutlineApproval(null);
-      setIsGeneratingFlow(false);
-      setFlowGenerationProgress(0);
-      setFlowOutline(null);
-      setFlowChildren([]);
-
-      logger.log('[Flow] Inserting conversation with data:', flowData);
-
-      const { data: newConversation, error } = await supabase
+      // Update flow_type in database
+      const { error } = await supabase
         .from('conversations')
-        .insert(flowData)
-        .select()
-        .single();
+        .update({ 
+        flow_type: flowType,
+          title: `New ${flowType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Flow`
+        })
+        .eq('id', currentConversation.id);
 
       if (error) {
-        logger.error('[Flow] Error creating conversation:', error);
-        logger.error('[Flow] Error details:', JSON.stringify(error, null, 2));
-        logger.error('[Flow] Error message:', error.message);
-        logger.error('[Flow] Error code:', error.code);
-        logger.error('[Flow] Error hint:', error.hint);
-        logger.error('[Flow] Error details:', error.details);
-        
-        // Roll back optimistic update on error
-        setConversations(prev => prev.filter(c => c.id !== tempId));
-        setCurrentConversation(null);
-        setEmailType('design');
-        throw error;
+        logger.error('[Flow] Error updating flow type:', error);
+        toast.error('Failed to set flow type');
+        return;
       }
 
-      logger.log('[Flow] Created conversation:', newConversation);
-      logger.log('[Flow] is_flow value:', newConversation.is_flow);
-      logger.log('[Flow] flow_type value:', newConversation.flow_type);
-
-      // Replace optimistic conversation with real one
-      setConversations(prev => prev.map(c => c.id === tempId ? newConversation : c));
-      setCurrentConversation(newConversation);
+      // Update local state
+      const updatedConversation = { ...currentConversation, flow_type: flowType };
+      setCurrentConversation(updatedConversation);
+      setConversations(prev => prev.map(c => 
+        c.id === currentConversation.id ? updatedConversation : c
+      ));
       
-      await loadConversations();
+      // Update flow state
+      flowState.setFlowType(flowType);
+      flowState.setStatus('chatting');
       
-      logger.log('[Flow] Conversation loaded, check sidebar for is_flow:', newConversation.is_flow);
-      toast.success('Flow conversation created! Describe your automation needs.');
+      // Send initial message to start the outline generation
+      const flowTypeDisplay = flowType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+      const initialMessage = `I want to create a ${flowTypeDisplay} email flow. Help me design the sequence.`;
+      
+      // Trigger the message send
+      handleSendMessage(initialMessage);
+      
+      logger.log('[Flow] Flow type selected, starting outline generation');
+      
     } catch (error) {
-      logger.error('Error creating flow:', error);
-      toast.error('Failed to create flow');
-      // Reset email type
-      setEmailType('design');
+      logger.error('[Flow] Error selecting flow type:', error);
+      toast.error('Failed to start flow');
     } finally {
       setIsCreatingFlow(false);
     }
@@ -1865,10 +1839,19 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       logger.log('[Flow UI] Starting flow generation for', outline.emails.length, 'emails');
       
-      // Set initial progress to 1 to show we're starting
-      setFlowGenerationProgress(1);
+      // Set initial progress to 0 (starting)
+      setFlowGenerationProgress(0);
       
-      // Subscribe to child conversation inserts for real-time progress updates
+      // Get initial list of child conversation IDs (for tracking messages)
+      const { data: existingChildren } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('parent_conversation_id', currentConversation.id);
+      
+      const existingChildIds = new Set(existingChildren?.map(c => c.id) || []);
+      
+      // Subscribe to MESSAGE inserts in child conversations for real-time progress
+      // This tracks when emails are actually generated (not just when conversations are created)
       flowProgressChannel = supabase
         .channel(`flow-generation:${currentConversation.id}`)
         .on(
@@ -1876,39 +1859,60 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           {
             event: 'INSERT',
             schema: 'public',
-            table: 'conversations',
-            filter: `parent_conversation_id=eq.${currentConversation.id}`,
+            table: 'messages',
           },
-          (payload) => {
-            const inserted = payload.new as { id?: string } | null;
-            if (inserted?.id) {
-              observedChildIds.add(inserted.id);
+          async (payload) => {
+            const inserted = payload.new as { conversation_id?: string; role?: string } | null;
+            // Only count assistant messages (the generated emails)
+            if (inserted?.conversation_id && inserted?.role === 'assistant') {
+              // Check if this message is in a child of our flow
+              const { data: conv } = await supabase
+                .from('conversations')
+                .select('parent_conversation_id')
+                .eq('id', inserted.conversation_id)
+                .single();
+              
+              if (conv?.parent_conversation_id === currentConversation.id) {
+                observedChildIds.add(inserted.conversation_id);
               const progressCount = Math.min(outline.emails.length, observedChildIds.size);
-              logger.log('[Flow Progress] Email created, updating progress:', progressCount);
+                logger.log('[Flow Progress] Email generated, updating progress:', progressCount);
               setFlowGenerationProgress(progressCount);
+              }
             }
           }
         )
         .subscribe();
       
-      // Fallback: Poll for progress every 3 seconds if realtime updates fail
+      // Fallback: Poll for progress every 2 seconds by counting messages in child conversations
       progressInterval = setInterval(async () => {
         try {
+          // Get child conversations with messages
           const { data: children } = await supabase
             .from('conversations')
-            .select('id')
+            .select(`
+              id,
+              messages!inner(id)
+            `)
             .eq('parent_conversation_id', currentConversation.id);
           
-          if (children && children.length > observedChildIds.size) {
-            children.forEach(c => observedChildIds.add(c.id));
-            const progressCount = Math.min(outline.emails.length, children.length);
+          if (children) {
+            // Count children that have at least one message (email was generated)
+            const completedCount = children.filter(c => c.messages && c.messages.length > 0).length;
+            if (completedCount > observedChildIds.size) {
+              children.forEach(c => {
+                if (c.messages && c.messages.length > 0) {
+                  observedChildIds.add(c.id);
+                }
+              });
+              const progressCount = Math.min(outline.emails.length, completedCount);
             logger.log('[Flow Progress] Polling detected progress:', progressCount);
             setFlowGenerationProgress(progressCount);
+            }
           }
         } catch (error) {
           logger.error('[Flow Progress] Error polling progress:', error);
         }
-      }, 3000);
+      }, 2000);
       
       logger.log('[Flow UI] Calling generate-emails API...');
       const response = await fetch('/api/flows/generate-emails', {
@@ -1942,26 +1946,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         // Reload conversations to show new children in sidebar
         await loadConversations();
         
-        // Clear pending approval
-        setPendingOutlineApproval(null);
-        
-        // Add a system message about the generation (local only, not saved to DB)
-        const systemMessage: Message = {
-          id: `system-flow-complete-${currentConversation.id}-${Date.now()}-${Math.random()}`,
-          conversation_id: currentConversation.id,
-          role: 'assistant',
-          content: `✅ Successfully generated ${result.generated} emails! Click on any email in the outline above to view and edit it.`,
-          created_at: new Date().toISOString()
-        };
-        
-        setMessages(prev => {
-          // Only add if not already there
-          const exists = prev.some(m => m.content.includes('Successfully generated') && m.content.includes('emails!'));
-          if (!exists) {
-            return [...prev, systemMessage];
-          }
-          return prev;
-        });
+        // Mark flow as complete to show completion UI (keep pendingOutlineApproval for UI)
+        flowState.setStatus('complete');
+        // Note: Don't clear pendingOutlineApproval - we need it to show the completion UI
       } else {
         logger.warn('[Flow UI] Partial success:', result);
         toast.error(`Generated ${result.generated} emails, but ${result.failed} failed. Check console for details.`);
@@ -2626,14 +2613,18 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       // Update conversation title if it's the first message
+      // IMPORTANT: Fire and forget - don't block the main AI response
       if (messagesToUse.length === 0) {
-        const title = await generateTitle(content, currentConversation.id);
-        // Update optimistically
-        setCurrentConversation({ ...currentConversation, title });
-        await loadConversations();
+        // Non-blocking title generation - runs in background
+        generateTitle(content, currentConversation.id).then(title => {
+          setCurrentConversation(prev => prev ? { ...prev, title } : prev);
+          loadConversations(); // Also non-blocking
+        }).catch(err => {
+          logger.error('Background title generation failed:', err);
+        });
       } else {
-        // Update conversation timestamp
-        await supabase
+        // Non-blocking timestamp update
+        supabase
           .from('conversations')
           .update({ updated_at: new Date().toISOString() })
           .eq('id', currentConversation.id);
@@ -2713,7 +2704,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
       }, 100);
-      
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -3327,17 +3318,31 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   }
 
 
-  const flowGuidanceCard = currentConversation?.is_flow &&
-    messages.length === 0 &&
-    !pendingOutlineApproval
-      ? (
+  // Flow UI element - shows FlowTypeCards for new flows, or FlowGuidanceCard for flows with messages
+  // Note: Not using useMemo to avoid hooks ordering issues with callback dependencies
+  let flowUIElement = null;
+  if (currentConversation?.is_flow && messages.length === 0 && !pendingOutlineApproval) {
+    // Show FlowTypeCards for new flow conversations (no messages yet)
+    // This allows users to select/change flow type before starting
+    flowUIElement = (
+      <div className="flex justify-center py-8">
+        <FlowTypeCards
+          onSelectType={handleSelectFlowType}
+          isLoading={isCreatingFlow || sending}
+          selectedType={currentConversation.flow_type || selectedFlowType}
+        />
+      </div>
+    );
+  } else if (currentConversation?.is_flow && messages.length > 0 && !flowOutline && !pendingOutlineApproval) {
+    // Show FlowGuidanceCard when there are messages but no outline yet
+    flowUIElement = (
         <FlowGuidanceCard
           flowType={(currentConversation.flow_type ?? selectedFlowType) || null}
           onPromptSelect={handleFlowPromptSelect}
-          isLoading={sending}
+        isLoading={sending}
         />
-      )
-      : null;
+    );
+  }
 
   return (
     <div className="relative h-screen bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
@@ -3505,7 +3510,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-200">
               <div className="space-y-6">
                 
-                {flowGuidanceCard}
+                {flowUIElement}
                 <MessageSkeleton isUser />
                 <MessageSkeleton />
                 <MessageSkeleton isUser />
@@ -3513,9 +3518,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               </div>
             </div>
           ) : messages.length === 0 ? (
-            flowGuidanceCard ? (
+            flowUIElement ? (
               <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <div className="space-y-6">{flowGuidanceCard}</div>
+                <div className="space-y-6">{flowUIElement}</div>
               </div>
             ) : (
               <ChatEmptyState mode={conversationMode} onNewConversation={handleNewConversation} />
@@ -3525,7 +3530,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             <SectionErrorBoundary sectionName="message list">
               <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-200">
                 
-                {flowGuidanceCard}
+                {flowUIElement}
               <VirtualizedMessageList
                 messages={messages}
                 brandId={brandId}
@@ -3562,7 +3567,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             <SectionErrorBoundary sectionName="message list">
               <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-200">
                 
-                {flowGuidanceCard}
+                {flowUIElement}
                 {/* Flow Outline Display for parent flow conversations */}
                 {currentConversation?.is_flow && flowOutline && flowOutline.approved && (
                   <FlowOutlineDisplay
@@ -3626,13 +3631,57 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                 />
               ))}
               
+              {/* Inline Flow Outline Approval UI - shows after messages */}
+              {currentConversation?.is_flow && pendingOutlineApproval && !isOutlineApproved && flowState.status !== 'complete' && !sending && !isGeneratingFlow && (
+                <div className="py-4">
+                  <FlowOutlineMessage
+                    outline={pendingOutlineApproval}
+                    mermaidChart={flowOutline?.mermaid_chart}
+                    isApproved={false}
+                    isGenerating={false}
+                    generationProgress={{
+                      current: 0,
+                      total: pendingOutlineApproval.emails.length,
+                      currentEmailTitle: null
+                    }}
+                    onApprove={() => handleApproveOutline(pendingOutlineApproval)}
+                  />
+                </div>
+              )}
+              
               {/* Inline Flow Generation Progress */}
               {isGeneratingFlow && pendingOutlineApproval && (
-                <FlowGenerationProgress
-                  totalEmails={pendingOutlineApproval.emails.length}
-                  currentEmail={flowGenerationProgress}
-                  isGenerating={isGeneratingFlow}
-                />
+                <div className="py-4">
+                  <FlowOutlineMessage
+                    outline={pendingOutlineApproval}
+                    mermaidChart={flowOutline?.mermaid_chart}
+                    isApproved={true}
+                    isGenerating={true}
+                    generationProgress={{
+                      current: flowGenerationProgress,
+                      total: pendingOutlineApproval.emails.length,
+                      currentEmailTitle: null
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Flow Generation Complete - shows clickable list of generated emails */}
+              {currentConversation?.is_flow && pendingOutlineApproval && (isOutlineApproved || flowState.status === 'complete') && !isGeneratingFlow && flowChildren.length > 0 && (
+                <div className="py-4">
+                  <FlowOutlineMessage
+                    outline={pendingOutlineApproval}
+                    mermaidChart={flowOutline?.mermaid_chart}
+                    isApproved={true}
+                    isGenerating={false}
+                    generatedEmails={flowChildren.map(child => ({
+                      id: child.id,
+                      title: child.flow_email_title || `Email ${child.flow_sequence_order}`,
+                      sequence: child.flow_sequence_order || 0
+                    }))}
+                    onViewEmail={(emailId) => handleSelectConversation(emailId)}
+                  />
+                </div>
               )}
               
               <div ref={messagesEndRef} />
@@ -3646,37 +3695,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           )}
         </div>
 
-        {/* Approve Outline Button (Flow Mode) */}
-        {(() => {
-          const shouldShow = currentConversation?.is_flow && 
-                            pendingOutlineApproval && 
-                            !flowOutline?.approved && 
-                            !sending;
-          
-          if (currentConversation?.is_flow) {
-            logger.log('[Approve Button Debug]', {
-              isFlow: currentConversation?.is_flow,
-              hasPendingOutline: !!pendingOutlineApproval,
-              flowOutlineApproved: flowOutline?.approved,
-              sending,
-              shouldShow
-            });
-          }
-          
-          return shouldShow;
-        })() && (
-          <div className="border-t border-gray-200 dark:border-gray-700 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-            <div className="max-w-4xl mx-auto">
-              <Suspense fallback={<div className="p-4 text-center text-gray-500">Loading...</div>}>
-                <ApproveOutlineButton
-                  outline={pendingOutlineApproval!}
-                  onApprove={() => handleApproveOutline(pendingOutlineApproval!)}
-                  disabled={sending}
-                />
-              </Suspense>
-            </div>
-          </div>
-        )}
+        {/* Note: Flow Outline UI is now rendered inline with messages above */}
 
         {/* Create Campaign Button (Planning Mode with detected campaign) */}
         {currentConversation && 
@@ -3765,7 +3784,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           </svg>
           <span className="text-sm font-medium">You're offline</span>
         </div>
-      )}
+        )}
 
         {/* Share Modal */}
         {showShareModal && currentConversation && (

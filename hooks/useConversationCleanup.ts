@@ -38,11 +38,11 @@ export function useConversationCleanup({
         return false;
       }
 
-      // IMPORTANT: Check the TARGET conversation's is_flow status from database
+      // IMPORTANT: Check the TARGET conversation's is_flow status and created_at from database
       // Don't use the hook's isFlow/isChild as those track the CURRENT conversation
       const { data: targetConv, error: convError } = await supabase
         .from('conversations')
-        .select('is_flow, parent_conversation_id')
+        .select('is_flow, parent_conversation_id, created_at')
         .eq('id', targetConversationId)
         .single();
       
@@ -56,6 +56,19 @@ export function useConversationCleanup({
       if (targetConv?.is_flow || targetConv?.parent_conversation_id) {
         logger.log('[Cleanup] Skipping auto-delete for flow/child conversation:', targetConversationId);
         return false;
+      }
+      
+      // SAFETY CHECK: Don't delete conversations created within the last 5 seconds
+      // This prevents race conditions where user is actively typing their first message
+      if (targetConv?.created_at) {
+        const createdAt = new Date(targetConv.created_at).getTime();
+        const now = Date.now();
+        const ageInSeconds = (now - createdAt) / 1000;
+        
+        if (ageInSeconds < 5) {
+          logger.log('[Cleanup] Skipping recently created conversation (age:', ageInSeconds.toFixed(1), 's):', targetConversationId);
+          return false;
+        }
       }
 
       // Verify conversation is empty in database before deleting
@@ -99,30 +112,38 @@ export function useConversationCleanup({
   };
 
   /**
-   * Cleanup on unmount (with delay to avoid blocking navigation)
-   * CRITICAL: Capture conversationId at effect setup time to prevent race conditions
-   * when switching conversations rapidly
+   * Cleanup on unmount or when conversation changes (with delay to avoid blocking navigation)
+   * CRITICAL: We intentionally do NOT include messageCount in dependencies.
+   * 
+   * The issue: When a user sends their first message, messageCount changes from 0 to 1.
+   * If messageCount is in dependencies, the effect re-runs, triggering cleanup of the
+   * PREVIOUS state (which had messageCount=0). This races with the message insert,
+   * potentially deleting the conversation before the message is saved.
+   * 
+   * The fix: Only trigger cleanup when conversationId changes (switching conversations)
+   * or on unmount. Always check the DB for the actual message count - the DB is authoritative.
    */
   useEffect(() => {
     if (!shouldAutoDelete || !conversationId) return;
 
-    // Capture current values at effect setup time (not from ref)
+    // Capture conversation ID at effect setup time
     const capturedConversationId = conversationId;
-    const capturedMessageCount = messageCount;
 
     return () => {
-      // Only cleanup if conversation was empty when this effect was set up
-      // This prevents deleting a newly created conversation when rapidly switching
-      if (capturedConversationId && capturedMessageCount === 0) {
-        // Small delay to avoid blocking navigation
+      // Cleanup when switching away from this conversation or on unmount
+      // The DB check in checkAndDeleteIfEmpty will verify it's actually empty
+      if (capturedConversationId) {
+        // Longer delay (500ms) to ensure any in-flight message inserts complete
+        // This prevents race conditions where cleanup runs before message is saved
         setTimeout(() => {
           (async () => {
             await checkAndDeleteIfEmpty(capturedConversationId, 'empty_on_unmount');
           })();
-        }, 100);
+        }, 500);
       }
     };
-  }, [shouldAutoDelete, conversationId, messageCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldAutoDelete, conversationId]); // Intentionally exclude messageCount - see comment above
 
   return {
     /**
@@ -180,10 +201,10 @@ export async function bulkCleanupEmptyConversations(brandId: string, excludeConv
   try {
     const supabase = createClient();
     
-    // Get all conversations for this brand
+    // Get all conversations for this brand (include created_at for age check)
     const { data: conversations, error: fetchError } = await supabase
       .from('conversations')
-      .select('id, is_flow, parent_conversation_id')
+      .select('id, is_flow, parent_conversation_id, created_at')
       .eq('brand_id', brandId);
     
     if (fetchError || !conversations) {
@@ -213,6 +234,19 @@ export async function bulkCleanupEmptyConversations(brandId: string, excludeConv
         // NEVER delete flow conversations or child conversations
         if (conv.is_flow || conv.parent_conversation_id) {
           continue;
+        }
+        
+        // SAFETY CHECK: Don't delete conversations created within the last 5 seconds
+        // This prevents race conditions where user is actively typing their first message
+        if (conv.created_at) {
+          const createdAt = new Date(conv.created_at).getTime();
+          const now = Date.now();
+          const ageInSeconds = (now - createdAt) / 1000;
+          
+          if (ageInSeconds < 5) {
+            logger.log('[BulkCleanup] Skipping recently created conversation (age:', ageInSeconds.toFixed(1), 's):', conv.id);
+            continue;
+          }
         }
         
         // Count messages for this conversation

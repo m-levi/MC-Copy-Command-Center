@@ -4,21 +4,12 @@ import { FlowOutlineData, AIModel, FlowOutlineEmail } from '@/types';
 import { buildFlowEmailPrompt } from '@/lib/flow-prompts';
 import { getActiveDebugPrompt } from '@/lib/debug-prompts';
 import { generateMermaidChart } from '@/lib/mermaid-generator';
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
+import { gateway } from '@/lib/ai-providers';
 
-// Note: Cannot use edge runtime because Anthropic SDK requires Node.js APIs
+// Note: Cannot use edge runtime for long-running operations
 // export const runtime = 'edge';
 export const maxDuration = 300; // 5 minutes for generating multiple emails
-
-// Flow email generation currently only supports Anthropic models
-// If OpenAI/Google support is needed, this will need to be refactored
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  // Add beta headers for web search and memory tools
-  defaultHeaders: {
-    'anthropic-beta': 'web-search-2025-03-05,context-management-2025-06-27'
-  }
-});
 
 /**
  * Check if a model is supported for flow generation
@@ -30,35 +21,15 @@ function isModelSupportedForFlows(aiGatewayModelId: string | undefined): boolean
 }
 
 /**
- * Map AI Gateway model IDs to Anthropic SDK model names
- * AI Gateway format: 'anthropic/claude-sonnet-4.5'
- * Anthropic SDK format: 'claude-sonnet-4-20250514'
- * 
- * @throws Error if a non-Anthropic model is requested
+ * Get AI Gateway model ID for flow generation
+ * Ensures we're using an Anthropic model (the only supported provider for flows)
  */
-function getAnthropicModelName(aiGatewayModelId: string | undefined): string {
-  const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+function getGatewayModelId(aiGatewayModelId: string | undefined): string {
+  const DEFAULT_MODEL = 'anthropic/claude-sonnet-4.5';
   
   if (!aiGatewayModelId) return DEFAULT_MODEL;
   
-  // Map AI Gateway model IDs to Anthropic SDK model names
-  const modelMap: Record<string, string> = {
-    'anthropic/claude-sonnet-4.5': 'claude-sonnet-4-20250514',
-    'anthropic/claude-opus-4.5': 'claude-opus-4-20250514',
-    'anthropic/claude-haiku-4.5': 'claude-haiku-4-20250514',
-    // Legacy model IDs
-    'claude-3-5-sonnet-20241022': 'claude-sonnet-4-20250514',
-    'claude-3-opus-20240229': 'claude-opus-4-20250514',
-    'claude-3-haiku-20240307': 'claude-haiku-4-20250514',
-  };
-  
-  // If it's a known AI Gateway model, map it
-  if (modelMap[aiGatewayModelId]) {
-    return modelMap[aiGatewayModelId];
-  }
-  
   // If it's not an Anthropic model (e.g., OpenAI, Google), throw an error
-  // Don't silently fall back - user should know their model choice isn't supported
   if (!aiGatewayModelId.startsWith('anthropic/') && !aiGatewayModelId.startsWith('claude')) {
     throw new Error(
       `Flow email generation currently only supports Anthropic (Claude) models. ` +
@@ -67,15 +38,32 @@ function getAnthropicModelName(aiGatewayModelId: string | undefined): string {
     );
   }
   
-  // If it's already in Anthropic SDK format, use it directly
-  if (aiGatewayModelId.startsWith('claude-')) {
+  // If it's already in AI Gateway format, use it
+  if (aiGatewayModelId.startsWith('anthropic/')) {
     return aiGatewayModelId;
   }
   
-  // Try to extract model name from AI Gateway format
-  const modelName = aiGatewayModelId.replace('anthropic/', '');
-  console.log(`[Flow Generator] Using extracted model name: ${modelName}`);
-  return modelName;
+  // Map legacy model IDs to AI Gateway format
+  const modelMap: Record<string, string> = {
+    'claude-3-5-sonnet-20241022': 'anthropic/claude-sonnet-4.5',
+    'claude-3-opus-20240229': 'anthropic/claude-opus-4.5',
+    'claude-3-haiku-20240307': 'anthropic/claude-haiku-4.5',
+    'claude-sonnet-4-20250514': 'anthropic/claude-sonnet-4.5',
+    'claude-opus-4-20250514': 'anthropic/claude-opus-4.5',
+    'claude-haiku-4-20250514': 'anthropic/claude-haiku-4.5',
+  };
+  
+  if (modelMap[aiGatewayModelId]) {
+    return modelMap[aiGatewayModelId];
+  }
+  
+  // Try to convert claude-* format to anthropic/ format
+  if (aiGatewayModelId.startsWith('claude-')) {
+    return `anthropic/${aiGatewayModelId}`;
+  }
+  
+  console.log(`[Flow Generator] Using model as-is: ${aiGatewayModelId}`);
+  return aiGatewayModelId;
 }
 
 export async function POST(request: NextRequest) {
@@ -236,33 +224,18 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
           } for Email ${emailOutline.sequence}`
         );
 
-        // Map user's selected model to Anthropic SDK format
-        const anthropicModel = getAnthropicModelName(model);
-        console.log(`[Flow Generator] Calling Claude API with model: ${anthropicModel} (requested: ${model})`);
-        let emailContent = '';
+        // Get AI Gateway model ID
+        const gatewayModelId = getGatewayModelId(model);
+        console.log(`[Flow Generator] Calling AI Gateway with model: ${gatewayModelId} (requested: ${model})`);
 
-        const response = await anthropic.messages.create({
-          model: anthropicModel,
-          max_tokens: 4000,
-          thinking: {
-            type: 'enabled',
-            budget_tokens: 2000
-          },
-          messages: [{
-            role: 'user',
-            content: prompt
-          }]
+        // Use Vercel AI SDK with AI Gateway
+        const response = await generateText({
+          model: gateway(gatewayModelId),
+          prompt: prompt,
         });
 
-        console.log(`[Flow Generator] Claude API response received`);
-        console.log(`[Flow Generator] Response contains ${response.content.length} blocks`);
-
-        for (const block of response.content) {
-          if (block.type === 'text') {
-            emailContent += block.text;
-          }
-        }
-
+        console.log(`[Flow Generator] AI Gateway response received`);
+        const emailContent = response.text;
         console.log(`[Flow Generator] Extracted ${emailContent.length} characters of content`);
 
         if (!emailContent || emailContent.length === 0) {

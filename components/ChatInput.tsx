@@ -106,15 +106,14 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const models = AI_MODELS.slice(0, 4);
 
   const modes = [
-    { id: 'planning' as const, name: 'Plan', description: 'Explore ideas & strategy', icon: Lightbulb },
+    { id: 'planning' as const, name: 'Chat', description: 'Ask questions & explore ideas', icon: Lightbulb },
     { id: 'email_copy' as const, name: 'Write', description: 'Generate email copy', icon: Pencil },
   ];
 
   const emailTypes = [
     { id: 'design' as const, name: 'Design', description: 'Full structured marketing email', icon: LayoutTemplate },
     { id: 'letter' as const, name: 'Letter', description: 'Short personal letter', icon: Mail },
-    // TEMPORARILY HIDDEN: Flow feature is being reworked
-    // { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation', icon: GitMerge },
+    { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation', icon: GitMerge },
   ];
 
   // Note: Flow filtering is temporarily removed since flow type is hidden
