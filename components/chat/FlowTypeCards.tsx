@@ -228,3 +228,6 @@ export function FlowTypeCards({ onSelectType, isLoading, selectedType }: FlowTyp
 
 export default FlowTypeCards;
 
+
+
+

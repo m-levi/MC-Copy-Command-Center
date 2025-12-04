@@ -9,7 +9,6 @@ interface CustomPrompt {
   description?: string;
   prompt_type: 'design_email' | 'letter_email' | 'flow_email';
   system_prompt: string;
-  user_prompt: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -17,8 +16,6 @@ interface CustomPrompt {
 
 interface ProcessedPromptPreview {
   system_prompt: string;
-  user_prompt: string;
-  variables_used: Record<string, string>;
 }
 
 interface DebugPromptLabProps {
@@ -31,37 +28,15 @@ interface DebugPromptLabProps {
 
 type TabType = 'edit' | 'preview' | 'defaults' | 'compare';
 
-const PROMPT_VARIABLES = {
-  design_email: [
-    { name: '{{COPY_BRIEF}}', description: 'The user\'s message/request' },
-    { name: '{{BRAND_INFO}}', description: 'Brand details (name, description, tone, etc.)' },
-    { name: '{{BRAND_VOICE_GUIDELINES}}', description: 'Copywriting style guide' },
-    { name: '{{RAG_CONTEXT}}', description: 'Retrieved brand documents/context' },
-    { name: '{{MEMORY_CONTEXT}}', description: 'Saved memories about this brand' },
-    { name: '{{WEBSITE_URL}}', description: 'Brand website URL' },
-    { name: '{{CONTEXT_INFO}}', description: 'Conversation history context' },
-  ],
-  letter_email: [
-    { name: '{{EMAIL_BRIEF}}', description: 'The email brief/request' },
-    { name: '{{BRAND_INFO}}', description: 'Brand details' },
-    { name: '{{RAG_CONTEXT}}', description: 'Retrieved brand documents' },
-    { name: '{{MEMORY_CONTEXT}}', description: 'Saved memories' },
-    { name: '{{WEBSITE_URL}}', description: 'Brand website URL' },
-    { name: '{{CONTEXT_INFO}}', description: 'Conversation context' },
-  ],
-  flow_email: [
-    { name: '{{EMAIL_SEQUENCE}}', description: 'Current email number in flow' },
-    { name: '{{TOTAL_EMAILS}}', description: 'Total emails in flow' },
-    { name: '{{FLOW_NAME}}', description: 'Name of the automation flow' },
-    { name: '{{BRAND_INFO}}', description: 'Brand details' },
-    { name: '{{FLOW_GOAL}}', description: 'Goal of the flow' },
-    { name: '{{TARGET_AUDIENCE}}', description: 'Target audience description' },
-    { name: '{{EMAIL_TITLE}}', description: 'This email\'s title' },
-    { name: '{{EMAIL_PURPOSE}}', description: 'Purpose of this email' },
-    { name: '{{KEY_POINTS}}', description: 'Key points to cover' },
-    { name: '{{PRIMARY_CTA}}', description: 'Main call to action' },
-  ],
-};
+// Available variables for system prompts
+const PROMPT_VARIABLES = [
+  { name: '{{BRAND_NAME}}', description: 'The brand name' },
+  { name: '{{BRAND_INFO}}', description: 'Brand details (name, description, tone, etc.)' },
+  { name: '{{BRAND_VOICE_GUIDELINES}}', description: 'Copywriting style guide' },
+  { name: '{{WEBSITE_URL}}', description: 'Brand website URL' },
+  { name: '{{COPY_BRIEF}}', description: 'The user\'s message/request' },
+  { name: '{{CONTEXT_INFO}}', description: 'Conversation history context' },
+];
 
 export default function DebugPromptLab({
   brandId,
@@ -78,7 +53,6 @@ export default function DebugPromptLab({
     description: '',
     prompt_type: 'design_email' as 'design_email' | 'letter_email' | 'flow_email',
     system_prompt: '',
-    user_prompt: '',
   });
   const [defaultPrompts, setDefaultPrompts] = useState<Record<string, { system: string; user: string }>>({});
   const [processedPreview, setProcessedPreview] = useState<ProcessedPromptPreview | null>(null);
@@ -90,7 +64,6 @@ export default function DebugPromptLab({
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [comparePromptId, setComparePromptId] = useState<string | null>(null);
   const systemPromptRef = useRef<HTMLTextAreaElement>(null);
-  const userPromptRef = useRef<HTMLTextAreaElement>(null);
 
   // Determine prompt type from email type
   const getPromptType = useCallback(() => {
@@ -113,10 +86,10 @@ export default function DebugPromptLab({
 
   // Generate preview when switching to preview tab or when form changes
   useEffect(() => {
-    if (activeTab === 'preview' && (editForm.system_prompt || editForm.user_prompt)) {
+    if (activeTab === 'preview' && editForm.system_prompt) {
       generatePreview();
     }
-  }, [activeTab, editForm.system_prompt, editForm.user_prompt, editForm.prompt_type]);
+  }, [activeTab, editForm.system_prompt, editForm.prompt_type]);
 
   const loadPrompts = async () => {
     setLoading(true);
@@ -165,7 +138,7 @@ export default function DebugPromptLab({
   };
 
   const generatePreview = async () => {
-    if (!editForm.system_prompt && !editForm.user_prompt) return;
+    if (!editForm.system_prompt) return;
     
     setLoadingPreview(true);
     try {
@@ -176,7 +149,6 @@ export default function DebugPromptLab({
           brand_id: brandId,
           prompt_type: editForm.prompt_type,
           system_prompt: editForm.system_prompt,
-          user_prompt: editForm.user_prompt,
         }),
       });
       
@@ -201,7 +173,6 @@ export default function DebugPromptLab({
       description: prompt.description || '',
       prompt_type: prompt.prompt_type,
       system_prompt: prompt.system_prompt || '',
-      user_prompt: prompt.user_prompt || '',
     });
     setIsCreatingNew(false);
     setHasUnsavedChanges(false);
@@ -217,7 +188,6 @@ export default function DebugPromptLab({
       description: '',
       prompt_type: getPromptType(),
       system_prompt: '',
-      user_prompt: '',
     });
     setIsCreatingNew(true);
     setHasUnsavedChanges(false);
@@ -228,42 +198,34 @@ export default function DebugPromptLab({
     setHasUnsavedChanges(true);
   };
 
-  const copyFromDefault = (type: 'system' | 'user') => {
+  const copyFromDefault = () => {
     const defaultPrompt = defaultPrompts[editForm.prompt_type];
     if (!defaultPrompt) {
       toast.error('Default prompt not available. Load defaults first.');
       return;
     }
     
-    if (type === 'system') {
-      handleFormChange('system_prompt', defaultPrompt.system);
-      toast.success('Copied default system prompt');
-    } else {
-      handleFormChange('user_prompt', defaultPrompt.user);
-      toast.success('Copied default user prompt');
-    }
+    handleFormChange('system_prompt', defaultPrompt.system);
+    toast.success('Copied default system prompt');
   };
 
-  const insertVariable = (variable: string, target: 'system' | 'user') => {
-    const ref = target === 'system' ? systemPromptRef : userPromptRef;
-    const field = target === 'system' ? 'system_prompt' : 'user_prompt';
-    
-    if (ref.current) {
-      const start = ref.current.selectionStart;
-      const end = ref.current.selectionEnd;
-      const currentValue = editForm[field];
+  const insertVariable = (variable: string) => {
+    if (systemPromptRef.current) {
+      const start = systemPromptRef.current.selectionStart;
+      const end = systemPromptRef.current.selectionEnd;
+      const currentValue = editForm.system_prompt;
       const newValue = currentValue.substring(0, start) + variable + currentValue.substring(end);
-      handleFormChange(field, newValue);
+      handleFormChange('system_prompt', newValue);
       
       // Restore cursor position
       setTimeout(() => {
-        if (ref.current) {
-          ref.current.selectionStart = ref.current.selectionEnd = start + variable.length;
-          ref.current.focus();
+        if (systemPromptRef.current) {
+          systemPromptRef.current.selectionStart = systemPromptRef.current.selectionEnd = start + variable.length;
+          systemPromptRef.current.focus();
         }
       }, 0);
     } else {
-      handleFormChange(field, editForm[field] + variable);
+      handleFormChange('system_prompt', editForm.system_prompt + variable);
     }
   };
 
@@ -273,8 +235,8 @@ export default function DebugPromptLab({
       return;
     }
     
-    if (!editForm.system_prompt && !editForm.user_prompt) {
-      toast.error('At least one prompt (system or user) is required');
+    if (!editForm.system_prompt) {
+      toast.error('System prompt is required');
       return;
     }
 
@@ -381,7 +343,6 @@ export default function DebugPromptLab({
   if (!isOpen) return null;
 
   const promptsOfCurrentType = customPrompts.filter(p => p.prompt_type === editForm.prompt_type);
-  const variables = PROMPT_VARIABLES[editForm.prompt_type] || PROMPT_VARIABLES.design_email;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -550,7 +511,7 @@ export default function DebugPromptLab({
                       <span className="text-xs text-purple-600 dark:text-purple-400">— AI's instructions & role</span>
                     </div>
                     <button
-                      onClick={() => copyFromDefault('system')}
+                      onClick={() => copyFromDefault()}
                       className="px-2.5 py-1 text-xs font-medium text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-800/40 rounded-md transition-colors"
                     >
                       📋 Copy Default
@@ -561,34 +522,8 @@ export default function DebugPromptLab({
                     value={editForm.system_prompt}
                     onChange={(e) => handleFormChange('system_prompt', e.target.value)}
                     className="w-full px-4 py-3 font-mono text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-0 focus:ring-0 resize-none"
-                    style={{ minHeight: '180px' }}
-                    placeholder="You are an expert email copywriter..."
-                    spellCheck={false}
-                  />
-                </div>
-
-                {/* User Prompt */}
-                <div className="border border-emerald-200 dark:border-emerald-800 rounded-xl overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-                      <span className="font-semibold text-emerald-900 dark:text-emerald-100 text-sm">User Prompt</span>
-                      <span className="text-xs text-emerald-600 dark:text-emerald-400">— Template with variables</span>
-                    </div>
-                    <button
-                      onClick={() => copyFromDefault('user')}
-                      className="px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40 rounded-md transition-colors"
-                    >
-                      📋 Copy Default
-                    </button>
-                  </div>
-                  <textarea
-                    ref={userPromptRef}
-                    value={editForm.user_prompt}
-                    onChange={(e) => handleFormChange('user_prompt', e.target.value)}
-                    className="w-full px-4 py-3 font-mono text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-0 focus:ring-0 resize-none"
-                    style={{ minHeight: '180px' }}
-                    placeholder="Create an email based on: {{COPY_BRIEF}}..."
+                    style={{ minHeight: '300px' }}
+                    placeholder="You are an expert email copywriter specializing in conversion-focused marketing emails..."
                     spellCheck={false}
                   />
                 </div>
@@ -602,10 +537,10 @@ export default function DebugPromptLab({
                     Available Variables (click to insert)
                   </h4>
                   <div className="flex flex-wrap gap-2">
-                    {variables.map((v) => (
+                    {PROMPT_VARIABLES.map((v) => (
                       <button
                         key={v.name}
-                        onClick={() => insertVariable(v.name, 'user')}
+                        onClick={() => insertVariable(v.name)}
                         className="group relative px-2.5 py-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md text-xs font-mono text-gray-700 dark:text-gray-300 hover:border-indigo-400 dark:hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                         title={v.description}
                       >
@@ -635,7 +570,7 @@ export default function DebugPromptLab({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
                     <p className="text-gray-600 dark:text-gray-400">
-                      Add a prompt and switch to Preview to see how it looks with real brand data
+                      Add a system prompt to preview how it will appear to the AI
                     </p>
                     <button
                       onClick={generatePreview}
@@ -647,44 +582,18 @@ export default function DebugPromptLab({
                 ) : (
                   <div className="space-y-6">
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                      <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Variables Substituted
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        {Object.entries(processedPreview.variables_used).map(([key, value]) => (
-                          <div key={key} className="flex items-start gap-2">
-                            <code className="px-1.5 py-0.5 bg-white dark:bg-gray-800 rounded text-xs font-mono text-blue-700 dark:text-blue-300">
-                              {key}
-                            </code>
-                            <span className="text-blue-800 dark:text-blue-200 truncate flex-1" title={value}>
-                              {value.substring(0, 50)}{value.length > 50 ? '...' : ''}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                      <p className="text-sm text-blue-800 dark:text-blue-200">
+                        <strong>Preview:</strong> This is exactly what the AI will see as its system instructions when generating emails.
+                      </p>
                     </div>
 
                     {processedPreview.system_prompt && (
                       <div className="border border-purple-200 dark:border-purple-800 rounded-xl overflow-hidden">
                         <div className="px-4 py-2.5 bg-purple-50 dark:bg-purple-900/20 border-b border-purple-200 dark:border-purple-800">
-                          <span className="font-semibold text-purple-900 dark:text-purple-100 text-sm">Processed System Prompt</span>
+                          <span className="font-semibold text-purple-900 dark:text-purple-100 text-sm">System Prompt</span>
                         </div>
-                        <pre className="p-4 text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap overflow-x-auto max-h-80 overflow-y-auto">
+                        <pre className="p-4 text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap overflow-x-auto max-h-[60vh] overflow-y-auto">
                           {processedPreview.system_prompt}
-                        </pre>
-                      </div>
-                    )}
-
-                    {processedPreview.user_prompt && (
-                      <div className="border border-emerald-200 dark:border-emerald-800 rounded-xl overflow-hidden">
-                        <div className="px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800">
-                          <span className="font-semibold text-emerald-900 dark:text-emerald-100 text-sm">Processed User Prompt</span>
-                        </div>
-                        <pre className="p-4 text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap overflow-x-auto max-h-80 overflow-y-auto">
-                          {processedPreview.user_prompt}
                         </pre>
                       </div>
                     )}
@@ -716,7 +625,7 @@ export default function DebugPromptLab({
                             {type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                           </span>
                         </div>
-                        <div className="p-4 space-y-4">
+                        <div className="p-4">
                           {prompts.system && (
                             <div>
                               <div className="flex items-center justify-between mb-2">
@@ -733,29 +642,8 @@ export default function DebugPromptLab({
                                   Use this →
                                 </button>
                               </div>
-                              <pre className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">
-                                {prompts.system.substring(0, 1000)}{prompts.system.length > 1000 ? '...' : ''}
-                              </pre>
-                            </div>
-                          )}
-                          {prompts.user && (
-                            <div>
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">User Prompt</span>
-                                <button
-                                  onClick={() => {
-                                    handleFormChange('user_prompt', prompts.user);
-                                    handleFormChange('prompt_type', type as any);
-                                    setActiveTab('edit');
-                                    toast.success('Copied to editor');
-                                  }}
-                                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-                                >
-                                  Use this →
-                                </button>
-                              </div>
-                              <pre className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">
-                                {prompts.user.substring(0, 1000)}{prompts.user.length > 1000 ? '...' : ''}
+                              <pre className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
+                                {prompts.system.substring(0, 1500)}{prompts.system.length > 1500 ? '...' : ''}
                               </pre>
                             </div>
                           )}
@@ -794,19 +682,11 @@ export default function DebugPromptLab({
                         <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
                         Current ({editForm.name || 'New Prompt'})
                       </h4>
-                      <div className="space-y-4">
-                        <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
-                          <span className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase">System</span>
-                          <pre className="mt-2 text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                            {editForm.system_prompt || '(empty)'}
-                          </pre>
-                        </div>
-                        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3">
-                          <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase">User</span>
-                          <pre className="mt-2 text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                            {editForm.user_prompt || '(empty)'}
-                          </pre>
-                        </div>
+                      <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
+                        <span className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase">System Prompt</span>
+                        <pre className="mt-2 text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-96 overflow-y-auto">
+                          {editForm.system_prompt || '(empty)'}
+                        </pre>
                       </div>
                     </div>
                     <div>
@@ -814,39 +694,26 @@ export default function DebugPromptLab({
                         <div className="w-3 h-3 rounded-full bg-amber-500"></div>
                         {comparePromptId === 'default' ? 'Default Prompt' : customPrompts.find(p => p.id === comparePromptId)?.name}
                       </h4>
-                      <div className="space-y-4">
-                        {(() => {
-                          const compareData = comparePromptId === 'default' 
-                            ? defaultPrompts[editForm.prompt_type] 
-                            : customPrompts.find(p => p.id === comparePromptId);
-                          
-                          if (!compareData) return <p className="text-gray-500">Loading...</p>;
-                          
-                          const systemPrompt = comparePromptId === 'default' 
-                            ? (compareData as { system: string; user: string }).system 
-                            : (compareData as CustomPrompt).system_prompt;
-                          const userPrompt = comparePromptId === 'default'
-                            ? (compareData as { system: string; user: string }).user
-                            : (compareData as CustomPrompt).user_prompt;
+                      {(() => {
+                        const compareData = comparePromptId === 'default' 
+                          ? defaultPrompts[editForm.prompt_type] 
+                          : customPrompts.find(p => p.id === comparePromptId);
+                        
+                        if (!compareData) return <p className="text-gray-500">Loading...</p>;
+                        
+                        const systemPrompt = comparePromptId === 'default' 
+                          ? (compareData as { system: string; user: string }).system 
+                          : (compareData as CustomPrompt).system_prompt;
 
-                          return (
-                            <>
-                              <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
-                                <span className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase">System</span>
-                                <pre className="mt-2 text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                                  {systemPrompt || '(empty)'}
-                                </pre>
-                              </div>
-                              <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3">
-                                <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase">User</span>
-                                <pre className="mt-2 text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                                  {userPrompt || '(empty)'}
-                                </pre>
-                              </div>
-                            </>
-                          );
-                        })()}
-                      </div>
+                        return (
+                          <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
+                            <span className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase">System Prompt</span>
+                            <pre className="mt-2 text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-96 overflow-y-auto">
+                              {systemPrompt || '(empty)'}
+                            </pre>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}

@@ -1395,9 +1395,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       navigationInProgressRef.current = { active: true, targetConversationId: data.id };
       
       // Replace optimistic conversation with real one and update cache
+      // IMPORTANT: We must filter out BOTH the temp ID AND any duplicate real ID
+      // that might have been added by the realtime subscription (race condition)
       setConversations(prev => {
-        const updated = prev.map(c => c.id === tempId ? data : c);
-        // Update cache with the new conversation to prevent stale cache issues
+        // Remove the temp conversation AND any duplicate with the real ID
+        // (realtime subscription might have already added the real one)
+        const filtered = prev.filter(c => c.id !== tempId && c.id !== data.id);
+        // Add the real conversation at the beginning (it's the newest)
+        const updated = [data, ...filtered];
+        // Update cache to prevent stale cache issues
         cacheConversations(brandId, updated);
         return updated;
       });
@@ -1405,12 +1411,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       // Update URL to reflect the new conversation
       updateConversationUrl(data.id);
-      
-      // NOTE: We intentionally do NOT call loadConversations() here because:
-      // 1. We already added the new conversation optimistically above
-      // 2. The realtime subscription will handle any updates from other tabs
-      // 3. Calling loadConversations() can overwrite with stale cached data,
-      //    causing the new conversation to disappear and triggering unwanted effects
       
       toast.success('New conversation created');
       trackEvent('conversation_created', { conversationId: data.id });
@@ -3077,7 +3077,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           
           // Clear checkpoint after successful completion
           clearCheckpoint(aiMessageId);
-        } catch (streamError) {
+        } catch (streamError: any) {
+          // Check if this is an abort error - don't try to recover, just re-throw
+          if (streamError?.name === 'AbortError' || currentController?.signal?.aborted) {
+            logger.log('[Stream] Stream aborted by user - skipping recovery');
+            const abortError = new Error('Generation cancelled');
+            abortError.name = 'AbortError';
+            throw abortError;
+          }
+          
           // Try to recover from last checkpoint
           const recovered = loadCheckpoint(aiMessageId);
           if (recovered) {
@@ -3165,6 +3173,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Check the parsed outputs (finalContent or finalThinking), not raw stream data
       // This allows legitimate partial responses (thinking without copy, or clarification requests)
       if (!finalContent && !finalThinking) {
+        // Check if this was due to an intentional abort/cancellation
+        // If the abort controller was triggered, throw an AbortError instead
+        if (currentController?.signal?.aborted) {
+          logger.log('[Stream] Stream was aborted by user - no content expected');
+          const abortError = new Error('Generation cancelled');
+          abortError.name = 'AbortError';
+          throw abortError;
+        }
+        
         logger.error('[Stream] No usable content after parsing. Raw stream length:', allStreamedContent.length);
         logger.error('[Stream] First 200 chars of raw stream:', allStreamedContent.substring(0, 200));
         throw new Error('No usable content could be extracted from the response. The AI may have returned an empty or malformed response.');

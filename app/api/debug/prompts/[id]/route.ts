@@ -14,7 +14,7 @@ export async function PUT(
   }
 
   const body = await request.json();
-  const { name, description, prompt_type, system_prompt, user_prompt, is_active } = body;
+  const { name, description, prompt_type, system_prompt, is_active } = body;
 
   const { data, error } = await supabase
     .from('custom_prompts')
@@ -23,7 +23,6 @@ export async function PUT(
       description,
       prompt_type,
       system_prompt: system_prompt || null,
-      user_prompt: user_prompt || null,
       is_active,
       updated_at: new Date().toISOString()
     })

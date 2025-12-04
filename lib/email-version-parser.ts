@@ -3,13 +3,20 @@
  * 
  * Parses AI response content for email version XML tags (version_a, version_b, version_c)
  * and extracts structured data for rendering version switching UI.
+ * 
+ * Expected format from AI:
+ * <version_a>
+ * **Approach:** [One sentence explaining this version]
+ * 
+ * [Full email content with blocks like [HERO], [TEXT], etc.]
+ * </version_a>
  */
 
 export interface EmailVersion {
   id: 'a' | 'b' | 'c';
   label: string;
   content: string;
-  note?: string; // The one-line note at the top explaining the approach
+  note?: string; // The approach explanation for this version
 }
 
 export interface ParsedEmailVersions {
@@ -20,15 +27,39 @@ export interface ParsedEmailVersions {
 
 /**
  * Extract the approach note from the beginning of a version's content
- * The note is typically the first paragraph explaining why this approach was chosen
- * NOTE: We extract the note for header display but KEEP it in the content as well
+ * 
+ * Looks for patterns like:
+ * - **Approach:** [text]
+ * - Approach: [text]
+ * - *[italic text]* (first paragraph)
+ * 
+ * NOTE: We extract the note for header display but KEEP it in the content for the preamble card
  */
 function extractApproachNote(content: string): { note: string | undefined; cleanContent: string } {
-  // Look for a note at the very beginning (first line or paragraph before the actual email content)
-  // The note typically appears before "---" or "SUBJECT LINE:"
-  const lines = content.trim().split('\n');
+  const trimmedContent = content.trim();
+  const lines = trimmedContent.split('\n');
   
-  // Check if first line looks like a note (not a subject line or divider)
+  // Check for "**Approach:**" format (most common in new prompt)
+  const approachMatch = trimmedContent.match(/^\*\*Approach:\*\*\s*(.+)/im);
+  if (approachMatch) {
+    // Extract the approach text (everything after **Approach:** on the first line)
+    const approachLine = approachMatch[1].trim();
+    return {
+      note: approachLine,
+      cleanContent: trimmedContent, // Keep full content - preamble card will also show it
+    };
+  }
+  
+  // Check for simple "Approach:" format (without bold)
+  const simpleApproachMatch = trimmedContent.match(/^Approach:\s*(.+)/im);
+  if (simpleApproachMatch) {
+    return {
+      note: simpleApproachMatch[1].trim(),
+      cleanContent: trimmedContent,
+    };
+  }
+  
+  // Legacy: Check if first line looks like a note (not a section marker or divider)
   const firstLine = lines[0]?.trim();
   if (
     firstLine &&
@@ -38,19 +69,18 @@ function extractApproachNote(content: string): { note: string | undefined; clean
     !firstLine.startsWith('[') &&
     !firstLine.startsWith('**SUBJECT') &&
     firstLine.length > 10 &&
-    firstLine.length < 300  // Allow longer notes
+    firstLine.length < 300
   ) {
     // This looks like an approach note
-    // Extract it for header display but KEEP it in the content
     return {
-      note: firstLine.replace(/^\*|\*$/g, '').trim(), // Remove markdown italic markers for header
-      cleanContent: content.trim(), // Keep full content including the note
+      note: firstLine.replace(/^\*|\*$/g, '').trim(),
+      cleanContent: trimmedContent,
     };
   }
   
   return {
     note: undefined,
-    cleanContent: content.trim(),
+    cleanContent: trimmedContent,
   };
 }
 
@@ -188,6 +218,7 @@ export function getStreamingVersionContent(content: string, versionId: 'a' | 'b'
 
 /**
  * Get content that appears BEFORE the first version tag (intro text)
+ * This is where the AI might write a brief analysis before the versions
  */
 export function getContentBeforeVersions(content: string): string {
   // Find the first opening version tag
@@ -239,4 +270,3 @@ export function getContentAfterVersions(content: string): string {
     .replace(/<\/version_[abc]>/g, '')
     .trim();
 }
-

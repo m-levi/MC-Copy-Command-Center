@@ -12,7 +12,6 @@ interface CustomPrompt {
   description?: string;
   prompt_type: 'design_email' | 'letter_email' | 'flow_email';
   system_prompt: string;
-  user_prompt: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -29,13 +28,11 @@ export default function DebugPage() {
     description: string;
     prompt_type: string;
     system_prompt: string;
-    user_prompt: string;
   }>({
     name: '',
     description: '',
     prompt_type: 'design_email',
     system_prompt: '',
-    user_prompt: '',
   });
   const [savingPrompt, setSavingPrompt] = useState(false);
 
@@ -99,7 +96,6 @@ export default function DebugPage() {
         description: prompt.description || '',
         prompt_type: prompt.prompt_type,
         system_prompt: prompt.system_prompt || '',
-        user_prompt: prompt.user_prompt || '',
       });
     } else {
       setEditingPrompt(null);
@@ -108,7 +104,6 @@ export default function DebugPage() {
         description: '',
         prompt_type: 'design_email',
         system_prompt: '',
-        user_prompt: '',
       });
     }
     setShowPromptDialog(true);
@@ -120,8 +115,8 @@ export default function DebugPage() {
       return;
     }
     
-    if (!promptForm.system_prompt && !promptForm.user_prompt) {
-      toast.error('At least one prompt (system or user) is required');
+    if (!promptForm.system_prompt) {
+      toast.error('System prompt is required');
       return;
     }
 
@@ -265,9 +260,8 @@ export default function DebugPage() {
               </p>
               <ul className="text-blue-700 dark:text-blue-200 space-y-1 list-disc list-inside">
                 <li><strong>System Prompt</strong> — Instructions for the AI (tone, rules, format)</li>
-                <li><strong>User Prompt</strong> — Template with variables like {'{{COPY_BRIEF}}'}</li>
                 <li>Only <strong>one prompt</strong> can be active per email type</li>
-                <li>Leave either field empty to use the default for that part</li>
+                <li>Active prompts override the default system instructions</li>
               </ul>
             </div>
           </div>
@@ -356,18 +350,11 @@ export default function DebugPage() {
                 <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mb-3">
                   {prompt.description || 'No description provided.'}
                 </p>
-                <div className="space-y-1">
-                  {prompt.system_prompt && (
-                    <div className="bg-purple-50 dark:bg-purple-900/20 rounded px-2 py-1 text-xs font-mono text-purple-700 dark:text-purple-300 truncate">
-                      <span className="font-semibold">System:</span> {prompt.system_prompt.substring(0, 50)}...
-                    </div>
-                  )}
-                  {prompt.user_prompt && (
-                    <div className="bg-green-50 dark:bg-green-900/20 rounded px-2 py-1 text-xs font-mono text-green-700 dark:text-green-300 truncate">
-                      <span className="font-semibold">User:</span> {prompt.user_prompt.substring(0, 50)}...
-                    </div>
-                  )}
-                </div>
+                {prompt.system_prompt && (
+                  <div className="bg-purple-50 dark:bg-purple-900/20 rounded px-2 py-1 text-xs font-mono text-purple-700 dark:text-purple-300 truncate">
+                    {prompt.system_prompt.substring(0, 80)}...
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -447,71 +434,26 @@ export default function DebugPage() {
                 <PromptEditor
                   value={promptForm.system_prompt}
                   onChange={(value) => setPromptForm({ ...promptForm, system_prompt: value })}
-                  minHeight="200px"
-                  placeholder="You are an expert email copywriter..."
+                  minHeight="300px"
+                  placeholder="You are an expert email copywriter specializing in conversion-focused marketing emails..."
                 />
               </div>
 
-              {/* User Prompt */}
-              <div className="border border-green-200 dark:border-green-800 rounded-lg p-4 bg-green-50/50 dark:bg-green-950/20">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                  <label className="text-sm font-semibold text-green-900 dark:text-green-100">
-                    User Prompt Template
-                  </label>
-                  <span className="text-xs text-green-600 dark:text-green-400">(Template with variables)</span>
-                </div>
-                <PromptEditor
-                  value={promptForm.user_prompt}
-                  onChange={(value) => setPromptForm({ ...promptForm, user_prompt: value })}
-                  minHeight="200px"
-                  placeholder="Create an email based on this brief: {{COPY_BRIEF}}..."
-                />
-              </div>
-
-              {/* Help Section */}
+              {/* Variables Section */}
               <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">
                   Available Variables
                 </h4>
                 <p className="text-sm text-blue-700 dark:text-blue-200 mb-3">
-                  Use these in your <strong>User Prompt</strong>. They will be replaced with actual values:
+                  Use these in your system prompt. They will be replaced with actual values:
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
-                  {promptForm.prompt_type === 'design_email' && (
-                    <>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{COPY_BRIEF}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{BRAND_INFO}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{BRAND_VOICE_GUIDELINES}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{RAG_CONTEXT}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{MEMORY_CONTEXT}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{WEBSITE_URL}}'}</code>
-                    </>
-                  )}
-                  {promptForm.prompt_type === 'letter_email' && (
-                    <>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{COPY_BRIEF}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{EMAIL_BRIEF}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{BRAND_INFO}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{RAG_CONTEXT}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{MEMORY_CONTEXT}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{WEBSITE_URL}}'}</code>
-                    </>
-                  )}
-                  {promptForm.prompt_type === 'flow_email' && (
-                    <>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{EMAIL_SEQUENCE}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{TOTAL_EMAILS}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{FLOW_NAME}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{BRAND_INFO}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{FLOW_GOAL}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{TARGET_AUDIENCE}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{EMAIL_TITLE}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{EMAIL_PURPOSE}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{KEY_POINTS}}'}</code>
-                      <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{PRIMARY_CTA}}'}</code>
-                    </>
-                  )}
+                  <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{BRAND_NAME}}'} — Brand name</code>
+                  <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{BRAND_INFO}}'} — Brand details</code>
+                  <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{BRAND_VOICE_GUIDELINES}}'} — Style guide</code>
+                  <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{WEBSITE_URL}}'} — Brand website</code>
+                  <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{COPY_BRIEF}}'} — User's message</code>
+                  <code className="bg-white dark:bg-gray-900 px-2 py-1 rounded text-blue-800 dark:text-blue-300">{'{{CONTEXT_INFO}}'} — Conversation history</code>
                 </div>
               </div>
             </div>

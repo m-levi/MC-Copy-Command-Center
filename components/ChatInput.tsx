@@ -686,9 +686,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                       <button
                         onClick={() => setShowModelPicker(!showModelPicker)}
                         className={cn(
-                          "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium cursor-pointer select-none",
+                          "flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium cursor-pointer select-none transition-colors",
                           showModelPicker
-                            ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                            ? "bg-blue-500 dark:bg-blue-600 text-white"
                             : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                         )}
                       >

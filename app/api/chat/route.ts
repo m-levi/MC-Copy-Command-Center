@@ -143,58 +143,47 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
 
     const websiteUrl = brandContext?.website_url;
 
-    // DEBUG MODE: Apply custom prompt if pre-fetched
+    // DEBUG MODE: Apply custom system prompt if pre-fetched
     // debugPromptResult was fetched in parallel with other async operations above
-    if (debugPromptResult) {
+    if (debugPromptResult && debugPromptResult.system_prompt) {
       logger.log(`[Chat API] DEBUG MODE: Using custom prompt: ${debugPromptResult.name}`);
       
-      // Helper function to replace all template variables
-      const replaceTemplateVars = (template: string, copyBrief: string = '') => {
-        const brandInfoLocal = buildBrandInfo(brandContext);
-        const contextInfo = buildContextInfo(conversationContext);
-        const brandVoiceGuidelines = brandContext?.copywriting_style_guide || '';
-        const brandName = brandContext?.name || 'Unknown Brand';
-        const brandDetails = brandContext?.brand_details || '';
-        const brandGuidelines = brandContext?.brand_guidelines || '';
-        
-        return template
-          // Brand placeholders
-          .replace(/{{BRAND_NAME}}/g, brandName)
-          .replace(/{{BRAND_DETAILS}}/g, brandDetails)
-          .replace(/{{BRAND_GUIDELINES}}/g, brandGuidelines)
-          .replace(/{{BRAND_INFO}}/g, brandInfoLocal)
-          .replace(/{{BRAND_VOICE_GUIDELINES}}/g, brandVoiceGuidelines)
-          .replace(/{{COPYWRITING_STYLE_GUIDE}}/g, brandVoiceGuidelines)
-          // Context placeholders
-          .replace(/{{RAG_CONTEXT}}/g, '') // RAG disabled for performance
-          .replace(/{{CONTEXT_INFO}}/g, contextInfo)
-          .replace(/{{MEMORY_CONTEXT}}/g, '') // Memory now handled by Supermemory
-          .replace(/{{WEBSITE_URL}}/g, websiteUrl || '')
-          // User input placeholders
-          .replace(/{{COPY_BRIEF}}/g, copyBrief || 'No copy brief provided.')
-          .replace(/{{EMAIL_BRIEF}}/g, copyBrief || 'No copy brief provided.')
-          .replace(/{{USER_MESSAGE}}/g, copyBrief || '');
-      };
+      // IMPORTANT: Reset processedMessages to original messages when using custom debug prompt.
+      // The default flow (e.g., Design Email V2) may have transformed processedMessages with its
+      // own template. Using a custom debug prompt should bypass that transformation entirely,
+      // pairing the custom system prompt with the user's original messages.
+      processedMessages = messages;
       
+      // Get user's message for the COPY_BRIEF variable
       const userMessages = messages.filter((m: Message) => m.role === 'user');
       const copyBrief = userMessages[userMessages.length - 1]?.content || '';
       
-      // Process system_prompt with template variables
-      if (debugPromptResult.system_prompt) {
-        systemPrompt = replaceTemplateVars(debugPromptResult.system_prompt, copyBrief);
-        logger.log(`[Chat API] DEBUG MODE: System prompt processed, length: ${systemPrompt.length}`);
-      }
+      // Build variable values
+      const brandInfoLocal = buildBrandInfo(brandContext);
+      const contextInfo = buildContextInfo(conversationContext);
+      const brandVoiceGuidelines = brandContext?.copywriting_style_guide || '';
+      const brandName = brandContext?.name || 'Unknown Brand';
       
-      // Process user_prompt with template variables (only for first message)
-      if (debugPromptResult.user_prompt) {
-        const isFirstMessage = userMessages.length === 1;
-
-        if (isFirstMessage) {
-          const filledUserPrompt = replaceTemplateVars(debugPromptResult.user_prompt, copyBrief);
-          processedMessages = [{ ...userMessages[0], content: filledUserPrompt }];
-          logger.log(`[Chat API] DEBUG MODE: User prompt processed, length: ${filledUserPrompt.length}`);
-        }
-      }
+      // Replace template variables in the system prompt
+      // Includes deprecated variables for backward compatibility with existing prompts
+      systemPrompt = debugPromptResult.system_prompt
+        // Current variables
+        .replace(/{{BRAND_NAME}}/g, brandName)
+        .replace(/{{BRAND_INFO}}/g, brandInfoLocal)
+        .replace(/{{BRAND_VOICE_GUIDELINES}}/g, brandVoiceGuidelines)
+        .replace(/{{WEBSITE_URL}}/g, websiteUrl || '')
+        .replace(/{{COPY_BRIEF}}/g, copyBrief || '')
+        .replace(/{{CONTEXT_INFO}}/g, contextInfo)
+        // Deprecated variables - replaced with safe fallbacks for backward compatibility
+        .replace(/{{RAG_CONTEXT}}/g, '') // RAG disabled, empty string
+        .replace(/{{MEMORY_CONTEXT}}/g, '') // Memory now handled by Supermemory
+        .replace(/{{EMAIL_BRIEF}}/g, copyBrief || '') // Alias for COPY_BRIEF
+        .replace(/{{USER_MESSAGE}}/g, copyBrief || '') // Alias for COPY_BRIEF
+        .replace(/{{BRAND_DETAILS}}/g, '') // Deprecated, use BRAND_INFO
+        .replace(/{{BRAND_GUIDELINES}}/g, '') // Deprecated, use BRAND_INFO
+        .replace(/{{COPYWRITING_STYLE_GUIDE}}/g, brandVoiceGuidelines); // Alias for BRAND_VOICE_GUIDELINES
+      
+      logger.log(`[Chat API] DEBUG MODE: System prompt processed, length: ${systemPrompt.length}`);
     }
 
     // Background queue mode

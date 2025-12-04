@@ -40,14 +40,14 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { name, description, prompt_type, system_prompt, user_prompt, is_active } = body;
+  const { name, description, prompt_type, system_prompt, is_active } = body;
 
   if (!name) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 });
   }
 
-  if (!system_prompt && !user_prompt) {
-    return NextResponse.json({ error: 'At least one prompt (system or user) is required' }, { status: 400 });
+  if (!system_prompt) {
+    return NextResponse.json({ error: 'System prompt is required' }, { status: 400 });
   }
 
   // Validation for prompt_type
@@ -67,7 +67,6 @@ export async function POST(request: Request) {
       description,
       prompt_type,
       system_prompt: system_prompt || null,
-      user_prompt: user_prompt || null,
       is_active: is_active || false
     })
     .select()

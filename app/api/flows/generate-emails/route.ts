@@ -197,10 +197,10 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
         // For flows, we use single 'flow_email' type
         const customPrompt = await getActiveDebugPrompt(supabase, user.id, 'flow_email');
 
-        if (customPrompt && customPrompt.user_prompt) {
+        if (customPrompt && customPrompt.system_prompt) {
            console.log(`[Flow Generator] 🐛 DEBUG MODE: Overriding flow prompt with custom prompt: ${customPrompt.name}`);
            // Replace variables manually since we are bypassing the builder
-           prompt = customPrompt.user_prompt
+           prompt = customPrompt.system_prompt
               .replace(/{{EMAIL_SEQUENCE}}/g, emailOutline.sequence.toString())
               .replace(/{{TOTAL_EMAILS}}/g, outline.emails.length.toString())
               .replace(/{{FLOW_NAME}}/g, outline.flowName)
@@ -220,7 +220,7 @@ ${conversation.brands.website_url ? `Website: ${conversation.brands.website_url}
 
         console.log(
           `[Flow Generator] Using ${
-            (customPrompt && customPrompt.user_prompt) ? `CUSTOM_DEBUG_PROMPT (${customPrompt.name})` : (emailOutline.emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT')
+            (customPrompt && customPrompt.system_prompt) ? `CUSTOM_DEBUG_PROMPT (${customPrompt.name})` : (emailOutline.emailType === 'design' ? 'STANDARD_EMAIL_PROMPT' : 'LETTER_EMAIL_PROMPT')
           } for Email ${emailOutline.sequence}`
         );
 

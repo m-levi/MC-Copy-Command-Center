@@ -4,7 +4,6 @@ export interface ActivePrompt {
   id: string;
   prompt_type: string;
   system_prompt: string | null;
-  user_prompt: string | null;
   name: string;
 }
 
@@ -29,7 +28,7 @@ export async function getActiveDebugPromptFast(
       // Fetch the active prompt for this type (RLS filters by authenticated user)
       supabase
         .from('custom_prompts')
-        .select('id, prompt_type, system_prompt, user_prompt, name')
+        .select('id, prompt_type, system_prompt, name')
         .eq('prompt_type', promptType)
         .eq('is_active', true)
         .maybeSingle(),
@@ -76,7 +75,7 @@ export async function getActiveDebugPrompt(
     // Then fetch the active prompt for this type
     const { data: prompt, error } = await supabase
       .from('custom_prompts')
-      .select('id, prompt_type, system_prompt, user_prompt, name')
+      .select('id, prompt_type, system_prompt, name')
       .eq('user_id', userId)
       .eq('prompt_type', promptType)
       .eq('is_active', true)

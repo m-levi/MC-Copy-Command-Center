@@ -11,6 +11,16 @@
  * 3. Unknown field labels display with their labels
  * 4. Lines without labels are captured as "unlabeled content"
  * 5. Raw content is always preserved for fallback/plain view
+ * 
+ * SUPPORTED BLOCK TYPES:
+ * - HERO: Accent, Headline, Subhead, CTA
+ * - TEXT: Accent, Headline, Body, CTA
+ * - BULLETS: Accent, Headline, Bullets, CTA
+ * - PRODUCT CARD: Product Name, Price, One-liner, CTA
+ * - PRODUCT GRID: Accent, Headline, Products, CTA
+ * - CTA BLOCK: Accent, Headline, Subhead, CTA
+ * - SOCIAL PROOF: Quote, Attribution
+ * - DISCOUNT BAR: Code, Message, Expiry
  */
 
 export interface EmailField {
@@ -20,13 +30,23 @@ export interface EmailField {
   labelLower: string;
 }
 
+export interface ProductItem {
+  name: string;
+  price: string;
+  description: string;
+}
+
 export interface EmailSection {
   /** The section name as it appears in brackets, e.g., "HERO", "TEXT", "PRODUCT CARD" */
   name: string;
+  /** Normalized section type for styling */
+  type: 'hero' | 'text' | 'bullets' | 'product_card' | 'product_grid' | 'cta_block' | 'social_proof' | 'discount_bar' | 'unknown';
   /** All labeled fields found in this section */
   fields: EmailField[];
   /** Any bullet list items found (lines starting with - or •) */
   bullets: string[];
+  /** Products for PRODUCT GRID sections */
+  products: ProductItem[];
   /** Any lines that weren't labeled fields or bullets */
   unlabeledContent: string[];
   /** Raw content of the section for fallback display */
@@ -45,17 +65,71 @@ export interface ParsedEmailCopy {
 }
 
 /**
+ * Normalize section name to type
+ */
+function getSectionType(name: string): EmailSection['type'] {
+  const normalized = name.toUpperCase().replace(/[^A-Z]/g, '');
+  
+  if (normalized === 'HERO') return 'hero';
+  if (normalized === 'TEXT') return 'text';
+  if (normalized === 'BULLETS') return 'bullets';
+  if (normalized === 'PRODUCTCARD') return 'product_card';
+  if (normalized === 'PRODUCTGRID') return 'product_grid';
+  if (normalized === 'CTABLOCK') return 'cta_block';
+  if (normalized === 'SOCIALPROOF') return 'social_proof';
+  if (normalized === 'DISCOUNTBAR') return 'discount_bar';
+  
+  return 'unknown';
+}
+
+/**
  * Check if content appears to be structured email copy
- * Looks for UPPERCASE section markers like [HERO], [TEXT], [PRODUCT CARD]
+ * Looks for BOLD section markers like **HERO**, **TEXT**, **PRODUCT CARD**
+ * NOTE: Accepts ANY uppercase block marker to match parseEmailCopy's capabilities.
+ * The parser handles unknown block types gracefully by returning 'unknown' as the section type.
  */
 export function isStructuredEmailCopy(content: string): boolean {
   if (!content || typeof content !== 'string') return false;
   // Match section markers that are:
-  // - Inside square brackets
-  // - Start with an uppercase letter
-  // - Contain only uppercase letters, numbers, spaces, underscores, or hyphens
-  // This excludes placeholders like [Price], [Name] which have lowercase letters
-  return /\[[A-Z][A-Z0-9 _-]*\]/.test(content);
+  // - Wrapped in ** (bold markdown)
+  // - Start with uppercase letter and contain only uppercase letters, numbers, spaces, underscores, or hyphens
+  // This matches parseEmailCopy's pattern exactly, allowing any valid block type (not just known ones)
+  return /\*\*[A-Z][A-Z0-9 _-]*\*\*/.test(content);
+}
+
+/**
+ * Parse product items from a section's content
+ * Handles formats like:
+ * - **Product Name** | $price | Description
+ * - Product Name: $price - Description
+ */
+function parseProductItems(lines: string[]): ProductItem[] {
+  const products: ProductItem[] = [];
+  
+  for (const line of lines) {
+    // Try format: **Name** | $price | description
+    const pipeMatch = line.match(/^\*?\*?([^|*]+)\*?\*?\s*\|\s*(\$[\d.,]+(?:\s*~~\$[\d.,]+~~)?)\s*\|\s*(.+)$/);
+    if (pipeMatch) {
+      products.push({
+        name: pipeMatch[1].trim(),
+        price: pipeMatch[2].trim(),
+        description: pipeMatch[3].trim(),
+      });
+      continue;
+    }
+    
+    // Try format: Name | price | description (without ** markers)
+    const simplePipeMatch = line.match(/^([^|]+)\s*\|\s*(\$[\d.,]+(?:\s*~~\$[\d.,]+~~)?)\s*\|\s*(.+)$/);
+    if (simplePipeMatch) {
+      products.push({
+        name: simplePipeMatch[1].trim().replace(/^\*\*|\*\*$/g, ''),
+        price: simplePipeMatch[2].trim(),
+        description: simplePipeMatch[3].trim(),
+      });
+    }
+  }
+  
+  return products;
 }
 
 /**
@@ -82,12 +156,9 @@ export function parseEmailCopy(content: string): ParsedEmailCopy | null {
   };
   
   // Find all section markers and their positions
-  // CRITICAL: Only match FULLY UPPERCASE markers
-  // Pattern breakdown:
-  // \[ - literal opening bracket
-  // ([A-Z][A-Z0-9 _-]*) - capture group: starts with uppercase, then any uppercase/number/space/underscore/hyphen
-  // \] - literal closing bracket
-  const sectionPattern = /\[([A-Z][A-Z0-9 _-]*)\]/g;
+  // Pattern matches **BLOCK** format (bold markdown)
+  // e.g., **HERO**, **TEXT**, **PRODUCT CARD**, **CTA BLOCK**
+  const sectionPattern = /\*\*([A-Z][A-Z0-9 _-]*)\*\*/g;
   const sectionMatches: Array<{name: string; start: number; end: number}> = [];
   
   let match;
@@ -103,9 +174,13 @@ export function parseEmailCopy(content: string): ParsedEmailCopy | null {
   if (sectionMatches.length === 0) return null;
   
   // Extract preamble (content before first section)
+  // Strip the **Approach:** line since it's displayed separately in the UI
   const firstSectionStart = sectionMatches[0].start;
   if (firstSectionStart > 0) {
-    result.preamble = cleanContent.slice(0, firstSectionStart).trim();
+    let preamble = cleanContent.slice(0, firstSectionStart).trim();
+    // Remove the **Approach:** line - it's shown in the EmailVersionRenderer header
+    preamble = preamble.replace(/^\*\*Approach:\*\*\s*.+\n*/im, '').trim();
+    result.preamble = preamble;
   }
   
   // Extract each section's content
@@ -144,10 +219,14 @@ export function parseEmailCopy(content: string): ParsedEmailCopy | null {
  * BULLETPROOF: Captures everything, never drops content
  */
 function parseSectionContent(name: string, content: string): EmailSection {
+  const sectionType = getSectionType(name);
+  
   const section: EmailSection = {
     name,
+    type: sectionType,
     fields: [],
     bullets: [],
+    products: [],
     unlabeledContent: [],
     rawContent: content,
   };
@@ -157,16 +236,33 @@ function parseSectionContent(name: string, content: string): EmailSection {
   // Split content into lines for processing
   const lines = content.split('\n');
   let currentField: EmailField | null = null;
+  let isInProductsSection = false;
+  const productLines: string[] = [];
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmedLine = line.trim();
     
     // Skip empty lines
-    if (!trimmedLine) continue;
+    if (!trimmedLine) {
+      isInProductsSection = false; // Reset products section on empty line
+      continue;
+    }
     
     // Skip horizontal rules (but don't drop them silently)
     if (trimmedLine === '---') continue;
+    
+    // Check if we're starting a Products section
+    if (trimmedLine.toLowerCase().startsWith('products:')) {
+      isInProductsSection = true;
+      continue;
+    }
+    
+    // If we're in products section, collect lines for product parsing
+    if (isInProductsSection && trimmedLine.includes('|')) {
+      productLines.push(trimmedLine);
+      continue;
+    }
     
     // Check for bullet items (lines starting with - or • or *)
     if (/^[-•*]\s+/.test(trimmedLine)) {
@@ -212,6 +308,11 @@ function parseSectionContent(name: string, content: string): EmailSection {
     // This ensures we NEVER drop content
     section.unlabeledContent.push(trimmedLine);
     currentField = null; // Reset current field
+  }
+  
+  // Parse collected product lines
+  if (productLines.length > 0) {
+    section.products = parseProductItems(productLines);
   }
   
   return section;
@@ -267,6 +368,54 @@ export function isCtaField(label: string): boolean {
 export function isAccentField(label: string): boolean {
   const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
   return ['accent', 'eyebrow', 'kicker', 'preheadline', 'label', 'tag'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "quote" patterns
+ */
+export function isQuoteField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['quote', 'testimonial', 'review', 'feedback'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "attribution" patterns
+ */
+export function isAttributionField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['attribution', 'author', 'source', 'name', 'customer', 'by'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "product name" patterns
+ */
+export function isProductNameField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['productname', 'product', 'item', 'name'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "price" patterns
+ */
+export function isPriceField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['price', 'cost', 'amount', 'value'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "discount code" patterns
+ */
+export function isCodeField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['code', 'discountcode', 'promocode', 'coupon'].includes(normalized);
+}
+
+/**
+ * Check if a field label matches known "expiry" patterns
+ */
+export function isExpiryField(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['expiry', 'expires', 'expiration', 'validuntil', 'endsdate', 'deadline'].includes(normalized);
 }
 
 /**

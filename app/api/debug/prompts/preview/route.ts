@@ -1,13 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
 import { buildBrandInfo, buildContextInfo } from '@/lib/chat-prompts';
-import { listMemories, isSupermemoryConfigured } from '@/lib/supermemory';
 
 /**
  * POST /api/debug/prompts/preview
  * 
- * Preview a prompt with actual brand data substituted for variables.
- * This helps users see exactly what the AI will receive.
+ * Preview a system prompt with template variables substituted.
+ * This matches what the chat API does, so users see exactly what the AI will receive.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -19,13 +18,49 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { brand_id, prompt_type, system_prompt, user_prompt } = body;
+    const { system_prompt, brand_id } = body;
 
-    if (!brand_id) {
-      return NextResponse.json({ error: 'brand_id is required' }, { status: 400 });
+    if (!system_prompt) {
+      return NextResponse.json({
+        system_prompt: '',
+        variables_used: {},
+      });
     }
 
-    // Fetch brand data
+    // If no brand_id provided, return prompt with placeholder indicators
+    // Includes deprecated variables for backward compatibility
+    if (!brand_id) {
+      const variables: Record<string, string> = {
+        // Current variables
+        '{{BRAND_NAME}}': '[Select a brand to preview]',
+        '{{BRAND_INFO}}': '[Brand info will appear here]',
+        '{{BRAND_VOICE_GUIDELINES}}': '[Brand voice guidelines will appear here]',
+        '{{WEBSITE_URL}}': '[Website URL will appear here]',
+        '{{COPY_BRIEF}}': '[User\'s message will appear here at runtime]',
+        '{{CONTEXT_INFO}}': '[Conversation context will appear here at runtime]',
+        // Deprecated variables - replaced with safe fallbacks for backward compatibility
+        '{{RAG_CONTEXT}}': '[Deprecated - RAG disabled]',
+        '{{MEMORY_CONTEXT}}': '[Deprecated - Memory handled by Supermemory]',
+        '{{EMAIL_BRIEF}}': '[User\'s message will appear here at runtime]',
+        '{{USER_MESSAGE}}': '[User\'s message will appear here at runtime]',
+        '{{BRAND_DETAILS}}': '[Deprecated - use BRAND_INFO]',
+        '{{BRAND_GUIDELINES}}': '[Deprecated - use BRAND_INFO]',
+        '{{COPYWRITING_STYLE_GUIDE}}': '[Brand voice guidelines will appear here]',
+      };
+
+      let processedPrompt = system_prompt;
+      for (const [variable, value] of Object.entries(variables)) {
+        const escapedVar = variable.replace(/[{}]/g, '\\$&');
+        processedPrompt = processedPrompt.replace(new RegExp(escapedVar, 'g'), value);
+      }
+
+      return NextResponse.json({
+        system_prompt: processedPrompt,
+        variables_used: variables,
+      });
+    }
+
+    // Fetch brand data to substitute variables
     const { data: brand, error: brandError } = await supabase
       .from('brands')
       .select('*')
@@ -36,84 +71,42 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
     }
 
-    // Build brand info string
+    // Build the same variable values that chat API uses
     const brandInfo = buildBrandInfo(brand);
+    const brandVoiceGuidelines = brand.copywriting_style_guide || '';
+    const brandName = brand.name || 'Unknown Brand';
+    const websiteUrl = brand.website_url || '';
+    const contextInfo = buildContextInfo(null); // No conversation context in preview
 
-    // Build context info (empty for preview since we don't have a conversation)
-    const contextInfo = buildContextInfo(null);
-
-    // Fetch brand memories from Supermemory if available
-    let memoryContext = '';
-    try {
-      if (isSupermemoryConfigured()) {
-        const memories = await listMemories(brand_id, user.id, 10);
-        if (memories && memories.length > 0) {
-          memoryContext = memories.map(m => {
-            const title = (m.metadata?.title as string) || 'Memory';
-            return `- ${title}: ${m.content.substring(0, 100)}`;
-          }).join('\n');
-        }
-      }
-    } catch (e) {
-      // Memories are optional
-    }
-
-    // Sample RAG context (truncated for preview)
-    let ragContext = 'No documents retrieved for this preview.';
-    try {
-      const { data: docs } = await supabase
-        .from('brand_documents')
-        .select('content')
-        .eq('brand_id', brand_id)
-        .limit(2);
-
-      if (docs && docs.length > 0) {
-        ragContext = docs.map(d => d.content?.substring(0, 200) + '...').join('\n\n---\n\n');
-      }
-    } catch (e) {
-      // Documents are optional
-    }
-
-    // Variables that will be substituted
+    // Variables that will be substituted - matching chat API exactly
+    // Includes deprecated variables for backward compatibility with existing prompts
     const variables: Record<string, string> = {
-      '{{COPY_BRIEF}}': '[User\'s message will appear here]',
-      '{{EMAIL_BRIEF}}': '[User\'s email brief will appear here]',
-      '{{BRAND_INFO}}': brandInfo.substring(0, 300) + (brandInfo.length > 300 ? '...' : ''),
-      '{{BRAND_VOICE_GUIDELINES}}': (brand.copywriting_style_guide || 'No style guide defined').substring(0, 200),
-      '{{RAG_CONTEXT}}': ragContext.substring(0, 300) + (ragContext.length > 300 ? '...' : ''),
-      '{{MEMORY_CONTEXT}}': memoryContext || 'No active memories',
-      '{{WEBSITE_URL}}': brand.website_url || 'No website URL',
-      '{{CONTEXT_INFO}}': contextInfo || 'No conversation history',
+      // Current variables
+      '{{BRAND_NAME}}': brandName,
+      '{{BRAND_INFO}}': brandInfo,
+      '{{BRAND_VOICE_GUIDELINES}}': brandVoiceGuidelines,
+      '{{WEBSITE_URL}}': websiteUrl,
+      '{{COPY_BRIEF}}': '[User\'s message will appear here at runtime]',
+      '{{CONTEXT_INFO}}': contextInfo || '[No conversation context]',
+      // Deprecated variables - replaced with safe fallbacks for backward compatibility
+      '{{RAG_CONTEXT}}': '[Deprecated - RAG disabled]',
+      '{{MEMORY_CONTEXT}}': '[Deprecated - Memory handled by Supermemory]',
+      '{{EMAIL_BRIEF}}': '[User\'s message will appear here at runtime]', // Alias for COPY_BRIEF
+      '{{USER_MESSAGE}}': '[User\'s message will appear here at runtime]', // Alias for COPY_BRIEF
+      '{{BRAND_DETAILS}}': '[Deprecated - use BRAND_INFO]',
+      '{{BRAND_GUIDELINES}}': '[Deprecated - use BRAND_INFO]',
+      '{{COPYWRITING_STYLE_GUIDE}}': brandVoiceGuidelines, // Alias for BRAND_VOICE_GUIDELINES
     };
 
-    // Flow-specific variables
-    if (prompt_type === 'flow_email') {
-      variables['{{EMAIL_SEQUENCE}}'] = '1';
-      variables['{{TOTAL_EMAILS}}'] = '5';
-      variables['{{FLOW_NAME}}'] = 'Welcome Series';
-      variables['{{FLOW_GOAL}}'] = 'Convert new subscribers to first purchase';
-      variables['{{TARGET_AUDIENCE}}'] = 'New email subscribers';
-      variables['{{EMAIL_TITLE}}'] = 'Welcome Email';
-      variables['{{EMAIL_PURPOSE}}'] = 'Introduce brand and set expectations';
-      variables['{{KEY_POINTS}}'] = '- Brand story\\n- Key products\\n- Welcome offer';
-      variables['{{PRIMARY_CTA}}'] = 'Shop Now';
-    }
-
-    // Process the prompts by substituting variables
-    let processedSystemPrompt = system_prompt || '';
-    let processedUserPrompt = user_prompt || '';
-
+    // Process the prompt by substituting variables
+    let processedPrompt = system_prompt;
     for (const [variable, value] of Object.entries(variables)) {
-      // Escape special regex characters in variable name
       const escapedVar = variable.replace(/[{}]/g, '\\$&');
-      const regex = new RegExp(escapedVar, 'g');
-      processedSystemPrompt = processedSystemPrompt.replace(regex, value);
-      processedUserPrompt = processedUserPrompt.replace(regex, value);
+      processedPrompt = processedPrompt.replace(new RegExp(escapedVar, 'g'), value);
     }
 
     return NextResponse.json({
-      system_prompt: processedSystemPrompt,
-      user_prompt: processedUserPrompt,
+      system_prompt: processedPrompt,
       variables_used: variables,
     });
   } catch (error: any) {
@@ -121,4 +114,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message || 'Failed to generate preview' }, { status: 500 });
   }
 }
-
