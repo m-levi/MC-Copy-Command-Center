@@ -63,7 +63,7 @@ export default function HomePage({ params, searchParams }: { params?: any; searc
     if (viewMode) localStorage.setItem('brandsViewMode', viewMode);
   }, [viewMode]);
 
-  const loadBrands = async (silent = false) => {
+  const loadBrands = useCallback(async (silent = false) => {
     return requestCoalescerRef.current.execute(async () => {
       try {
         if (!silent) setLoading(true);
@@ -151,7 +151,7 @@ export default function HomePage({ params, searchParams }: { params?: any; searc
         setIsRefreshing(false);
       }
     });
-  };
+  }, [supabase, router]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -197,13 +197,17 @@ export default function HomePage({ params, searchParams }: { params?: any; searc
         toast.success('Brand created successfully');
       }
 
-      setIsModalOpen(false);
+      // Only close modal when editing - for new brands, the modal handles its own
+      // onboarding flow and will call onClose() when complete or skipped
+      if (editingBrand) {
+        setIsModalOpen(false);
+      }
       await loadBrands(true);
     } catch (error: any) {
       logger.error('Error saving brand:', error);
       toast.error(error.message || 'Failed to save brand');
     }
-  }, [editingBrand, organization, supabase]);
+  }, [editingBrand, organization, supabase, loadBrands]);
 
   const handleDeleteBrand = useCallback(async (brandId: string) => {
     try {
@@ -220,7 +224,7 @@ export default function HomePage({ params, searchParams }: { params?: any; searc
       logger.error('Error deleting brand:', error);
       toast.error('Failed to delete brand');
     }
-  }, [supabase]);
+  }, [supabase, loadBrands]);
 
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut();

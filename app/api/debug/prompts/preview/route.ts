@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
-import { buildBrandInfo, buildContextInfo } from '@/lib/chat-prompts';
+import { buildBrandInfo, buildContextInfo, formatBrandVoiceForPrompt } from '@/lib/chat-prompts';
+import { BrandVoiceData } from '@/types';
 
 /**
  * POST /api/debug/prompts/preview
@@ -31,21 +32,21 @@ export async function POST(request: Request) {
     // Includes deprecated variables for backward compatibility
     if (!brand_id) {
       const variables: Record<string, string> = {
-        // Current variables
+        // Current variables - show placeholders since no brand is selected
         '{{BRAND_NAME}}': '[Select a brand to preview]',
         '{{BRAND_INFO}}': '[Brand info will appear here]',
         '{{BRAND_VOICE_GUIDELINES}}': '[Brand voice guidelines will appear here]',
         '{{WEBSITE_URL}}': '[Website URL will appear here]',
         '{{COPY_BRIEF}}': '[User\'s message will appear here at runtime]',
         '{{CONTEXT_INFO}}': '[Conversation context will appear here at runtime]',
-        // Deprecated variables - replaced with safe fallbacks for backward compatibility
-        '{{RAG_CONTEXT}}': '[Deprecated - RAG disabled]',
-        '{{MEMORY_CONTEXT}}': '[Deprecated - Memory handled by Supermemory]',
-        '{{EMAIL_BRIEF}}': '[User\'s message will appear here at runtime]',
-        '{{USER_MESSAGE}}': '[User\'s message will appear here at runtime]',
-        '{{BRAND_DETAILS}}': '[Deprecated - use BRAND_INFO]',
-        '{{BRAND_GUIDELINES}}': '[Deprecated - use BRAND_INFO]',
-        '{{COPYWRITING_STYLE_GUIDE}}': '[Brand voice guidelines will appear here]',
+        // Deprecated variables - use empty strings to match chat API exactly
+        '{{RAG_CONTEXT}}': '', // Matches chat API: empty string
+        '{{MEMORY_CONTEXT}}': '', // Matches chat API: empty string
+        '{{EMAIL_BRIEF}}': '[User\'s message will appear here at runtime]', // Alias for COPY_BRIEF
+        '{{USER_MESSAGE}}': '[User\'s message will appear here at runtime]', // Alias for COPY_BRIEF
+        '{{BRAND_DETAILS}}': '', // Matches chat API: empty string
+        '{{BRAND_GUIDELINES}}': '', // Matches chat API: empty string
+        '{{COPYWRITING_STYLE_GUIDE}}': '[Brand voice guidelines will appear here]', // Alias for BRAND_VOICE_GUIDELINES
       };
 
       let processedPrompt = system_prompt;
@@ -73,7 +74,10 @@ export async function POST(request: Request) {
 
     // Build the same variable values that chat API uses
     const brandInfo = buildBrandInfo(brand);
-    const brandVoiceGuidelines = brand.copywriting_style_guide || '';
+    // Use same logic as chat API: prioritize brand_voice over copywriting_style_guide
+    const brandVoiceGuidelines = brand.brand_voice
+      ? formatBrandVoiceForPrompt(brand.brand_voice as BrandVoiceData)
+      : brand.copywriting_style_guide || '';
     const brandName = brand.name || 'Unknown Brand';
     const websiteUrl = brand.website_url || '';
     const contextInfo = buildContextInfo(null); // No conversation context in preview
@@ -88,13 +92,13 @@ export async function POST(request: Request) {
       '{{WEBSITE_URL}}': websiteUrl,
       '{{COPY_BRIEF}}': '[User\'s message will appear here at runtime]',
       '{{CONTEXT_INFO}}': contextInfo || '[No conversation context]',
-      // Deprecated variables - replaced with safe fallbacks for backward compatibility
-      '{{RAG_CONTEXT}}': '[Deprecated - RAG disabled]',
-      '{{MEMORY_CONTEXT}}': '[Deprecated - Memory handled by Supermemory]',
+      // Deprecated variables - use empty strings to match chat API exactly
+      '{{RAG_CONTEXT}}': '', // Matches chat API: empty string
+      '{{MEMORY_CONTEXT}}': '', // Matches chat API: empty string
       '{{EMAIL_BRIEF}}': '[User\'s message will appear here at runtime]', // Alias for COPY_BRIEF
       '{{USER_MESSAGE}}': '[User\'s message will appear here at runtime]', // Alias for COPY_BRIEF
-      '{{BRAND_DETAILS}}': '[Deprecated - use BRAND_INFO]',
-      '{{BRAND_GUIDELINES}}': '[Deprecated - use BRAND_INFO]',
+      '{{BRAND_DETAILS}}': '', // Matches chat API: empty string
+      '{{BRAND_GUIDELINES}}': '', // Matches chat API: empty string
       '{{COPYWRITING_STYLE_GUIDE}}': brandVoiceGuidelines, // Alias for BRAND_VOICE_GUIDELINES
     };
 

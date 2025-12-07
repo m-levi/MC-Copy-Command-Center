@@ -35,7 +35,7 @@ export default function DebugPromptSelector({ brandId: propBrandId, emailType = 
   const brandId = propBrandId || (params?.brandId as string);
 
   // Only show on relevant pages
-  const isEmailPage = pathname?.includes('/brand-architect') || 
+  const isEmailPage = pathname?.includes('/voice-builder') || 
                       pathname?.includes('/chat') || 
                       pathname?.includes('/flow') ||
                       pathname?.includes('/brands/');

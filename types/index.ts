@@ -6,6 +6,36 @@ export interface Profile {
   created_at: string;
 }
 
+// Brand Voice Builder - Structured voice data
+export interface BrandVoiceTrait {
+  trait: string;
+  explanation: string;
+}
+
+export interface BrandVoiceVocabulary {
+  use: string[];
+  avoid: string[];
+}
+
+export interface BrandVoiceSampleEmails {
+  product_focused: string;
+  content_educational: string;
+}
+
+export interface BrandVoiceData {
+  brand_summary: string;        // "[Name] — [What they sell] for [who they serve]"
+  voice_description: string;    // "2-3 word description + analogy"
+  we_sound: BrandVoiceTrait[];
+  we_never_sound: string[];
+  vocabulary: BrandVoiceVocabulary;
+  proof_points: string[];
+  audience: string;
+  good_copy_example: string;
+  bad_copy_example: string;
+  patterns: string;
+  sample_emails?: BrandVoiceSampleEmails;
+}
+
 export interface Brand {
   id: string;
   user_id: string;
@@ -16,6 +46,7 @@ export interface Brand {
   brand_guidelines: string;
   copywriting_style_guide: string;
   website_url?: string;
+  brand_voice?: BrandVoiceData; // Structured voice data (optional - backward compatible)
   created_at: string;
   updated_at: string;
 }

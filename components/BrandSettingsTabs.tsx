@@ -130,11 +130,13 @@ export default function BrandSettingsTabs({ brand, onUpdate, saveStatus }: Brand
             ))}
           </div>
           <button
-            onClick={() => router.push(`/brands/${brand.id}/architect`)}
-            className="ml-2 sm:ml-4 px-3 sm:px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-purple-700 hover:to-blue-700 shadow-sm transition-all hover:scale-105 flex items-center gap-2 flex-shrink-0"
+            onClick={() => router.push(`/brands/${brand.id}/voice-builder`)}
+            className="ml-2 sm:ml-4 px-3 sm:px-4 py-2 bg-gradient-to-r from-violet-600 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-violet-700 hover:to-purple-700 shadow-sm transition-all hover:scale-105 flex items-center gap-2 flex-shrink-0"
           >
-            <span className="text-lg">🏗️</span>
-            <span className="hidden sm:inline">Brand Architect</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+            </svg>
+            <span className="hidden sm:inline">Brand Voice</span>
           </button>
         </div>
       </div>

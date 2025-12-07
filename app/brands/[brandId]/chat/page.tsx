@@ -153,6 +153,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [filteredConversations, setFilteredConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  // Ref to always have access to current messages (avoids stale closure in realtime handlers)
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
   const [selectedModel, setSelectedModel] = useState<AIModel>('anthropic/claude-sonnet-4.5');
   const [emailType, setEmailType] = useState<EmailType>('design');
   const [loading, setLoading] = useState(true);
@@ -739,14 +742,22 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           logger.log('[Realtime] Message updated:', payload.new);
           const updatedMessage = payload.new as Message;
           
-          setMessages((prev) =>
+          // Use messagesRef.current to avoid stale closure (messages changes often but
+          // we don't want to re-subscribe on every change)
+          // (realtime doesn't include joined data like user profile, so we preserve it)
+          // Fall back to updatedMessage.user if not found in state (avoids losing data)
+          const existingMsg = messagesRef.current.find(m => m.id === updatedMessage.id);
+          const messageWithUser = { ...updatedMessage, user: existingMsg?.user ?? updatedMessage.user };
+          
+          // Update state (pure function - no side effects)
+          setMessages((prev) => 
             prev.map((msg) =>
-              msg.id === updatedMessage.id ? updatedMessage : msg
+              msg.id === updatedMessage.id ? messageWithUser : msg
             )
           );
           
-          // Update cache
-          updateCachedMessage(conversationId, updatedMessage);
+          // Update cache with the same computed value
+          updateCachedMessage(conversationId, messageWithUser);
         }
       )
       .on(
@@ -2677,9 +2688,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         }
         userMessage = data;
         
+        // Add user profile to the saved message (API response doesn't include joined data)
+        // data is guaranteed to exist here (checked above with !data condition)
+        const savedUserMessage: Message = { ...data, user: currentUserProfile || undefined };
+        userMessage = savedUserMessage;
+        
         // Replace temp user message with real saved one
         setMessages((prev) => prev.map(msg => 
-          msg.id === tempUserMessage?.id ? userMessage! : msg
+          msg.id === tempUserMessage?.id ? savedUserMessage : msg
         ));
       } else {
         // Use the last user message from the provided messages array

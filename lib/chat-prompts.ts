@@ -11,6 +11,7 @@ import {
 } from './prompts/standard-email.prompt';
 import { buildDesignEmailV2Prompt } from './prompts/design-email-v2.prompt';
 import { SECTION_REGENERATION_PROMPTS } from './prompts/section-regeneration.prompt';
+import { BrandVoiceData } from '@/types';
 
 export interface PromptContext {
   brandInfo: string;
@@ -36,12 +37,92 @@ function getHostnameFromUrl(url: string | undefined): string | null {
 }
 
 /**
+ * Format structured BrandVoiceData into a condensed, AI-optimized string
+ * This format is designed to be injected into prompts for consistent voice
+ */
+export function formatBrandVoiceForPrompt(voice: BrandVoiceData): string {
+  const sections: string[] = [];
+  
+  // Brand summary
+  if (voice.brand_summary) {
+    sections.push(`BRAND: ${voice.brand_summary}`);
+  }
+  
+  // Voice description
+  if (voice.voice_description) {
+    sections.push(`VOICE: ${voice.voice_description}`);
+  }
+  
+  // We Sound (tone attributes)
+  if (voice.we_sound?.length > 0) {
+    const traits = voice.we_sound
+      .map(t => `• ${t.trait}: ${t.explanation}`)
+      .join('\n');
+    sections.push(`WE SOUND:\n${traits}`);
+  }
+  
+  // We Never Sound (anti-patterns)
+  if (voice.we_never_sound?.length > 0) {
+    const antiPatterns = voice.we_never_sound.map(s => `• ${s}`).join('\n');
+    sections.push(`WE NEVER SOUND:\n${antiPatterns}`);
+  }
+  
+  // Vocabulary
+  if (voice.vocabulary) {
+    const vocabParts: string[] = [];
+    if (voice.vocabulary.use?.length > 0) {
+      vocabParts.push(`Use: ${voice.vocabulary.use.join(', ')}`);
+    }
+    if (voice.vocabulary.avoid?.length > 0) {
+      vocabParts.push(`Avoid: ${voice.vocabulary.avoid.join(', ')}`);
+    }
+    if (vocabParts.length > 0) {
+      sections.push(`VOCABULARY:\n${vocabParts.join('\n')}`);
+    }
+  }
+  
+  // Proof Points
+  if (voice.proof_points?.length > 0) {
+    const points = voice.proof_points.map(p => `• ${p}`).join('\n');
+    sections.push(`PROOF POINTS:\n${points}`);
+  }
+  
+  // Audience
+  if (voice.audience) {
+    sections.push(`AUDIENCE: ${voice.audience}`);
+  }
+  
+  // Good Copy Example
+  if (voice.good_copy_example) {
+    sections.push(`GOOD COPY EXAMPLE:\n"${voice.good_copy_example}"`);
+  }
+  
+  // Bad Copy Example (contrast)
+  if (voice.bad_copy_example) {
+    sections.push(`BAD COPY (never write like this):\n"${voice.bad_copy_example}"`);
+  }
+  
+  // Patterns
+  if (voice.patterns) {
+    sections.push(`PATTERNS: ${voice.patterns}`);
+  }
+  
+  return sections.join('\n\n');
+}
+
+/**
  * Build brand information string
+ * Uses structured BrandVoiceData when available for optimal AI consumption
  */
 export function buildBrandInfo(brandContext: any): string {
   if (!brandContext) {
     return 'No brand information provided.';
   }
+
+  // Use structured brand voice if available (new format)
+  const voiceSection = brandContext.brand_voice
+    ? formatBrandVoiceForPrompt(brandContext.brand_voice as BrandVoiceData)
+    : brandContext.copywriting_style_guide || 'No style guide provided.';
 
   return `
 Brand Name: ${brandContext.name}
@@ -53,7 +134,7 @@ Brand Guidelines:
 ${brandContext.brand_guidelines || 'No brand guidelines provided.'}
 
 Copywriting Style Guide:
-${brandContext.copywriting_style_guide || 'No style guide provided.'}
+${voiceSection}
 ${brandContext.website_url ? `\nBrand Website: ${brandContext.website_url}` : ''}
 `.trim();
 }
