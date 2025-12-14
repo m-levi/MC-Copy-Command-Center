@@ -256,6 +256,56 @@ export interface BrandDocument {
   created_at: string;
 }
 
+// Brand File Categories
+export type BrandFileCategory = 
+  | 'brand_guidelines'
+  | 'style_guide'
+  | 'logo'
+  | 'product_catalog'
+  | 'marketing_material'
+  | 'research'
+  | 'competitor_analysis'
+  | 'customer_data'
+  | 'general';
+
+// Brand Files for Document Store
+export interface BrandFile {
+  id: string;
+  brand_id: string;
+  uploaded_by: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  storage_path: string;
+  category: BrandFileCategory;
+  description?: string;
+  tags?: string[];
+  extracted_text?: string;
+  is_indexed: boolean;
+  created_at: string;
+  updated_at: string;
+  // Joined data
+  uploader?: Profile;
+  public_url?: string;
+}
+
+// File category metadata for UI
+export const FILE_CATEGORY_META: Record<BrandFileCategory, {
+  label: string;
+  icon: string;
+  color: string;
+}> = {
+  brand_guidelines: { label: 'Brand Guidelines', icon: '📋', color: 'blue' },
+  style_guide: { label: 'Style Guide', icon: '🎨', color: 'purple' },
+  logo: { label: 'Logo', icon: '✨', color: 'pink' },
+  product_catalog: { label: 'Product Catalog', icon: '📦', color: 'orange' },
+  marketing_material: { label: 'Marketing Material', icon: '📣', color: 'green' },
+  research: { label: 'Research', icon: '🔬', color: 'cyan' },
+  competitor_analysis: { label: 'Competitor Analysis', icon: '🔍', color: 'red' },
+  customer_data: { label: 'Customer Data', icon: '👥', color: 'yellow' },
+  general: { label: 'General', icon: '📁', color: 'gray' },
+};
+
 // Conversation Summaries
 export interface ConversationSummary {
   id: string;

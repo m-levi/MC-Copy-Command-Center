@@ -16,6 +16,7 @@ import { logger } from '@/lib/logger';
 import { MoonCommerceLogo } from '@/components/MoonCommerceLogo';
 import NotificationCenter from '@/components/NotificationCenter';
 import { RequestCoalescer } from '@/lib/performance-utils';
+import { PERSONAL_AI_INFO } from '@/lib/personal-ai';
 
 // Lazy load the modal since it's not needed on initial render
 const BrandModal = lazy(() => import('@/components/BrandModal'));
@@ -371,8 +372,37 @@ export default function HomePage({ params, searchParams }: { params?: any; searc
             <RecentActivityList />
           </div>
 
-          {/* Right Column: Recent Brands */}
-          <div className="lg:col-span-4 h-full">
+          {/* Right Column: Recent Brands & Personal AI */}
+          <div className="lg:col-span-4 h-full flex flex-col gap-4">
+            {/* Personal AI Assistant Card */}
+            <button
+              onClick={() => router.push(`/brands/${PERSONAL_AI_INFO.id}/chat`)}
+              className="group relative bg-gradient-to-br from-violet-500/10 via-purple-500/10 to-fuchsia-500/10 dark:from-violet-500/20 dark:via-purple-500/20 dark:to-fuchsia-500/20 border border-violet-200/50 dark:border-violet-700/50 rounded-2xl p-5 text-left hover:shadow-lg hover:shadow-violet-500/10 hover:border-violet-300 dark:hover:border-violet-600 transition-all duration-300"
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-violet-500/0 via-purple-500/0 to-fuchsia-500/0 group-hover:from-violet-500/5 group-hover:via-purple-500/5 group-hover:to-fuchsia-500/5 rounded-2xl transition-all duration-300" />
+              <div className="relative">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-2xl shadow-lg shadow-violet-500/20 group-hover:scale-105 transition-transform">
+                    {PERSONAL_AI_INFO.icon}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                      {PERSONAL_AI_INFO.name}
+                      <span className="text-[10px] px-2 py-0.5 bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-400 rounded-full font-medium">
+                        Private
+                      </span>
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                      {PERSONAL_AI_INFO.description}
+                    </p>
+                  </div>
+                  <svg className="w-5 h-5 text-violet-400 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+              </div>
+            </button>
+            
             {/* Quick Brand View (Most Recent Brands) */}
             <RecentBrandsList brands={brands} activityMap={brandActivityMap} />
           </div>

@@ -13,6 +13,7 @@ import { logger } from '@/lib/logger';
 import { smartExtractProductLinks } from '@/lib/url-extractor';
 import { withSupermemory } from '@supermemory/tools/ai-sdk';
 import { getSupermemoryUserId, isSupermemoryConfigured } from '@/lib/supermemory';
+import { isPersonalAI, buildPersonalAIPrompt } from '@/lib/personal-ai';
 
 export const runtime = 'edge';
 
@@ -76,14 +77,23 @@ export async function POST(req: Request) {
     let systemPrompt: string;
     let processedMessages = messages;
     
-    // Build brand info string for prompts
-    const brandInfo = `
+    // Check if this is a Personal AI conversation (no brand context)
+    const isPersonalAIMode = isPersonalAI(brandContext?.id);
+    
+    if (isPersonalAIMode) {
+      // Personal AI mode: Use generic assistant prompt without brand context
+      logger.log('[Chat API] Personal AI mode - using generic assistant prompt');
+      systemPrompt = buildPersonalAIPrompt();
+    } else {
+      // Brand mode: Build brand-specific prompts
+      // Build brand info string for prompts
+      const brandInfo = `
 Brand Name: ${brandContext?.name || 'N/A'}
 Brand Details: ${brandContext?.brand_details || 'N/A'}
 Brand Guidelines: ${brandContext?.brand_guidelines || 'N/A'}
 Copywriting Style Guide: ${brandContext?.copywriting_style_guide || 'N/A'}
 ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
-    `.trim();
+      `.trim();
 
     // Flow mode: Use conversational flow prompt for guided flow creation
     if (conversationMode === 'flow') {
@@ -140,6 +150,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         emailType
       });
     }
+    } // Close isPersonalAIMode else block
 
     const websiteUrl = brandContext?.website_url;
 
@@ -320,7 +331,8 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
 
     // Wrap model with Supermemory for persistent brand+user memory
     // This automatically injects memory context into every LLM call
-    if (isSupermemoryConfigured() && brandContext?.id && user?.id) {
+    // Skip for Personal AI mode - no brand-specific memory needed
+    if (isSupermemoryConfigured() && brandContext?.id && user?.id && !isPersonalAIMode) {
       const supermemoryUserId = getSupermemoryUserId(brandContext.id, user.id);
       logger.log('[Chat API] Wrapping model with Supermemory:', { supermemoryUserId });
       
@@ -337,8 +349,9 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
     logger.log(`[Chat API] Starting stream with ${model.provider} model`);
     logger.log(`[Chat API] System prompt length: ${systemPrompt.length}`);
     logger.log(`[Chat API] Messages count: ${formattedMessages.length}`);
+    logger.log(`[Chat API] Mode: ${isPersonalAIMode ? 'Personal AI' : 'Brand Mode'}`);
     logger.log(`[Chat API] Web search enabled: ${model.provider === 'anthropic' ? 'via tool' : 'via provider options'}`);
-    logger.log(`[Chat API] Supermemory enabled: ${isSupermemoryConfigured() && brandContext?.id && user?.id}`);
+    logger.log(`[Chat API] Supermemory enabled: ${isSupermemoryConfigured() && brandContext?.id && user?.id && !isPersonalAIMode}`);
     
     // Log attachment details for debugging
     if (attachments && attachments.length > 0) {

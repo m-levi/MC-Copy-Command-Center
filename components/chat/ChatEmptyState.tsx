@@ -5,9 +5,53 @@ import { ConversationMode } from '@/types';
 interface ChatEmptyStateProps {
   mode: ConversationMode;
   onNewConversation: () => void;
+  isPersonalAI?: boolean;
 }
 
-export default function ChatEmptyState({ mode, onNewConversation }: ChatEmptyStateProps) {
+export default function ChatEmptyState({ mode, onNewConversation, isPersonalAI = false }: ChatEmptyStateProps) {
+  // Personal AI mode: show a different empty state
+  if (isPersonalAI) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center max-w-2xl px-4 sm:px-6">
+          <div className="mb-6 flex justify-center">
+            <div className="w-20 h-20 bg-gradient-to-br from-violet-100 to-purple-100 dark:from-violet-900/30 dark:to-purple-900/30 rounded-2xl flex items-center justify-center text-4xl shadow-lg">
+              ✨
+            </div>
+          </div>
+          <h3 className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-2">
+            AI Assistant
+          </h3>
+          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mb-6">
+            Chat with any AI model directly. No brand context, no templates - just you and the AI.
+          </p>
+          <div className="grid grid-cols-2 gap-3 max-w-md mx-auto">
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-left">
+              <div className="text-xl mb-2">💡</div>
+              <div className="font-medium text-gray-900 dark:text-white text-sm">Ask anything</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Get help with any topic</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-left">
+              <div className="text-xl mb-2">✍️</div>
+              <div className="font-medium text-gray-900 dark:text-white text-sm">Write & edit</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Content, code, and more</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-left">
+              <div className="text-xl mb-2">🧠</div>
+              <div className="font-medium text-gray-900 dark:text-white text-sm">Brainstorm</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Generate creative ideas</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-left">
+              <div className="text-xl mb-2">📊</div>
+              <div className="font-medium text-gray-900 dark:text-white text-sm">Analyze</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Break down complex topics</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-center h-full">
       <div className="text-center max-w-2xl px-4 sm:px-6">

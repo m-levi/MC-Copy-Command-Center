@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { logger } from '@/lib/logger';
+import { isPersonalAI, PERSONAL_AI_INFO } from '@/lib/personal-ai';
 
 interface RecentConversation {
   id: string;
@@ -32,6 +33,7 @@ export default function RecentActivityList() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Fetch conversations without joining brands (FK was removed for Personal AI support)
       const { data, error } = await supabase
         .from('conversations')
         .select(`
@@ -39,23 +41,43 @@ export default function RecentActivityList() {
           title,
           updated_at,
           brand_id,
-          last_message_preview,
-          brand:brands(id, name)
+          last_message_preview
         `)
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
-        .limit(10); // Fetch 10 items
+        .limit(10);
 
       if (error) throw error;
 
-      // Transform data: Supabase returns brand as array, extract first element
-      const validConversations = data
-        ?.filter(c => c.brand && (Array.isArray(c.brand) ? c.brand.length > 0 : true))
-        .map(c => ({
-          ...c,
-          brand: Array.isArray(c.brand) ? c.brand[0] : c.brand
-        })) || [];
-      setConversations(validConversations);
+      // Get unique brand IDs (excluding Personal AI)
+      const brandIds = [...new Set(
+        (data || [])
+          .filter(c => !isPersonalAI(c.brand_id))
+          .map(c => c.brand_id)
+      )];
+
+      // Fetch brands separately
+      let brandsMap: Record<string, { id: string; name: string }> = {};
+      if (brandIds.length > 0) {
+        const { data: brands } = await supabase
+          .from('brands')
+          .select('id, name')
+          .in('id', brandIds);
+        
+        if (brands) {
+          brandsMap = Object.fromEntries(brands.map(b => [b.id, b]));
+        }
+      }
+
+      // Transform data: add brand info or Personal AI info
+      const transformedConversations = (data || []).map(c => ({
+        ...c,
+        brand: isPersonalAI(c.brand_id)
+          ? { id: PERSONAL_AI_INFO.id, name: PERSONAL_AI_INFO.name }
+          : brandsMap[c.brand_id] || null
+      })).filter(c => c.brand !== null);
+
+      setConversations(transformedConversations);
     } catch (error) {
       logger.error('Error fetching recent conversations:', error);
     } finally {

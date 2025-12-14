@@ -5,9 +5,11 @@ import { useState, useEffect, memo, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { AIReasoning } from './chat/AIReasoning';
 import InlineCommentBox from './InlineCommentBox';
-import { ChatMessageUser, ChatMessageActions, ProductLinksSection, EmailVersionRenderer, StructuredEmailRenderer, isStructuredEmailCopy } from './chat';
+import { ChatMessageUser, ChatMessageActions, ProductLinksSection, isStructuredEmailCopy } from './chat';
 // Note: FlowUIRenderer temporarily removed - needs reconnection when flow feature is re-enabled
 import SubjectLineGeneratorInline from './SubjectLineGeneratorInline';
+import { useOptionalArtifactContext } from '@/contexts/ArtifactContext';
+import { MailIcon, ExternalLinkIcon, SparklesIcon, ChevronRightIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
@@ -127,6 +129,141 @@ const createCommentHighlightPlugin = (highlights: CommentHighlight[]) => {
     });
   };
 };
+
+// Inline Artifact Card - Compact card shown in chat that opens the artifact sidebar
+function InlineArtifactCard({ 
+  messageId, 
+  isStreaming = false 
+}: { 
+  messageId: string; 
+  isStreaming?: boolean;
+}) {
+  const artifactContext = useOptionalArtifactContext();
+  const [isHovering, setIsHovering] = useState(false);
+  
+  // Check if we have an artifact for this message
+  const artifact = artifactContext?.findArtifactByMessageId?.(messageId);
+  const hasArtifact = !!artifact;
+  const isContextAvailable = !!artifactContext;
+  
+  // Get variant count if artifact exists
+  const variantCount = artifact ? [
+    artifact.version_a_content,
+    artifact.version_b_content,
+    artifact.version_c_content,
+  ].filter(Boolean).length : 3;
+  
+  const handleClick = useCallback(() => {
+    if (artifactContext) {
+      if (artifact) {
+        artifactContext.setActiveArtifact(artifact.id);
+      }
+      artifactContext.openSidebar();
+    }
+  }, [artifactContext, artifact]);
+
+  // Check if sidebar is already open (streaming is shown there)
+  const isSidebarOpen = artifactContext?.isSidebarOpen;
+
+  if (isStreaming) {
+    return (
+      <div className="py-4">
+        <button
+          onClick={handleClick}
+          className="w-full p-4 rounded-2xl border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/20 text-left hover:bg-blue-100/50 dark:hover:bg-blue-900/30 transition-colors"
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center">
+              <MailIcon className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-semibold text-gray-900 dark:text-white">Email Copy</span>
+                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 rounded">
+                  <div className="flex gap-0.5">
+                    <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  Writing
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {isSidebarOpen ? 'View in sidebar →' : 'Click to open sidebar'}
+              </p>
+            </div>
+            <ChevronRightIcon className="w-5 h-5 text-blue-400 flex-shrink-0" />
+          </div>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-4">
+      <button
+        onClick={handleClick}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+        disabled={!isContextAvailable}
+        className={`w-full p-4 rounded-2xl border transition-all text-left group ${
+          isContextAvailable 
+            ? 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer'
+            : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/30 cursor-default opacity-75'
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          <div className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+            hasArtifact 
+              ? 'bg-blue-100 dark:bg-blue-900/30 group-hover:bg-blue-200 dark:group-hover:bg-blue-800/40'
+              : 'bg-gray-100 dark:bg-gray-700 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30'
+          }`}>
+            <MailIcon className={`w-5 h-5 ${
+              hasArtifact 
+                ? 'text-blue-500'
+                : 'text-gray-500 dark:text-gray-400 group-hover:text-blue-500'
+            }`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-semibold text-gray-900 dark:text-white">
+                {artifact?.title || 'Email Copy'}
+              </span>
+              {hasArtifact ? (
+                <span className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
+                  <SparklesIcon className="w-2.5 h-2.5" />
+                  {variantCount} option{variantCount !== 1 ? 's' : ''}
+                </span>
+              ) : isContextAvailable ? (
+                <span className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded">
+                  <SparklesIcon className="w-2.5 h-2.5" />
+                  Processing
+                </span>
+              ) : (
+                <span className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded">
+                  Email content
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {hasArtifact 
+                ? 'Click to view and edit in sidebar'
+                : isContextAvailable
+                  ? 'Artifact will open in sidebar when ready'
+                  : 'Email copy generated'
+              }
+            </p>
+          </div>
+          {isContextAvailable && (
+            <ChevronRightIcon className={`w-5 h-5 flex-shrink-0 transition-transform ${
+              isHovering ? 'translate-x-0.5 text-blue-500' : 'text-gray-400'
+            }`} />
+          )}
+        </div>
+      </button>
+    </div>
+  );
+}
 
 const ChatMessage = memo(function ChatMessage({
   message,
@@ -620,9 +757,10 @@ const ChatMessage = memo(function ChatMessage({
   const isUser = message.role === 'user';
 
   // Render floating elements via portal to avoid CSS containment clipping
+  // Note: We removed the floating selection menu - text selection actions are now in the artifact sidebar
   const floatingElements = isMounted && typeof window !== 'undefined' ? createPortal(
     <>
-      {/* Inline comment box - appears when user clicks "Comment" */}
+      {/* Inline comment box - appears when user clicks on highlighted text */}
       {showInlineCommentBox && selectedText && selectionPosition && conversationId && (
         <InlineCommentBox
           position={{
@@ -640,97 +778,6 @@ const ChatMessage = memo(function ChatMessage({
           }}
           onCommentAdded={handleCommentPosted}
         />
-      )}
-
-      {/* Floating selection menu - Premium pill design */}
-      {!showInlineCommentBox && selectionPosition && selectedText && (onCommentClick || onReferenceInChat) && (
-        <div
-          className="floating-comment-btn fixed"
-          style={{
-            left: `${selectionPosition.x}px`,
-            top: `${selectionPosition.y}px`,
-            transform: 'translate(-50%, -100%)',
-            zIndex: 100000,
-            pointerEvents: 'auto',
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Container with spring animation */}
-          <div 
-            className="animate-in fade-in zoom-in-95 slide-in-from-bottom-3 duration-200"
-            style={{ animationTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
-          >
-            {/* Pill-shaped menu with glassmorphism */}
-            <div className="relative">
-              {/* Glow effect */}
-              <div className="absolute inset-0 bg-gradient-to-r from-amber-400/20 to-orange-400/20 rounded-full blur-lg"></div>
-              
-              {/* Main pill */}
-              <div className="relative bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl border border-stone-200/80 dark:border-gray-700/80 rounded-full shadow-xl shadow-stone-200/50 dark:shadow-gray-900/50 flex items-center p-1 gap-0.5">
-                {/* Reference in Chat button - Primary action */}
-                {onReferenceInChat && (
-                  <button
-                    onClick={() => {
-                      onReferenceInChat(selectedText);
-                      toast.success('Quote added – type your feedback below', { 
-                        icon: '💬',
-                        duration: 2500 
-                      });
-                      setSelectedText('');
-                      setSelectionPosition(null);
-                      window.getSelection()?.removeAllRanges();
-                    }}
-                    className="group flex items-center gap-2 pl-3 pr-4 py-2 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 transition-all duration-200 text-white font-medium text-sm shadow-sm hover:shadow-md"
-                    title="Reference this text in your next message"
-                  >
-                    <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                    </svg>
-                    <span>Quote</span>
-                  </button>
-                )}
-                
-                {/* Comment button */}
-                {onCommentClick && (
-                  <button
-                    onClick={handleCommentOnHighlight}
-                    className={`group flex items-center gap-1.5 px-3 py-2 rounded-full transition-all duration-200 text-sm font-medium ${
-                      onReferenceInChat 
-                        ? 'text-stone-600 dark:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-700' 
-                        : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm hover:shadow-md pl-3 pr-4 gap-2'
-                    }`}
-                    title="Add comment"
-                  >
-                    <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                    </svg>
-                    <span>Comment</span>
-                  </button>
-                )}
-                
-                {/* Copy button */}
-                <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(selectedText);
-                    toast.success('Copied!');
-                    setSelectedText('');
-                    setSelectionPosition(null);
-                  }}
-                  className="group flex items-center gap-1.5 px-3 py-2 rounded-full text-stone-600 dark:text-gray-300 hover:bg-stone-100 dark:hover:bg-gray-700 transition-all duration-200 text-sm font-medium"
-                  title="Copy text"
-                >
-                  <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                  <span>Copy</span>
-                </button>
-              </div>
-              
-              {/* Arrow pointer */}
-              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-3 h-3 bg-white dark:bg-gray-800 border-b border-r border-stone-200/80 dark:border-gray-700/80 rotate-45"></div>
-            </div>
-          </div>
-        </div>
       )}
     </>,
     document.body
@@ -837,24 +884,12 @@ const ChatMessage = memo(function ChatMessage({
                     {/* NOTE: FlowUIRenderer temporarily disabled - component interface was refactored
                         and needs to be reconnected when flow feature is re-enabled.
                         The component now expects flowOutline: FlowOutline instead of content string. */}
-                    {hasVersionedContent ? (
-                      /* Render Email Version UI for versioned email content (version_a, version_b, version_c) */
-                      <div className="py-4">
-                        <EmailVersionRenderer
-                          content={stripCampaignTags(messageContent)}
-                          remarkPlugins={remarkPlugins}
-                          markdownComponents={markdownComponents}
-                          isStreaming={isStreaming}
-                        />
-                      </div>
-                    ) : hasStructuredEmailContent ? (
-                      /* Render Structured Email UI for email copy with [HERO], [TEXT], etc. markers */
-                      <div className="px-4 sm:px-6 py-4">
-                        <StructuredEmailRenderer
-                          content={stripCampaignTags(messageContent)}
-                          onCopy={() => toast.success('Copied to clipboard!')}
-                        />
-                      </div>
+                    {(hasVersionedContent || hasStructuredEmailContent) ? (
+                      /* Render compact artifact card - click to open sidebar */
+                      <InlineArtifactCard 
+                        messageId={message.id}
+                        isStreaming={isStreaming}
+                      />
                     ) : (
                       <div 
                         className={`prose dark:prose-invert max-w-none select-text cursor-text comment-selection-area
@@ -888,12 +923,14 @@ const ChatMessage = memo(function ChatMessage({
                     {/* Commented text snippets removed - now shown inline as highlights */}
                   </div>
                   
-                  {/* Product Links Section - Using split component */}
+                  {/* Product Links Section */}
                   <ProductLinksSection productLinks={productLinks} />
 
-                  {/* Inline Subject Line Generator - Only for email drafts */}
+                  {/* Subject Line Generator - Only for email drafts */}
                   {!isUser && (messageContent.includes('```') || mode === 'email_copy') && (
-                    <SubjectLineGeneratorInline emailContent={messageContent} />
+                    <div className="px-6 sm:px-8 pb-4">
+                      <SubjectLineGeneratorInline emailContent={messageContent} />
+                    </div>
                   )}
                   </div>
                   </div>

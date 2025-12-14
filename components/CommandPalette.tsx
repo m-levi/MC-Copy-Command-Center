@@ -1,20 +1,49 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { Brand, Conversation, ConversationWithStatus } from '@/types';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Brand, ConversationWithStatus } from '@/types';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { performSearch, SearchResult } from '@/lib/search-service';
 import { logger } from '@/lib/logger';
+import { cn } from '@/lib/utils';
+import {
+  Search,
+  Command,
+  Mail,
+  MessageSquare,
+  Building2,
+  Settings,
+  Home,
+  Star,
+  Keyboard,
+  RefreshCw,
+  Plus,
+  ChevronRight,
+  Clock,
+  User,
+  Pin,
+  Workflow,
+  Sparkles,
+  Filter,
+  X,
+  CornerDownLeft,
+  ArrowUp,
+  ArrowDown,
+  Loader2,
+  Hash,
+  Zap,
+} from 'lucide-react';
 
 interface CommandItem {
   id: string;
   type: 'action' | 'conversation' | 'brand' | 'recent' | 'navigation';
   label: string;
   description?: string;
-  icon: string;
+  icon: React.ReactNode;
   shortcut?: string;
   badge?: string;
+  badgeVariant?: 'default' | 'current' | 'pinned' | 'brand';
   score: number;
   onExecute: () => void;
   meta?: {
@@ -41,6 +70,13 @@ interface CommandPaletteProps {
 
 type SearchFilter = 'all' | 'conversations' | 'brands' | 'actions';
 
+const FILTER_CONFIG: { value: SearchFilter; label: string; icon: React.ReactNode }[] = [
+  { value: 'all', label: 'All', icon: <Sparkles className="w-3.5 h-3.5" /> },
+  { value: 'conversations', label: 'Chats', icon: <MessageSquare className="w-3.5 h-3.5" /> },
+  { value: 'brands', label: 'Brands', icon: <Building2 className="w-3.5 h-3.5" /> },
+  { value: 'actions', label: 'Actions', icon: <Zap className="w-3.5 h-3.5" /> },
+];
+
 export default function CommandPalette({
   isOpen,
   onClose,
@@ -61,6 +97,7 @@ export default function CommandPalette({
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   // Load recent searches
   useEffect(() => {
@@ -75,40 +112,45 @@ export default function CommandPalette({
   }, []);
 
   // Save to recent searches
-  const saveRecentSearch = (search: string) => {
+  const saveRecentSearch = useCallback((search: string) => {
     if (!search.trim()) return;
     
     const updated = [search, ...recentSearches.filter(s => s !== search)].slice(0, 5);
     setRecentSearches(updated);
     localStorage.setItem('command-palette-recent', JSON.stringify(updated));
-  };
+  }, [recentSearches]);
 
   // Perform API search when query is long enough
   useEffect(() => {
     if (query.trim().length >= 3) {
       setIsSearching(true);
-      performSearch(query, 'all', {}, 1, 10)
-        .then((response) => {
-          setApiSearchResults(response.results);
-        })
-        .catch((error) => {
-          logger.error('Search API error:', error);
-          setApiSearchResults([]);
-        })
-        .finally(() => {
-          setIsSearching(false);
-        });
+      const timeoutId = setTimeout(() => {
+        performSearch(query, 'all', {}, 1, 10)
+          .then((response) => {
+            setApiSearchResults(response.results);
+          })
+          .catch((error) => {
+            logger.error('Search API error:', error);
+            setApiSearchResults([]);
+          })
+          .finally(() => {
+            setIsSearching(false);
+          });
+      }, 150); // Debounce
+
+      return () => clearTimeout(timeoutId);
     } else {
       setApiSearchResults([]);
+      setIsSearching(false);
     }
   }, [query]);
 
   // Advanced fuzzy search with better scoring and highlighting
-  const fuzzyMatch = (text: string, query: string): { matches: boolean; score: number; highlightIndices: number[] } => {
-    if (!query) return { matches: true, score: 0, highlightIndices: [] };
+  const fuzzyMatch = useCallback((text: string, searchQuery: string): { matches: boolean; score: number; highlightIndices: number[] } => {
+    if (!searchQuery) return { matches: true, score: 0, highlightIndices: [] };
     
     const normalizedText = text.toLowerCase();
-    const normalizedQuery = query.toLowerCase();
+    const normalizedQuery = searchQuery.toLowerCase();
     
     // Exact match gets highest score
     if (normalizedText.includes(normalizedQuery)) {
@@ -157,10 +199,10 @@ export default function CommandPalette({
       score: score + (consecutiveMatches * 3),
       highlightIndices,
     };
-  };
+  }, []);
 
   // Highlight matching characters in text
-  const highlightText = (text: string, highlightIndices: number[]) => {
+  const highlightText = useCallback((text: string, highlightIndices: number[]) => {
     if (!highlightIndices || highlightIndices.length === 0) {
       return <span>{text}</span>;
     }
@@ -168,14 +210,17 @@ export default function CommandPalette({
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
 
-    highlightIndices.forEach((index, i) => {
+    highlightIndices.forEach((index) => {
       // Add non-highlighted text before this match
       if (index > lastIndex) {
         parts.push(<span key={`text-${lastIndex}`}>{text.substring(lastIndex, index)}</span>);
       }
       // Add highlighted character
       parts.push(
-        <span key={`highlight-${index}`} className="bg-yellow-200 dark:bg-yellow-700 text-gray-900 dark:text-gray-100 font-semibold">
+        <span 
+          key={`highlight-${index}`} 
+          className="bg-amber-200/70 dark:bg-amber-500/30 text-amber-900 dark:text-amber-200 rounded-sm px-0.5 font-medium"
+        >
           {text[index]}
         </span>
       );
@@ -188,15 +233,11 @@ export default function CommandPalette({
     }
 
     return <>{parts}</>;
-  };
+  }, []);
 
   // Detect command mode (starts with ">")
   const isCommandMode = query.startsWith('>');
   const searchQuery = isCommandMode ? query.slice(1).trim() : query;
-
-  // Detect filter mode (starts with "#")
-  const isFilterMode = query.startsWith('#');
-  const filterQuery = isFilterMode ? query.slice(1).trim() : searchQuery;
 
   // Generate command items
   const filteredItems = useMemo(() => {
@@ -211,7 +252,7 @@ export default function CommandPalette({
           label: 'New Email Conversation',
           description: 'Start a new email copy conversation',
           shortcut: '⌘N',
-          icon: '✉️',
+          icon: <Plus className="w-4 h-4" />,
           action: onNewConversation,
         },
         {
@@ -219,7 +260,7 @@ export default function CommandPalette({
           label: 'New Email Flow',
           description: 'Create a multi-email automation sequence',
           shortcut: '⌘⇧N',
-          icon: '🔄',
+          icon: <Workflow className="w-4 h-4" />,
           action: onNewFlow,
         },
         {
@@ -227,7 +268,7 @@ export default function CommandPalette({
           label: 'Toggle Sidebar',
           description: 'Show or hide the conversation sidebar',
           shortcut: '⌘B',
-          icon: '👁️',
+          icon: <Command className="w-4 h-4" />,
           action: () => {
             window.dispatchEvent(new CustomEvent('toggleSidebar'));
             onClose();
@@ -237,7 +278,7 @@ export default function CommandPalette({
           id: 'go-home',
           label: 'Go to Home',
           description: 'View all brands',
-          icon: '🏠',
+          icon: <Home className="w-4 h-4" />,
           action: () => {
             router.push('/');
             onClose();
@@ -247,7 +288,7 @@ export default function CommandPalette({
           id: 'settings',
           label: 'Settings',
           description: 'Account and preferences',
-          icon: '⚙️',
+          icon: <Settings className="w-4 h-4" />,
           action: () => {
             router.push('/settings');
             onClose();
@@ -257,7 +298,7 @@ export default function CommandPalette({
           id: 'starred-emails',
           label: 'View Starred Emails',
           description: currentBrand ? `Favorite emails for ${currentBrand.name}` : 'View your starred emails',
-          icon: '⭐',
+          icon: <Star className="w-4 h-4" />,
           action: () => {
             if (currentBrandId) {
               window.dispatchEvent(new CustomEvent('showStarredEmails'));
@@ -270,7 +311,7 @@ export default function CommandPalette({
           label: 'Keyboard Shortcuts',
           description: 'View all available shortcuts',
           shortcut: '⌘/',
-          icon: '⌨️',
+          icon: <Keyboard className="w-4 h-4" />,
           action: () => {
             onClose();
             setTimeout(() => {
@@ -282,7 +323,7 @@ export default function CommandPalette({
           id: 'refresh-data',
           label: 'Refresh Data',
           description: 'Reload conversations and brands',
-          icon: '🔄',
+          icon: <RefreshCw className="w-4 h-4" />,
           action: () => {
             localStorage.removeItem('command-palette-data-loaded');
             window.location.reload();
@@ -319,7 +360,7 @@ export default function CommandPalette({
         label: 'New Email Conversation',
         description: 'Start a new email copy conversation',
         shortcut: '⌘N',
-        icon: '✉️',
+        icon: <Plus className="w-4 h-4" />,
         score: 1000,
         onExecute: () => {
           onNewConversation();
@@ -335,7 +376,7 @@ export default function CommandPalette({
         label: 'New Email Flow',
         description: 'Create a multi-email automation sequence',
         shortcut: '⌘⇧N',
-        icon: '🔄',
+        icon: <Workflow className="w-4 h-4" />,
         score: 999,
         onExecute: () => {
           onNewFlow();
@@ -352,7 +393,7 @@ export default function CommandPalette({
           type: 'navigation',
           label: 'Go to Home',
           description: 'View all brands',
-          icon: '🏠',
+          icon: <Home className="w-4 h-4" />,
           score: 950,
           onExecute: () => {
             router.push('/');
@@ -367,7 +408,7 @@ export default function CommandPalette({
           type: 'navigation',
           label: 'Settings',
           description: 'Account and preferences',
-          icon: '⚙️',
+          icon: <Settings className="w-4 h-4" />,
           score: 940,
           onExecute: () => {
             router.push('/settings');
@@ -382,7 +423,7 @@ export default function CommandPalette({
           type: 'action',
           label: 'View Starred Emails',
           description: currentBrand ? `Favorite emails for ${currentBrand.name}` : 'View your starred emails',
-          icon: '⭐',
+          icon: <Star className="w-4 h-4" />,
           score: 930,
           onExecute: () => {
             if (currentBrandId) {
@@ -397,16 +438,17 @@ export default function CommandPalette({
     // Brands
     if (searchFilter === 'all' || searchFilter === 'brands') {
       brands.forEach(brand => {
-        const match = fuzzyMatch(brand.name, filterQuery);
+        const match = fuzzyMatch(brand.name, query);
         if (match.matches) {
           const isCurrent = brand.id === currentBrandId;
           items.push({
             id: `brand-${brand.id}`,
             type: 'brand',
             label: brand.name,
-            description: isCurrent ? 'Current brand' : 'Switch to this brand',
-            icon: '🏢',
+            description: isCurrent ? 'Current workspace' : 'Switch to this brand',
+            icon: <Building2 className="w-4 h-4" />,
             badge: isCurrent ? 'Current' : undefined,
+            badgeVariant: 'current',
             score: match.score + (isCurrent ? 50 : 0) + 800,
             onExecute: () => {
               if (brand.id !== currentBrandId) {
@@ -428,9 +470,9 @@ export default function CommandPalette({
         const conversationBrand = brands.find(b => b.id === conversation.brand_id);
         
         // Search in title, preview, and brand name
-        const titleMatch = fuzzyMatch(conversation.title || 'Untitled', filterQuery);
-        const previewMatch = fuzzyMatch(conversation.last_message_preview || '', filterQuery);
-        const brandMatch = conversationBrand ? fuzzyMatch(conversationBrand.name, filterQuery) : { matches: false, score: 0, highlightIndices: [] };
+        const titleMatch = fuzzyMatch(conversation.title || 'Untitled', query);
+        const previewMatch = fuzzyMatch(conversation.last_message_preview || '', query);
+        const brandMatch = conversationBrand ? fuzzyMatch(conversationBrand.name, query) : { matches: false, score: 0, highlightIndices: [] };
         
         // Match if any field matches
         const bestMatch = [titleMatch, previewMatch, brandMatch]
@@ -444,14 +486,9 @@ export default function CommandPalette({
           const isDifferentBrand = conversation.brand_id !== currentBrandId;
           
           // Build description with brand name if different brand
-          let description = conversation.last_message_preview?.substring(0, 100) || 'No messages yet';
+          let description = conversation.last_message_preview?.substring(0, 80) || 'No messages yet';
           if (isDifferentBrand && conversationBrand) {
             description = `${conversationBrand.name} • ${description}`;
-          }
-          
-          // Add creator info if available
-          if (conversation.created_by_name) {
-            description = `${description.substring(0, 80)} • by ${conversation.created_by_name}`;
           }
           
           items.push({
@@ -459,15 +496,14 @@ export default function CommandPalette({
             type: 'conversation',
             label: conversation.title || 'Untitled Conversation',
             description,
-            icon: isFlow ? '🔄' : (isChild ? '📧' : isPinned ? '📌' : '💬'),
+            icon: isFlow ? <Workflow className="w-4 h-4" /> : (isChild ? <Mail className="w-4 h-4" /> : isPinned ? <Pin className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />),
             badge: isPinned ? 'Pinned' : (isDifferentBrand && conversationBrand ? conversationBrand.name : undefined),
-            score: bestMatch.score + (isPinned ? 150 : 0) + (isDifferentBrand ? -30 : 50), // Prefer current brand
+            badgeVariant: isPinned ? 'pinned' : 'brand',
+            score: bestMatch.score + (isPinned ? 150 : 0) + (isDifferentBrand ? -30 : 50),
             onExecute: () => {
-              // Pass the brand ID to the handler so it can navigate properly
               onSelectConversation(conversation.id, conversation.brand_id);
               saveRecentSearch(conversation.title || 'Untitled');
               
-              // Show toast if switching brands
               if (isDifferentBrand && conversationBrand) {
                 toast.success(`Opening in ${conversationBrand.name}`);
               }
@@ -497,8 +533,8 @@ export default function CommandPalette({
             type: result.type === 'brand' ? 'brand' : result.type === 'conversation' ? 'conversation' : 'action',
             label: result.title,
             description: result.content?.substring(0, 100),
-            icon: result.type === 'brand' ? '🏷️' : result.type === 'conversation' ? '💬' : '📧',
-            score: 200, // High score for API results
+            icon: result.type === 'brand' ? <Building2 className="w-4 h-4" /> : result.type === 'conversation' ? <MessageSquare className="w-4 h-4" /> : <Mail className="w-4 h-4" />,
+            score: 200,
             onExecute: () => {
               if (result.type === 'brand' && result.id) {
                 onSelectBrand(result.id);
@@ -521,13 +557,33 @@ export default function CommandPalette({
     return items
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
-        // If scores are equal, sort by most recent
         const aTime = a.meta?.updatedAt || a.meta?.createdAt || '';
         const bTime = b.meta?.updatedAt || b.meta?.createdAt || '';
         return bTime.localeCompare(aTime);
       })
-      .slice(0, 25); // Show top 25 results
-  }, [query, searchQuery, filterQuery, isCommandMode, isFilterMode, searchFilter, brands, conversations, currentBrandId, apiSearchResults, onSelectBrand, onSelectConversation, onNewConversation, onNewFlow, onClose, router]);
+      .slice(0, 25);
+  }, [query, searchQuery, isCommandMode, searchFilter, brands, conversations, currentBrandId, apiSearchResults, onSelectBrand, onSelectConversation, onNewConversation, onNewFlow, onClose, router, fuzzyMatch, saveRecentSearch]);
+
+  // Group items by type for better visual organization
+  const groupedItems = useMemo(() => {
+    const groups: { [key: string]: CommandItem[] } = {
+      actions: [],
+      conversations: [],
+      brands: [],
+    };
+
+    filteredItems.forEach(item => {
+      if (item.type === 'action' || item.type === 'navigation') {
+        groups.actions.push(item);
+      } else if (item.type === 'conversation') {
+        groups.conversations.push(item);
+      } else if (item.type === 'brand') {
+        groups.brands.push(item);
+      }
+    });
+
+    return groups;
+  }, [filteredItems]);
 
   // Reset selected index when filtered items change
   useEffect(() => {
@@ -546,8 +602,8 @@ export default function CommandPalette({
     }
   }, [isOpen]);
 
-  // Keyboard navigation - use input's onKeyDown for better reliability
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  // Keyboard navigation
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -566,10 +622,8 @@ export default function CommandPalette({
       case 'Escape':
         e.preventDefault();
         if (query) {
-          // Clear query first
           setQuery('');
         } else {
-          // Close palette
           onClose();
         }
         break;
@@ -582,20 +636,18 @@ export default function CommandPalette({
         }
         break;
     }
-  };
+  }, [filteredItems, selectedIndex, query, onClose]);
 
   // Scroll selected item into view
   useEffect(() => {
-    if (listRef.current && filteredItems.length > 0) {
-      const selectedElement = listRef.current.children[0]?.children[selectedIndex] as HTMLElement;
-      if (selectedElement) {
-        selectedElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
+    const selectedElement = itemRefs.current.get(selectedIndex);
+    if (selectedElement) {
+      selectedElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
-  }, [selectedIndex, filteredItems]);
+  }, [selectedIndex]);
 
   // Format relative time
-  const formatRelativeTime = (dateString: string) => {
+  const formatRelativeTime = useCallback((dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -609,35 +661,158 @@ export default function CommandPalette({
     if (diffDays < 7) return `${diffDays}d ago`;
     if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
     return date.toLocaleDateString();
-  };
+  }, []);
+
+  // Get flat index for an item
+  const getFlatIndex = useCallback((groupKey: string, itemIndex: number): number => {
+    let index = 0;
+    const groupOrder = ['actions', 'conversations', 'brands'];
+    
+    for (const key of groupOrder) {
+      if (key === groupKey) {
+        return index + itemIndex;
+      }
+      index += groupedItems[key]?.length || 0;
+    }
+    return index;
+  }, [groupedItems]);
 
   if (!isOpen) return null;
 
-  const currentFilter = isCommandMode ? 'commands' : isFilterMode ? 'filtered' : searchFilter;
+  const renderGroup = (items: CommandItem[], title: string, icon: React.ReactNode, groupKey: string) => {
+    if (items.length === 0) return null;
+
+    return (
+      <div className="py-2">
+        <div className="px-3 pb-2 flex items-center gap-2">
+          <span className="text-muted-foreground">{icon}</span>
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</span>
+          <span className="text-xs text-muted-foreground/60">{items.length}</span>
+        </div>
+        <div className="space-y-0.5">
+          {items.map((item, itemIndex) => {
+            const flatIndex = getFlatIndex(groupKey, itemIndex);
+            const isSelected = flatIndex === selectedIndex;
+
+            return (
+              <button
+                key={item.id}
+                ref={(el) => {
+                  if (el) itemRefs.current.set(flatIndex, el);
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  item.onExecute();
+                }}
+                onMouseEnter={() => setSelectedIndex(flatIndex)}
+                className={cn(
+                  "w-full text-left px-3 py-2.5 flex items-center gap-3 transition-all duration-75 cursor-pointer group rounded-lg mx-1",
+                  "outline-none focus:outline-none",
+                  isSelected
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-accent/50"
+                )}
+              >
+                {/* Icon */}
+                <div className={cn(
+                  "flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg transition-colors",
+                  isSelected
+                    ? "bg-primary/10 text-primary"
+                    : "bg-muted text-muted-foreground group-hover:bg-muted/80"
+                )}>
+                  {item.icon}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      "font-medium truncate",
+                      isSelected ? "text-foreground" : "text-foreground/90"
+                    )}>
+                      {item.highlightIndices && item.highlightIndices.length > 0 
+                        ? highlightText(item.label, item.highlightIndices)
+                        : item.label
+                      }
+                    </span>
+                    {item.badge && (
+                      <span className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 uppercase tracking-wide",
+                        item.badgeVariant === 'current' && "bg-primary/15 text-primary",
+                        item.badgeVariant === 'pinned' && "bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400",
+                        item.badgeVariant === 'brand' && "bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400",
+                        !item.badgeVariant && "bg-muted text-muted-foreground"
+                      )}>
+                        {item.badge}
+                      </span>
+                    )}
+                  </div>
+                  {item.description && (
+                    <p className="text-sm text-muted-foreground truncate mt-0.5">
+                      {item.description}
+                    </p>
+                  )}
+                  {/* Timestamp for conversations */}
+                  {item.type === 'conversation' && item.meta?.updatedAt && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <Clock className="w-3 h-3 text-muted-foreground/60" />
+                      <span className="text-xs text-muted-foreground/60">
+                        {formatRelativeTime(item.meta.updatedAt)}
+                      </span>
+                      {item.meta.creatorName && (
+                        <>
+                          <span className="text-muted-foreground/40">•</span>
+                          <User className="w-3 h-3 text-muted-foreground/60" />
+                          <span className="text-xs text-muted-foreground/60">
+                            {item.meta.creatorName}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Shortcut or arrow */}
+                <div className="flex-shrink-0 flex items-center gap-2">
+                  {item.shortcut && (
+                    <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-medium text-muted-foreground bg-muted rounded border border-border/50">
+                      {item.shortcut}
+                    </kbd>
+                  )}
+                  {isSelected && (
+                    <ChevronRight className="w-4 h-4 text-primary" />
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm z-[9998]"
+        className="fixed inset-0 bg-black/60 dark:bg-black/70 backdrop-blur-sm z-[9998] animate-in fade-in duration-150"
         onClick={onClose}
       />
 
       {/* Command Palette Modal */}
-      <div className="fixed inset-0 flex items-start justify-center pt-[12vh] z-[9999] pointer-events-none">
-        <div className="w-full max-w-3xl mx-4 pointer-events-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
-            {/* Search Input */}
-            <div className="border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center px-4 py-3">
+      <div className="fixed inset-0 flex items-start justify-center pt-[10vh] z-[9999] pointer-events-none px-4">
+        <div className="w-full max-w-2xl pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-200">
+          <div className="bg-popover rounded-xl shadow-2xl border border-border/50 overflow-hidden">
+            {/* Search Header */}
+            <div className="border-b border-border/50">
+              <div className="flex items-center px-4 h-14">
                 {isCommandMode ? (
-                  <svg className="w-5 h-5 text-blue-500 dark:text-blue-400 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
+                  <Command className="w-5 h-5 text-primary mr-3 flex-shrink-0" />
+                ) : isSearching ? (
+                  <Loader2 className="w-5 h-5 text-muted-foreground mr-3 flex-shrink-0 animate-spin" />
                 ) : (
-                  <svg className="w-5 h-5 text-gray-400 dark:text-gray-500 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
+                  <Search className="w-5 h-5 text-muted-foreground mr-3 flex-shrink-0" />
                 )}
                 <input
                   ref={inputRef}
@@ -647,43 +822,45 @@ export default function CommandPalette({
                   onKeyDown={handleKeyDown}
                   placeholder={
                     isCommandMode 
-                      ? "Type a command or action..." 
-                      : "Search anything... (> for commands)"
+                      ? "Type a command..." 
+                      : "Search conversations, brands, actions..."
                   }
-                  className="flex-1 bg-transparent border-none outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-base"
+                  className="flex-1 bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground text-base"
                   autoComplete="off"
                   spellCheck="false"
                 />
                 {query && (
                   <button
                     onClick={() => setQuery('')}
-                    className="mr-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                    className="p-1.5 hover:bg-accent rounded-md transition-colors"
                     title="Clear search"
                   >
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <X className="w-4 h-4 text-muted-foreground" />
                   </button>
                 )}
-                <kbd className="hidden sm:inline-block px-2 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 rounded">
-                  ESC
-                </kbd>
+                <div className="ml-2 pl-2 border-l border-border/50">
+                  <kbd className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono font-medium text-muted-foreground bg-muted rounded border border-border/50">
+                    ESC
+                  </kbd>
+                </div>
               </div>
 
-              {/* Quick filters */}
+              {/* Filter Tabs */}
               {!isCommandMode && (
-                <div className="px-4 pb-2 flex gap-2">
-                  {(['all', 'conversations', 'brands', 'actions'] as SearchFilter[]).map((filter) => (
+                <div className="px-4 pb-3 flex items-center gap-1.5">
+                  {FILTER_CONFIG.map((filter) => (
                     <button
-                      key={filter}
-                      onClick={() => setSearchFilter(filter)}
-                      className={`px-2 py-1 text-xs rounded-full transition-all ${
-                        searchFilter === filter
-                          ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
+                      key={filter.value}
+                      onClick={() => setSearchFilter(filter.value)}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-all",
+                        searchFilter === filter.value
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      )}
                     >
-                      {filter === 'all' ? '🌐 All' : filter === 'conversations' ? '💬 Conversations' : filter === 'brands' ? '🏢 Brands' : '⚡ Actions'}
+                      {filter.icon}
+                      {filter.label}
                     </button>
                   ))}
                 </div>
@@ -693,150 +870,123 @@ export default function CommandPalette({
             {/* Results List */}
             <div
               ref={listRef}
-              className="max-h-[65vh] overflow-y-auto"
+              className="max-h-[60vh] overflow-y-auto overscroll-contain"
             >
               {filteredItems.length === 0 ? (
-                <div className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
-                  <svg className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                  <p className="text-base font-medium mb-1">No results found</p>
-                  <p className="text-sm">
+                <div className="px-4 py-16 text-center">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
+                    <Search className="w-8 h-8 text-muted-foreground/50" />
+                  </div>
+                  <p className="text-base font-medium text-foreground mb-1">No results found</p>
+                  <p className="text-sm text-muted-foreground">
                     {isCommandMode 
-                      ? "Try a different command or leave blank to see all" 
+                      ? "Try a different command or clear the search" 
                       : "Try a different search term or change your filter"}
                   </p>
-                  {searchFilter !== 'all' && (
+                  {searchFilter !== 'all' && !isCommandMode && (
                     <button
                       onClick={() => setSearchFilter('all')}
-                      className="mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                      className="mt-4 text-sm text-primary hover:underline font-medium"
                     >
                       Search in all categories
                     </button>
                   )}
                 </div>
-              ) : (
-                <div className="py-1">
+              ) : isCommandMode ? (
+                // Command mode - no grouping
+                <div className="py-2 space-y-0.5">
                   {filteredItems.map((item, index) => (
                     <button
                       key={item.id}
+                      ref={(el) => {
+                        if (el) itemRefs.current.set(index, el);
+                      }}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         item.onExecute();
                       }}
                       onMouseEnter={() => setSelectedIndex(index)}
-                      className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-all duration-100 cursor-pointer group ${
+                      className={cn(
+                        "w-full text-left px-3 py-2.5 flex items-center gap-3 transition-all duration-75 cursor-pointer group rounded-lg mx-1",
+                        "outline-none focus:outline-none",
                         index === selectedIndex
-                          ? 'bg-blue-50 dark:bg-blue-900/30 border-l-2 border-blue-500'
-                          : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-l-2 border-transparent'
-                      }`}
+                          ? "bg-accent text-accent-foreground"
+                          : "hover:bg-accent/50"
+                      )}
                     >
-                      {/* Icon */}
-                      <div className={`flex-shrink-0 w-10 h-10 flex items-center justify-center text-2xl rounded-lg transition-all ${
+                      <div className={cn(
+                        "flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg transition-colors",
                         index === selectedIndex
-                          ? 'bg-blue-100 dark:bg-blue-900/50'
-                          : 'bg-gray-50 dark:bg-gray-700/50 group-hover:bg-gray-100 dark:group-hover:bg-gray-700'
-                      }`}>
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted text-muted-foreground"
+                      )}>
                         {item.icon}
                       </div>
-
-                      {/* Content */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-medium text-gray-900 dark:text-gray-100 truncate">
-                            {item.highlightIndices && item.highlightIndices.length > 0 
-                              ? highlightText(item.label, item.highlightIndices)
-                              : item.label
-                            }
-                          </span>
-                          {item.badge && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
-                              item.badge === 'Current' 
-                                ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                                : item.badge === 'Pinned'
-                                ? 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
-                                : 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'
-                            }`}>
-                              {item.badge}
-                            </span>
-                          )}
-                          {/* Type badge - subtle */}
-                          <span className="text-xs text-gray-400 dark:text-gray-500 capitalize flex-shrink-0">
-                            {item.type}
-                          </span>
-                        </div>
+                        <span className="font-medium">{item.label}</span>
                         {item.description && (
-                          <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                            {item.description}
-                          </p>
-                        )}
-                        {/* Show timestamp for conversations */}
-                        {item.type === 'conversation' && item.meta?.updatedAt && (
-                          <div className="flex items-center gap-2 mt-1">
-                            <p className="text-xs text-gray-400 dark:text-gray-500">
-                              {formatRelativeTime(item.meta.updatedAt)}
-                            </p>
-                            {item.meta.creatorName && (
-                              <>
-                                <span className="text-xs text-gray-300 dark:text-gray-600">•</span>
-                                <p className="text-xs text-gray-400 dark:text-gray-500">
-                                  {item.meta.creatorName}
-                                </p>
-                              </>
-                            )}
-                          </div>
+                          <p className="text-sm text-muted-foreground truncate">{item.description}</p>
                         )}
                       </div>
-
-                      {/* Shortcut or arrow */}
-                      <div className="flex-shrink-0">
-                        {item.shortcut ? (
-                          <kbd className="hidden sm:inline-block px-2 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 rounded">
-                            {item.shortcut}
-                          </kbd>
-                        ) : (
-                          index === selectedIndex && (
-                            <svg className="w-4 h-4 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                            </svg>
-                          )
-                        )}
-                      </div>
+                      {item.shortcut && (
+                        <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-medium text-muted-foreground bg-muted rounded border border-border/50">
+                          {item.shortcut}
+                        </kbd>
+                      )}
+                      {index === selectedIndex && (
+                        <ChevronRight className="w-4 h-4 text-primary" />
+                      )}
                     </button>
                   ))}
+                </div>
+              ) : (
+                // Regular mode - grouped results
+                <div className="divide-y divide-border/30">
+                  {renderGroup(groupedItems.actions, 'Quick Actions', <Zap className="w-3.5 h-3.5" />, 'actions')}
+                  {renderGroup(groupedItems.conversations, 'Conversations', <MessageSquare className="w-3.5 h-3.5" />, 'conversations')}
+                  {renderGroup(groupedItems.brands, 'Brands', <Building2 className="w-3.5 h-3.5" />, 'brands')}
                 </div>
               )}
             </div>
 
-            {/* Footer with enhanced hints */}
-            <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-4 text-gray-500 dark:text-gray-400">
-                  <span className="flex items-center gap-1.5">
-                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-600 font-mono">↑</kbd>
-                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-600 font-mono">↓</kbd>
-                    Navigate
+            {/* Footer */}
+            <div className="px-4 py-3 bg-muted/30 border-t border-border/50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <kbd className="inline-flex items-center justify-center w-5 h-5 bg-background rounded border border-border/50 text-[10px] font-mono">
+                      <ArrowUp className="w-3 h-3" />
+                    </kbd>
+                    <kbd className="inline-flex items-center justify-center w-5 h-5 bg-background rounded border border-border/50 text-[10px] font-mono">
+                      <ArrowDown className="w-3 h-3" />
+                    </kbd>
+                    <span className="text-muted-foreground/70">Navigate</span>
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-600 font-mono">↵</kbd>
-                    Open
+                  <span className="inline-flex items-center gap-1.5">
+                    <kbd className="inline-flex items-center justify-center px-1.5 h-5 bg-background rounded border border-border/50 text-[10px] font-mono">
+                      <CornerDownLeft className="w-3 h-3" />
+                    </kbd>
+                    <span className="text-muted-foreground/70">Select</span>
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-600 font-mono">ESC</kbd>
-                    {query ? 'Clear' : 'Close'}
+                  <span className="hidden sm:inline-flex items-center gap-1.5">
+                    <kbd className="inline-flex items-center justify-center px-1.5 h-5 bg-background rounded border border-border/50 text-[10px] font-mono">
+                      <Hash className="w-2.5 h-2.5" />
+                    </kbd>
+                    <span className="text-muted-foreground/70">Type &gt; for commands</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   {isCommandMode ? (
-                    <span className="text-blue-500 dark:text-blue-400 font-medium">
-                      🎯 Command Mode
+                    <span className="inline-flex items-center gap-1.5 text-xs text-primary font-medium">
+                      <Command className="w-3.5 h-3.5" />
+                      Command Mode
                     </span>
                   ) : (
-                    <span className="text-gray-400 dark:text-gray-500">
+                    <span className="text-xs text-muted-foreground">
                       {filteredItems.length} {filteredItems.length === 1 ? 'result' : 'results'}
-                      {conversations.length > 0 && searchFilter === 'all' && (
-                        <span className="ml-1 hidden sm:inline">across {brands.length} brands</span>
+                      {brands.length > 0 && searchFilter === 'all' && (
+                        <span className="hidden sm:inline"> across {brands.length} brands</span>
                       )}
                     </span>
                   )}
@@ -845,34 +995,44 @@ export default function CommandPalette({
             </div>
           </div>
 
-          {/* Tips and recent searches */}
-          {!query && (
-            <div className="mt-3 px-4 space-y-2 animate-in fade-in duration-300">
+          {/* Tips Card - Show when no query */}
+          {!query && !isCommandMode && (
+            <div className="mt-3 animate-in fade-in slide-in-from-top-2 duration-300 delay-100">
               {/* Recent searches */}
               {recentSearches.length > 0 && (
-                <div className="text-xs text-gray-400 dark:text-gray-500">
-                  <span className="font-medium">🕐 Recent:</span>
-                  {recentSearches.slice(0, 3).map((search, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setQuery(search)}
-                      className="ml-2 hover:text-blue-500 dark:hover:text-blue-400 hover:underline cursor-pointer transition-colors"
-                    >
-                      {search}
-                    </button>
-                  ))}
+                <div className="bg-popover/80 backdrop-blur-sm rounded-lg border border-border/30 p-3 mb-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-xs font-medium text-muted-foreground">Recent</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {recentSearches.slice(0, 4).map((search, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setQuery(search)}
+                        className="inline-flex items-center px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+                      >
+                        {search}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
               
               {/* Pro tips */}
-              <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 text-xs text-gray-500 dark:text-gray-400 space-y-1.5 backdrop-blur-sm border border-gray-200/50 dark:border-gray-700/50">
-                <p className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                  💡 Pro Tips
-                </p>
-                <p>• Type <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono">&gt;</kbd> for command mode - browse all available actions</p>
-                <p>• Search works across <span className="font-medium text-gray-600 dark:text-gray-300">all {brands.length} brands</span> - find any conversation instantly</p>
-                <p>• Use <span className="font-medium">filters</span> to narrow results by type</p>
-                <p>• Press <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono">Tab</kbd> or hover to navigate</p>
+              <div className="bg-popover/80 backdrop-blur-sm rounded-lg border border-border/30 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="text-xs font-medium text-foreground">Pro Tips</span>
+                </div>
+                <div className="space-y-1.5 text-xs text-muted-foreground">
+                  <p className="flex items-center gap-2">
+                    <kbd className="inline-flex items-center justify-center px-1.5 h-4 bg-muted rounded text-[10px] font-mono">&gt;</kbd>
+                    <span>Type &gt; for command mode with all available actions</span>
+                  </p>
+                  <p>Search works across <span className="text-foreground font-medium">all {brands.length} brands</span> — find any conversation instantly</p>
+                  <p>Use <span className="text-foreground font-medium">Tab</span> to navigate, <span className="text-foreground font-medium">Enter</span> to select</p>
+                </div>
               </div>
             </div>
           )}

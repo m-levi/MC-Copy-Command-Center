@@ -7,6 +7,7 @@ import { Brand, BrandDocument } from '@/types';
 import { useBrandAutoSave } from '@/hooks/useBrandAutoSave';
 import BrandSettingsTabs from '@/components/BrandSettingsTabs';
 import BrandDocumentManager from '@/components/BrandDocumentManager';
+import BrandFileManager from '@/components/BrandFileManager';
 import StarredEmailsManager from '@/components/StarredEmailsManager';
 import toast from 'react-hot-toast';
 import { logger } from '@/lib/logger';
@@ -23,6 +24,7 @@ export default function BrandDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [showStarredEmails, setShowStarredEmails] = useState(false);
   const [showDocuments, setShowDocuments] = useState(false);
+  const [showFileStore, setShowFileStore] = useState(false);
 
   // Auto-save hook
   const { saveStatus, saveBrand } = useBrandAutoSave({
@@ -291,6 +293,16 @@ export default function BrandDetailsPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              {/* Document Store Button */}
+              <button
+                onClick={() => setShowFileStore(true)}
+                className="px-4 py-2 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow-md flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+                </svg>
+                Files
+              </button>
               {/* Knowledge Base Button */}
               <button
                 onClick={() => setShowDocuments(true)}
@@ -360,6 +372,33 @@ export default function BrandDetailsPage() {
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <BrandDocumentManager brandId={brandId} brandName={brand.name} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Document Store Modal */}
+      {showFileStore && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Document Store</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Upload and manage files for {brand.name}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowFileStore(false)}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all"
+              >
+                <svg className="w-6 h-6 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <BrandFileManager brandId={brandId} brandName={brand.name} />
             </div>
           </div>
         </div>

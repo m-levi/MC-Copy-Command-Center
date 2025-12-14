@@ -2,6 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
+import { 
+  ZapIcon, 
+  CopyIcon, 
+  CheckIcon, 
+  ChevronDownIcon, 
+  SparklesIcon, 
+  RefreshCwIcon, 
+  MailOpenIcon,
+  LightbulbIcon,
+  InfoIcon
+} from 'lucide-react';
 
 interface SubjectLineOption {
   subject: string;
@@ -16,12 +27,45 @@ interface SubjectLineGeneratorInlineProps {
   isVisible?: boolean;
 }
 
+// Get badge style based on type
+function getTypeBadgeStyle(type: string) {
+  const t = type.toLowerCase();
+  if (t.includes('curiosity')) {
+    return 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400';
+  }
+  if (t.includes('open loop')) {
+    return 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+  }
+  if (t.includes('pattern') || t.includes('interrupt')) {
+    return 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400';
+  }
+  if (t.includes('benefit')) {
+    return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400';
+  }
+  if (t.includes('short') || t.includes('ultra')) {
+    return 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400';
+  }
+  return 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400';
+}
+
+// Get icon based on type
+function getTypeIcon(type: string) {
+  const t = type.toLowerCase();
+  if (t.includes('curiosity')) return '🤔';
+  if (t.includes('open loop')) return '🔄';
+  if (t.includes('pattern') || t.includes('interrupt')) return '⚡';
+  if (t.includes('benefit')) return '✨';
+  if (t.includes('short') || t.includes('ultra')) return '💥';
+  return '📧';
+}
+
 export default function SubjectLineGeneratorInline({ emailContent, isVisible = false }: SubjectLineGeneratorInlineProps) {
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<SubjectLineOption[]>([]);
   const [error, setError] = useState('');
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [showExplanation, setShowExplanation] = useState<number | null>(null);
 
   // Auto-expand if visible and no options yet
   useEffect(() => {
@@ -50,7 +94,6 @@ export default function SubjectLineGeneratorInline({ emailContent, isVisible = f
 
       const data = await response.json();
       if (data.options && Array.isArray(data.options)) {
-        // Append new options to existing ones
         setOptions(prevOptions => [...prevOptions, ...data.options]);
       } else {
         throw new Error('Invalid response format');
@@ -70,153 +113,195 @@ export default function SubjectLineGeneratorInline({ emailContent, isVisible = f
     setTimeout(() => setCopiedIndex(null), 2000);
   };
 
+  const handleCopyBoth = async (subject: string, preview: string, index: number) => {
+    const combined = `Subject: ${subject}\nPreview: ${preview}`;
+    await navigator.clipboard.writeText(combined);
+    setCopiedIndex(index + 1000);
+    toast.success('Subject + preview copied!');
+    setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
+  // Collapsed state - Clean pill button
   if (!expanded) {
     return (
-      <div className="border-t border-gray-200 dark:border-gray-700">
+      <div className="pt-3">
         <button
           onClick={() => {
             setExpanded(true);
             if (options.length === 0) generateSubjectLines();
           }}
-          className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer group"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 cursor-pointer bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 group"
         >
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-6 h-6 bg-purple-100 dark:bg-purple-900/30 rounded text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
-              {options.length > 0 ? `View Subject Lines (${options.length})` : 'Generate Subject Lines'}
+          <ZapIcon className="w-3.5 h-3.5 text-amber-500" />
+          <span>{options.length > 0 ? `Subject Lines` : 'Generate Subject Lines'}</span>
+          {options.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-[10px] font-bold">
+              {options.length}
             </span>
-          </div>
-          <svg className="w-4 h-4 text-gray-400 group-hover:text-purple-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          )}
+          <ChevronDownIcon className="w-3 h-3 opacity-50" />
         </button>
       </div>
     );
   }
 
+  // Expanded state
   return (
-    <div className="border-t border-gray-200 dark:border-gray-700 animate-in fade-in slide-in-from-top-1 duration-200">
-      <div className="bg-gray-50/50 dark:bg-gray-800/20">
-        {/* Header */}
-        <div className="px-4 py-2.5 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <div className="flex items-center justify-center w-6 h-6 bg-purple-100 dark:bg-purple-900/30 rounded text-purple-600 dark:text-purple-400">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            Smart Subject Lines
-          </h3>
+    <div className="pt-3 animate-in fade-in duration-200">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <button
+          onClick={() => setExpanded(false)}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 transition-colors"
+        >
+          <ZapIcon className="w-3.5 h-3.5" />
+          <span>Subject Lines</span>
+          {options.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-200/60 dark:bg-amber-800/40 text-[10px] font-bold">
+              {options.length}
+            </span>
+          )}
+          <ChevronDownIcon className="w-3 h-3 rotate-180 opacity-60" />
+        </button>
+        
+        {options.length > 0 && (
           <button
-            onClick={() => setExpanded(false)}
-            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+            onClick={generateSubjectLines}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-gray-500 dark:text-gray-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors disabled:opacity-50"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-            </svg>
+            <RefreshCwIcon className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Generating...' : 'Generate More'}
           </button>
-        </div>
+        )}
+      </div>
 
-        {/* Content */}
-        <div className="p-4">
-          {loading && options.length === 0 ? (
-            <div className="py-8 flex flex-col items-center text-center space-y-3">
-              <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Analyzing email content...</p>
+      {/* Content */}
+      <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-white dark:bg-gray-800/40">
+        {loading && options.length === 0 ? (
+          <div className="py-10 flex flex-col items-center text-center px-4">
+            <div className="relative mb-4">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 flex items-center justify-center">
+                <LightbulbIcon className="w-6 h-6 text-amber-500" />
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-white dark:bg-gray-800 border-2 border-amber-400 flex items-center justify-center">
+                <SparklesIcon className="w-3 h-3 text-amber-500 animate-pulse" />
+              </div>
             </div>
-          ) : error ? (
-            <div className="py-6 text-center space-y-3">
-              <p className="text-sm text-red-500">{error}</p>
-              <button
-                onClick={generateSubjectLines}
-                className="text-sm text-blue-600 hover:underline"
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Creating irresistible subject lines...</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Crafting curiosity hooks that demand opens</p>
+          </div>
+        ) : error ? (
+          <div className="py-8 text-center px-4">
+            <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-3">
+              <span className="text-red-500 text-lg">!</span>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{error}</p>
+            <button
+              onClick={generateSubjectLines}
+              className="text-sm font-medium text-amber-600 dark:text-amber-400 hover:underline"
+            >
+              Try Again
+            </button>
+          </div>
+        ) : options.length === 0 ? (
+          <button
+            onClick={generateSubjectLines}
+            className="w-full py-8 px-4 flex flex-col items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 flex items-center justify-center">
+              <ZapIcon className="w-6 h-6 text-amber-500" />
+            </div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Generate Subject Lines</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">AI-crafted hooks that drive opens</span>
+          </button>
+        ) : (
+          <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
+            {options.map((option, index) => (
+              <div 
+                key={index} 
+                className="group p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
               >
-                Try Again
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {options.map((option, index) => (
-                <div 
-                  key={index} 
-                  className="group p-3 rounded-lg border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-blue-200 dark:hover:border-blue-700 transition-all"
-                >
-                  <div className="flex justify-between items-start gap-3 mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-full ${
-                        option.type.toLowerCase().includes('urgent') ? 'bg-red-50 text-red-600 dark:bg-red-900/30' :
-                        option.type.toLowerCase().includes('benefit') ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30' :
-                        'bg-blue-50 text-blue-600 dark:bg-blue-900/30'
-                      }`}>
-                        {option.type}
-                      </span>
-                      {option.score > 0 && (
-                        <span className="text-[10px] font-medium text-amber-500 flex items-center gap-0.5">
-                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                          </svg>
-                          {option.score}
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleCopy(option.subject, index)}
-                      className="text-gray-400 hover:text-blue-600 transition-colors opacity-0 group-hover:opacity-100"
-                      title="Copy subject"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    </button>
-                  </div>
-                  
-                  <div className="mb-2">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-snug">
-                      {option.subject}
-                    </p>
-                  </div>
-
-                  {option.preview_text && (
-                    <div className="flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 px-2 py-1.5 rounded">
-                      <span className="truncate">{option.preview_text}</span>
-                      <button
-                        onClick={() => handleCopy(option.preview_text, index + 100)}
-                        className="text-gray-400 hover:text-blue-600"
-                        title="Copy preview text"
-                      >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                      </button>
-                    </div>
+                {/* Type badge row */}
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full ${getTypeBadgeStyle(option.type)}`}>
+                    <span>{getTypeIcon(option.type)}</span>
+                    {option.type}
+                  </span>
+                  {option.score > 0 && (
+                    <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500">
+                      {option.score}% predicted open rate
+                    </span>
                   )}
                 </div>
-              ))}
-              
-              <button
-                onClick={generateSubjectLines}
-                disabled={loading}
-                className="w-full py-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors border border-dashed border-blue-200 dark:border-blue-800 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loading ? (
-                  <>
-                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Generating...
-                  </>
-                ) : (
-                  'Generate More Options'
-                )}
-              </button>
-            </div>
-          )}
-        </div>
+                
+                {/* Subject line - main content */}
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-medium text-gray-900 dark:text-white leading-snug">
+                      {option.subject}
+                    </p>
+                    
+                    {/* Preview text */}
+                    {option.preview_text && (
+                      <div className="mt-1.5 flex items-start gap-1.5">
+                        <MailOpenIcon className="w-3 h-3 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                          {option.preview_text}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Explanation - toggle on click */}
+                    {option.explanation && (
+                      <button
+                        onClick={() => setShowExplanation(showExplanation === index ? null : index)}
+                        className="mt-2 inline-flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                      >
+                        <InfoIcon className="w-3 h-3" />
+                        {showExplanation === index ? 'Hide why this works' : 'Why this works'}
+                      </button>
+                    )}
+                    
+                    {showExplanation === index && option.explanation && (
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg p-2 animate-in fade-in duration-150">
+                        {option.explanation}
+                      </p>
+                    )}
+                  </div>
+                  
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => handleCopy(option.subject, index)}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+                      title="Copy subject line"
+                    >
+                      {copiedIndex === index ? (
+                        <CheckIcon className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <CopyIcon className="w-4 h-4" />
+                      )}
+                    </button>
+                    {option.preview_text && (
+                      <button
+                        onClick={() => handleCopyBoth(option.subject, option.preview_text, index)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        title="Copy subject + preview"
+                      >
+                        {copiedIndex === index + 1000 ? (
+                          <CheckIcon className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <MailOpenIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

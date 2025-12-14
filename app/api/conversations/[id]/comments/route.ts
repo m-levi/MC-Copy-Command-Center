@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { createServiceClient } from '@/lib/supabase/service';
 import {
   validationError,
   authenticationError,
@@ -8,25 +7,8 @@ import {
   notFoundError,
   withErrorHandling,
 } from '@/lib/api-error';
-import { logger } from '@/lib/logger';
-import {
-  sendCommentAddedEmail,
-  sendCommentAssignedEmail,
-  sendCommentMentionEmail,
-  shouldSendEmail,
-} from '@/lib/email-service';
 
 export const runtime = 'nodejs';
-
-// Get service client for bypassing RLS on membership checks
-function getServiceClient() {
-  try {
-    return createServiceClient();
-  } catch (e) {
-    logger.warn('[Comments API] Service client not available');
-    return null;
-  }
-}
 
 // POST: Add a comment
 export const POST = withErrorHandling(async (
@@ -90,20 +72,9 @@ export const POST = withErrorHandling(async (
 
   if (assignedTo) {
     // Validate assigned user is a member of the organization
-    logger.log('[Comments API] Validating assignedTo:', assignedTo, 'for brand:', conversation.brand_id);
-    
-    // Only validate if we have a service client (can bypass RLS)
-    // Otherwise, trust the frontend selection from the team members list
-    const serviceClient = getServiceClient();
-    if (serviceClient) {
-      const isMember = await checkOrgMembership(serviceClient, conversation.brand_id, assignedTo);
-      logger.log('[Comments API] isMember result:', isMember);
-      if (!isMember) {
-        logger.log('[Comments API] Assigned user is not a member, rejecting');
-        return validationError('Assigned user is not a member of this organization');
-      }
-    } else {
-      logger.log('[Comments API] No service client available, skipping membership validation');
+    const isMember = await checkOrgMembership(supabase, conversation.brand_id, assignedTo);
+    if (!isMember) {
+      return validationError('Assigned user is not a member of this organization');
     }
     commentData.assigned_to = assignedTo;
   }
@@ -112,49 +83,14 @@ export const POST = withErrorHandling(async (
     commentData.attachments = attachments;
   }
 
-  logger.log('[Comments API] Inserting comment data:', JSON.stringify(commentData, null, 2));
-
-  let comment;
-  let commentError;
-
-  // Try to insert with all fields
-  const result = await supabase
+  const { data: comment, error: commentError } = await supabase
     .from('conversation_comments')
     .insert(commentData)
     .select('*')
     .single();
-  
-  comment = result.data;
-  commentError = result.error;
-
-  // If the error is about the assigned_to column not existing, retry without it
-  if (commentError && (
-    commentError.message?.includes('assigned_to') || 
-    commentError.code === '42703' || // undefined_column
-    commentError.details?.includes('assigned_to')
-  )) {
-    logger.warn('[Comments API] assigned_to column may not exist, retrying without it');
-    const { assigned_to, ...commentDataWithoutAssignment } = commentData;
-    
-    const retryResult = await supabase
-      .from('conversation_comments')
-      .insert(commentDataWithoutAssignment)
-      .select('*')
-      .single();
-    
-    comment = retryResult.data;
-    commentError = retryResult.error;
-    
-    if (!commentError) {
-      logger.log('[Comments API] Comment created without assignment - run ADD_COMMENT_ASSIGNMENTS.sql migration to enable assignments');
-    }
-  }
 
   if (commentError) {
-    logger.error('[Comments API] Error creating comment:', commentError);
-    logger.error('[Comments API] Error code:', commentError.code);
-    logger.error('[Comments API] Error details:', commentError.details);
-    logger.error('[Comments API] Error hint:', commentError.hint);
+    console.error('[Comments API] Error creating comment:', commentError);
     throw commentError;
   }
 
@@ -171,32 +107,13 @@ export const POST = withErrorHandling(async (
     user: profile || { id: user.id, email: user.email || 'Unknown' }
   };
 
-  // Get conversation title for emails
-  const { data: conversationData } = await supabase
-    .from('conversations')
-    .select('title')
-    .eq('id', conversationId)
-    .single();
-  
-  // Get brand name for emails
-  const { data: brandData } = await supabase
-    .from('brands')
-    .select('name')
-    .eq('id', conversation.brand_id)
-    .single();
-
-  const conversationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/brands/${conversation.brand_id}/chat?conversation=${conversationId}`;
-  const commenterName = profile?.full_name || user.email || 'Someone';
-
   // Create notification for conversation owner (if not the commenter)
   if (conversation.user_id !== user.id) {
-    logger.log('[Comments API] Creating notification for conversation owner:', conversation.user_id);
-    
     await supabase.from('notifications').insert({
       user_id: conversation.user_id,
       type: 'comment_added',
       title: 'New Comment',
-      message: `${commenterName} commented on your conversation`,
+      message: `${profile?.full_name || user.email || 'Someone'} commented on your conversation`,
       link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
       metadata: {
         conversation_id: conversationId,
@@ -204,50 +121,6 @@ export const POST = withErrorHandling(async (
         commenter_id: user.id,
       },
     });
-
-    // Send email notification to conversation owner
-    logger.log('[Comments API] Attempting to send email notification...');
-    const serviceClient = getServiceClient();
-    
-    if (!serviceClient) {
-      logger.warn('[Comments API] No service client available for email sending');
-    } else {
-      logger.log('[Comments API] Service client available, checking email preferences...');
-      const shouldEmail = await shouldSendEmail(serviceClient, conversation.user_id, 'comment_added');
-      logger.log('[Comments API] Should send email:', shouldEmail);
-      
-      if (shouldEmail) {
-        // Get owner's email
-        const { data: ownerProfile, error: profileError } = await serviceClient
-          .from('profiles')
-          .select('email')
-          .eq('user_id', conversation.user_id)
-          .single();
-        
-        logger.log('[Comments API] Owner profile lookup:', { email: ownerProfile?.email, error: profileError?.message });
-        
-        if (ownerProfile?.email) {
-          logger.log('[Comments API] Sending comment notification email to:', ownerProfile.email);
-          sendCommentAddedEmail({
-            to: ownerProfile.email,
-            commenterName,
-            commentContent: content,
-            conversationTitle: conversationData?.title,
-            brandName: brandData?.name,
-            conversationLink,
-            quotedText,
-          }).then(result => {
-            logger.log('[Comments API] Email send result:', result);
-          }).catch(err => {
-            logger.error('[Comments API] Failed to send comment email:', err);
-          });
-        } else {
-          logger.warn('[Comments API] No email found for owner');
-        }
-      }
-    }
-  } else {
-    logger.log('[Comments API] Commenter is the owner, skipping owner notification');
   }
 
   // Create notification for assigned user (if different from commenter)
@@ -256,7 +129,7 @@ export const POST = withErrorHandling(async (
       user_id: assignedTo,
       type: 'comment_assigned',
       title: 'Comment Assigned to You',
-      message: `${commenterName} assigned you a comment`,
+      message: `${profile?.full_name || user.email || 'Someone'} assigned you a comment`,
       link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
       metadata: {
         conversation_id: conversationId,
@@ -264,32 +137,6 @@ export const POST = withErrorHandling(async (
         assigner_id: user.id,
       },
     });
-
-    // Send email notification to assigned user
-    const serviceClient = getServiceClient();
-    if (serviceClient) {
-      const shouldEmail = await shouldSendEmail(serviceClient, assignedTo, 'comment_assigned');
-      if (shouldEmail) {
-        // Get assignee's email
-        const { data: assigneeProfile } = await serviceClient
-          .from('profiles')
-          .select('email')
-          .eq('user_id', assignedTo)
-          .single();
-        
-        if (assigneeProfile?.email) {
-          sendCommentAssignedEmail({
-            to: assigneeProfile.email,
-            assignerName: commenterName,
-            commentContent: content,
-            conversationTitle: conversationData?.title,
-            brandName: brandData?.name,
-            conversationLink,
-            quotedText,
-          }).catch(err => logger.error('[Comments API] Failed to send assignment email:', err));
-        }
-      }
-    }
   }
 
   // Parse @mentions from content and create notifications
@@ -319,9 +166,8 @@ export const POST = withErrorHandling(async (
             
             // Find matching member
             const matchedMember = orgMembers.find((m: any) => {
-              const profile = Array.isArray(m.profile) ? m.profile[0] : m.profile;
-              const fullName = profile?.full_name?.toLowerCase() || '';
-              const emailPrefix = profile?.email?.split('@')[0].toLowerCase() || '';
+              const fullName = m.profile?.full_name?.toLowerCase() || '';
+              const emailPrefix = m.profile?.email?.split('@')[0].toLowerCase() || '';
               return fullName.includes(mentionName) || emailPrefix === mentionName;
             });
 
@@ -337,7 +183,7 @@ export const POST = withErrorHandling(async (
                 user_id: matchedMember.user_id,
                 type: 'comment_mention',
                 title: 'You were mentioned',
-                message: `${commenterName} mentioned you in a comment`,
+                message: `${profile?.full_name || user.email || 'Someone'} mentioned you in a comment`,
                 link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
                 metadata: {
                   conversation_id: conversationId,
@@ -345,24 +191,6 @@ export const POST = withErrorHandling(async (
                   mentioner_id: user.id,
                 },
               });
-
-              // Send email notification for mention
-              const serviceClient = getServiceClient();
-              const memberProfile = Array.isArray(matchedMember.profile) ? matchedMember.profile[0] : matchedMember.profile;
-              const memberEmail = memberProfile?.email;
-              if (serviceClient && memberEmail) {
-                const shouldEmail = await shouldSendEmail(serviceClient, matchedMember.user_id, 'comment_mention');
-                if (shouldEmail) {
-                  sendCommentMentionEmail({
-                    to: memberEmail,
-                    mentionerName: commenterName,
-                    commentContent: content,
-                    conversationTitle: conversationData?.title,
-                    brandName: brandData?.name,
-                    conversationLink,
-                  }).catch(err => logger.error('[Comments API] Failed to send mention email:', err));
-                }
-              }
             }
           }
         }
@@ -409,7 +237,7 @@ export const GET = withErrorHandling(async (
     .order('created_at', { ascending: true });
 
   if (error) {
-    logger.error('[Comments API] Error fetching comments:', error);
+    console.error('[Comments API] Error fetching comments:', error);
     throw error;
   }
 
@@ -450,45 +278,25 @@ export const GET = withErrorHandling(async (
 });
 
 // Helper function to check organization membership
-// Uses service client to bypass RLS for accurate membership checks
 async function checkOrgMembership(
   supabase: any,
   brandId: string,
   userId: string
 ): Promise<boolean> {
-  // Try to use service client for bypassing RLS
-  const client = getServiceClient() || supabase;
-  
-  const { data, error: brandError } = await client
+  const { data } = await supabase
     .from('brands')
     .select('organization_id')
     .eq('id', brandId)
-    .maybeSingle();
+    .single();
 
-  if (brandError) {
-    logger.error('[Comments API] Brand query error:', brandError);
-    return false;
-  }
+  if (!data) return false;
 
-  if (!data) {
-    logger.log('[Comments API] No brand found for id:', brandId);
-    return false;
-  }
-
-  // Use service client to check membership (bypasses RLS)
-  const { data: membership, error: membershipError } = await client
+  const { data: membership } = await supabase
     .from('organization_members')
     .select('id')
     .eq('organization_id', data.organization_id)
     .eq('user_id', userId)
-    .maybeSingle();
-
-  if (membershipError) {
-    logger.error('[Comments API] Membership query error:', membershipError);
-    return false;
-  }
-
-  logger.log('[Comments API] Checking membership for user:', userId, 'in org:', data.organization_id, 'Result:', !!membership);
+    .single();
 
   return !!membership;
 }

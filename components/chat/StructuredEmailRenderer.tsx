@@ -125,7 +125,7 @@ export default function StructuredEmailRenderer({ content, onCopy }: StructuredE
       
       {/* Raw View - Lightly formatted */}
       {viewMode === 'plain' && (
-        <div className="p-5 sm:p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
+        <div className="p-4 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
           <FormattedRawView content={cleanContent} />
         </div>
       )}
@@ -204,20 +204,20 @@ function FormattedRawView({ content }: { content: string }) {
   const lines = content.split('\n');
   
   return (
-    <div className="text-[15px] sm:text-base leading-7 space-y-1">
+    <div className="text-sm leading-relaxed space-y-0.5">
       {lines.map((line, index) => {
         const trimmed = line.trim();
         
         // Empty line
         if (!trimmed) {
-          return <div key={index} className="h-3" />;
+          return <div key={index} className="h-2" />;
         }
         
-        // Block header: **HERO**, **TEXT**, etc. - subtle section divider
+        // Block header: **HERO**, **TEXT**, etc. - grayed out
         const blockMatch = trimmed.match(/^\*\*([A-Z][A-Z0-9 _-]*)\*\*$/);
         if (blockMatch) {
           return (
-            <div key={index} className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide pt-4 pb-0.5 first:pt-0">
+            <div key={index} className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide pt-3 first:pt-0">
               {blockMatch[1]}
             </div>
           );
@@ -227,8 +227,8 @@ function FormattedRawView({ content }: { content: string }) {
         const approachMatch = trimmed.match(/^\*\*Approach:\*?\*?\s*(.+)/i);
         if (approachMatch) {
           return (
-            <div key={index} className="text-gray-800 dark:text-gray-200">
-              <span className="font-semibold text-gray-900 dark:text-gray-100">Approach:</span> {approachMatch[1]}
+            <div key={index} className="text-gray-900 dark:text-gray-100">
+              <span className="font-semibold">Approach:</span> {approachMatch[1]}
             </div>
           );
         }
@@ -240,8 +240,8 @@ function FormattedRawView({ content }: { content: string }) {
           const label = trimmed.slice(0, colonIndex);
           const value = trimmed.slice(colonIndex + 1).trim();
           return (
-            <div key={index} className="text-gray-800 dark:text-gray-200">
-              <span className="font-semibold text-gray-900 dark:text-gray-100">{label}:</span> {value}
+            <div key={index} className="text-gray-900 dark:text-gray-100">
+              <span className="font-semibold">{label}:</span> {value}
             </div>
           );
         }
@@ -250,20 +250,15 @@ function FormattedRawView({ content }: { content: string }) {
         if (/^[•\-\*]\s+/.test(trimmed)) {
           const bulletContent = trimmed.replace(/^[•\-\*]\s+/, '');
           return (
-            <div key={index} className="text-gray-800 dark:text-gray-200 pl-1">
-              <span className="text-gray-400 dark:text-gray-500 mr-2">•</span>{bulletContent}
+            <div key={index} className="text-gray-900 dark:text-gray-100">
+              • {bulletContent}
             </div>
           );
         }
         
-        // Separator line (---)
-        if (/^-{2,}$/.test(trimmed)) {
-          return <div key={index} className="h-px bg-gray-200 dark:bg-gray-700 my-2" />;
-        }
-        
         // Regular text
         return (
-          <div key={index} className="text-gray-800 dark:text-gray-200">
+          <div key={index} className="text-gray-900 dark:text-gray-100">
             {trimmed}
           </div>
         );

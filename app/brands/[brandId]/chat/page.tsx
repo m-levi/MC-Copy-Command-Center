@@ -65,6 +65,8 @@ import { ErrorBoundary, SectionErrorBoundary } from '@/components/ErrorBoundary'
 import { sanitizeContent, stripControlMarkers, parseStreamedContent } from '@/lib/chat-utils';
 import ChatHeader from '@/components/chat/ChatHeader';
 import ChatEmptyState, { NoConversationState, PreparingResponseIndicator } from '@/components/chat/ChatEmptyState';
+import { ArtifactProvider, useArtifactContext, useOptionalArtifactContext } from '@/contexts/ArtifactContext';
+import { ArtifactSidebar, ArtifactCard, StreamingArtifactCard } from '@/components/artifacts';
 
 export const dynamic = 'force-dynamic';
 
@@ -140,6 +142,172 @@ function SidebarPanelWrapper({
       </ResizablePanel>
     </SidebarPanelContext.Provider>
   );
+}
+
+// Artifact Sidebar Panel - Shows the resizable artifact sidebar
+function ArtifactSidebarPanel({
+  conversationId,
+  onQuoteText,
+}: {
+  conversationId?: string;
+  onQuoteText?: (text: string) => void;
+}) {
+  const artifactContext = useOptionalArtifactContext();
+
+  // Don't render panel at all if sidebar is closed
+  if (!artifactContext?.isSidebarOpen) {
+    return null;
+  }
+
+  return (
+    <>
+      <ResizableHandle 
+        withHandle 
+        className="w-1 bg-gray-200 dark:bg-gray-700 hover:bg-blue-500 dark:hover:bg-blue-500 transition-colors"
+      />
+      <ResizablePanel 
+        id="artifact-panel"
+        defaultSize={35} 
+        minSize={25} 
+        maxSize={50}
+        className="min-w-0"
+      >
+        <ArtifactSidebar conversationId={conversationId} onQuoteText={onQuoteText} />
+      </ResizablePanel>
+    </>
+  );
+}
+
+// Component that processes AI messages and creates/updates artifacts
+const globalProcessedMessageIds = new Set<string>();
+const globalStreamingOpenedFor = new Set<string>(); // Track messages where we opened sidebar during streaming
+
+function ArtifactMessageProcessor({ 
+  messages, 
+  isStreaming 
+}: { 
+  messages: Message[]; 
+  isStreaming: boolean;
+}) {
+  const artifactContext = useOptionalArtifactContext();
+  const isProcessingRef = useRef(false);
+
+  // Effect 1: Open sidebar immediately when streaming email content is detected
+  // For EDITS (sidebar open with active artifact), start streaming immediately
+  useEffect(() => {
+    if (!artifactContext || !isStreaming) return;
+
+    const latestAIMessage = [...messages].reverse().find(m => m.role === 'assistant');
+    if (!latestAIMessage) return;
+
+    // Don't re-open for same message
+    if (globalStreamingOpenedFor.has(latestAIMessage.id)) return;
+    
+    // Don't trigger for already processed messages
+    if (globalProcessedMessageIds.has(latestAIMessage.id)) return;
+
+    // Check if this is an edit scenario (sidebar open with active artifact)
+    const isEditMode = artifactContext.activeArtifact !== null && artifactContext.isSidebarOpen;
+    
+    // For edits, start streaming immediately to show live updates
+    // For new artifacts, wait for email content markers
+    const hasArtifactContent = artifactContext.hasArtifactContent(latestAIMessage.content);
+    
+    if (isEditMode || hasArtifactContent) {
+      // Mark that we've opened for this message
+      globalStreamingOpenedFor.add(latestAIMessage.id);
+      
+      // Start streaming mode in artifact context
+      artifactContext.startStreaming(latestAIMessage.id);
+      
+      // Update streaming content as it comes in
+      artifactContext.updateStreamingContent(latestAIMessage.content);
+    }
+  }, [messages, isStreaming, artifactContext]);
+
+  // Effect 2: Update streaming content while streaming
+  // Note: We intentionally exclude artifactContext from deps to avoid infinite loop
+  // The updateStreamingContent function is stable and only the content changes
+  const lastStreamedContentRef = useRef<string>('');
+  useEffect(() => {
+    if (!artifactContext || !isStreaming) {
+      lastStreamedContentRef.current = '';
+      return;
+    }
+
+    const latestAIMessage = [...messages].reverse().find(m => m.role === 'assistant');
+    if (!latestAIMessage) return;
+
+    // IMPORTANT: Don't re-trigger streaming for already processed messages
+    // This prevents the "stuck in writing mode" bug after edits complete
+    if (globalProcessedMessageIds.has(latestAIMessage.id)) return;
+
+    // Only update if we've already opened the sidebar for streaming AND content changed
+    if (globalStreamingOpenedFor.has(latestAIMessage.id)) {
+      // Avoid unnecessary updates if content hasn't changed
+      if (latestAIMessage.content !== lastStreamedContentRef.current) {
+        lastStreamedContentRef.current = latestAIMessage.content;
+        artifactContext.updateStreamingContent(latestAIMessage.content);
+      }
+    } else {
+      // Fallback: If streaming is active and we have an open sidebar with an artifact,
+      // we should still update the streaming content even if Effect 1 didn't catch it
+      const isEditMode = artifactContext.activeArtifact !== null && artifactContext.isSidebarOpen;
+      if (isEditMode && latestAIMessage.content !== lastStreamedContentRef.current) {
+        // Late-add to opened set and start streaming
+        globalStreamingOpenedFor.add(latestAIMessage.id);
+        artifactContext.startStreaming(latestAIMessage.id);
+        lastStreamedContentRef.current = latestAIMessage.content;
+        artifactContext.updateStreamingContent(latestAIMessage.content);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, isStreaming]);
+
+  // Effect 3: Process completed message and create artifact
+  useEffect(() => {
+    if (!artifactContext || isStreaming || isProcessingRef.current) return;
+
+    const latestAIMessage = [...messages].reverse().find(
+      m => m.role === 'assistant' && !globalProcessedMessageIds.has(m.id)
+    );
+
+    if (!latestAIMessage) return;
+
+    isProcessingRef.current = true;
+
+    // Finish streaming mode if it was active
+    if (globalStreamingOpenedFor.has(latestAIMessage.id)) {
+      artifactContext.finishStreaming();
+      globalStreamingOpenedFor.delete(latestAIMessage.id);
+    }
+
+    const hasArtifactContent = artifactContext.hasArtifactContent(latestAIMessage.content);
+    if (!hasArtifactContent) {
+      globalProcessedMessageIds.add(latestAIMessage.id);
+      isProcessingRef.current = false;
+      return;
+    }
+
+    // Check if artifact already exists for this message (prevents duplicates on page refresh)
+    const existingArtifact = artifactContext.findArtifactByMessageId(latestAIMessage.id);
+    if (existingArtifact) {
+      globalProcessedMessageIds.add(latestAIMessage.id);
+      isProcessingRef.current = false;
+      return;
+    }
+
+    const isEdit = artifactContext.activeArtifact !== null && artifactContext.isSidebarOpen;
+
+    globalProcessedMessageIds.add(latestAIMessage.id);
+    
+    artifactContext.processAIResponse(latestAIMessage.id, latestAIMessage.content, isEdit)
+      .finally(() => {
+        isProcessingRef.current = false;
+      });
+  }, [messages, isStreaming, artifactContext]);
+
+  return null;
 }
 
 export default function ChatPage({ params }: { params: Promise<{ brandId: string }> }) {
@@ -3456,7 +3624,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     );
   }
 
-  return (
+  const baseContent = (
     <div className="relative h-screen bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
       <Toaster position="top-right" />
       <RealtimeStatusIndicator />
@@ -3979,8 +4147,29 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             </ResizablePanel>
           </>
         )}
+
+        {/* Artifact Sidebar - Shows email artifacts for editing/reviewing */}
+        {currentConversation && (
+          <ArtifactSidebarPanel 
+            conversationId={currentConversation.id} 
+            onQuoteText={(text) => setQuotedText(text)}
+          />
+        )}
       </ResizablePanelGroup>
     </div>
   );
+
+  // Wrap with ArtifactProvider when we have a conversation with a real ID
+  // (Skip temp- IDs used during optimistic UI updates)
+  if (currentConversation && !currentConversation.id.startsWith('temp-')) {
+    return (
+      <ArtifactProvider conversationId={currentConversation.id}>
+        <ArtifactMessageProcessor messages={messages} isStreaming={sending} />
+        {baseContent}
+      </ArtifactProvider>
+    );
+  }
+
+  return baseContent;
 }
 

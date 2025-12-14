@@ -1,6 +1,15 @@
 'use client';
 
 import { useEffect } from 'react';
+import { cn } from '@/lib/utils';
+import {
+  X,
+  Keyboard,
+  Navigation,
+  MousePointerClick,
+  PenLine,
+  Command,
+} from 'lucide-react';
 
 interface Shortcut {
   keys: string;
@@ -12,6 +21,13 @@ interface KeyboardShortcutsHelpProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const categoryIcons: Record<string, React.ReactNode> = {
+  'Navigation': <Navigation className="w-4 h-4" />,
+  'Actions': <MousePointerClick className="w-4 h-4" />,
+  'Editing': <PenLine className="w-4 h-4" />,
+  'Command Palette': <Command className="w-4 h-4" />,
+};
 
 export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelpProps) {
   // Handle Escape key to close modal
@@ -56,7 +72,9 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
     // Command Palette (when open)
     { keys: '↑ / ↓', description: 'Navigate results', category: 'Command Palette' },
     { keys: 'Enter', description: 'Select item', category: 'Command Palette' },
-    { keys: 'ESC', description: 'Close palette', category: 'Command Palette' },
+    { keys: 'Tab', description: 'Next item', category: 'Command Palette' },
+    { keys: '>', description: 'Enter command mode', category: 'Command Palette' },
+    { keys: 'ESC', description: 'Clear search or close', category: 'Command Palette' },
   ];
 
   // Group shortcuts by category
@@ -72,50 +90,62 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm z-[9998]"
+        className="fixed inset-0 bg-black/60 dark:bg-black/70 backdrop-blur-sm z-[9998] animate-in fade-in duration-150"
         onClick={onClose}
       />
 
       {/* Modal */}
       <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999] pointer-events-none">
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 max-w-2xl w-full pointer-events-auto max-h-[80vh] overflow-y-auto">
+        <div className="bg-popover rounded-xl shadow-2xl border border-border/50 max-w-2xl w-full pointer-events-auto max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
           {/* Header */}
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                Keyboard Shortcuts
-              </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Work faster with these keyboard shortcuts
-              </p>
+          <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Keyboard className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">
+                  Keyboard Shortcuts
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Work faster with these shortcuts
+                </p>
+              </div>
             </div>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              className="p-2 hover:bg-accent rounded-lg transition-colors"
             >
-              <svg className="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X className="w-5 h-5 text-muted-foreground" />
             </button>
           </div>
 
           {/* Content */}
-          <div className="px-6 py-4 space-y-6">
+          <div className="px-6 py-5 space-y-6 overflow-y-auto max-h-[calc(85vh-140px)]">
             {Object.entries(groupedShortcuts).map(([category, categoryShortcuts]) => (
               <div key={category}>
-                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                  {category}
-                </h3>
-                <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-muted-foreground">
+                    {categoryIcons[category] || <Keyboard className="w-4 h-4" />}
+                  </span>
+                  <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
+                    {category}
+                  </h3>
+                </div>
+                <div className="space-y-1">
                   {categoryShortcuts.map((shortcut, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between py-2 px-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-colors"
+                      className="flex items-center justify-between py-2.5 px-3 hover:bg-accent/50 rounded-lg transition-colors group"
                     >
-                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                      <span className="text-sm text-foreground/90 group-hover:text-foreground">
                         {shortcut.description}
                       </span>
-                      <kbd className="px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded shadow-sm">
+                      <kbd className={cn(
+                        "inline-flex items-center gap-1 px-2.5 py-1 text-xs font-mono font-medium",
+                        "text-muted-foreground bg-muted rounded-md border border-border/50",
+                        "shadow-sm"
+                      )}>
                         {shortcut.keys}
                       </kbd>
                     </div>
@@ -126,9 +156,13 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 rounded-b-xl">
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-              Press <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-600">ESC</kbd> or click outside to close
+          <div className="px-6 py-3 bg-muted/30 border-t border-border/50">
+            <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-2">
+              Press 
+              <kbd className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-medium text-muted-foreground bg-background rounded border border-border/50">
+                ESC
+              </kbd> 
+              or click outside to close
             </p>
           </div>
         </div>
@@ -136,4 +170,3 @@ export default function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShort
     </>
   );
 }
-

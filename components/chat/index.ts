@@ -1,24 +1,13 @@
-// Chat components powered by AI Elements
-export { AIReasoning } from './AIReasoning';
-export { AIPromptInput } from './AIPromptInput';
-export { StreamingLoader } from './StreamingLoader';
-export { SpeechButton } from './SpeechButton';
-export { default as ChatMessageModern } from './ChatMessageModern';
+/**
+ * Chat component exports
+ * Split from original ChatMessage.tsx for better maintainability
+ */
 
-// Flow UI components
-export { FlowUIRenderer } from './FlowUIRenderer';
-
-// Email Version UI components
-export { EmailVersionRenderer } from './EmailVersionRenderer';
-
-// Structured Email Renderer
-export { default as StructuredEmailRenderer, isStructuredEmailCopy } from './StructuredEmailRenderer';
-
-// Memory components
-export { MemoryIndicator, MemoryBadge } from './MemoryIndicator';
-export { QuickAddMemory } from './QuickAddMemory';
-
-// Re-export existing chat components
-export { ChatMessageUser } from './ChatMessageUser';
 export { ChatMessageActions } from './ChatMessageActions';
+export { ChatMessageUser } from './ChatMessageUser';
 export { ProductLinksSection } from './ProductLinksSection';
+export { EmailVersionRenderer } from './EmailVersionRenderer';
+export { default as StructuredEmailRenderer, isStructuredEmailCopy } from './StructuredEmailRenderer';
+export { EmailActionsBar } from './EmailActionsBar';
+export { default as EmailReferencePicker } from './EmailReferencePicker';
+export type { EmailReference } from './EmailReferencePicker';

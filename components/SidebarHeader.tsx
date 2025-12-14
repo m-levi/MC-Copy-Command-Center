@@ -4,6 +4,7 @@ import { Brand } from '@/types';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
+import { PERSONAL_AI_INFO } from '@/lib/personal-ai';
 
 interface SidebarHeaderProps {
   brandName: string;
@@ -138,8 +139,8 @@ export default function SidebarHeader({
       aria-label="Select a brand"
     >
       <div className="flex flex-col">
-        {/* All Brands - Fixed at Top */}
-        <div className="p-2 border-b border-gray-100 dark:border-gray-700/50">
+        {/* All Brands & AI Assistant - Fixed at Top */}
+        <div className="p-2 border-b border-gray-100 dark:border-gray-700/50 space-y-1">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -152,6 +153,22 @@ export default function SidebarHeader({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
             </svg>
             All Brands
+          </button>
+          
+          {/* Personal AI Assistant */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              router.push(`/brands/${PERSONAL_AI_INFO.id}/chat`);
+              setShowBrandSwitcher(false);
+            }}
+            className="w-full px-3 py-2.5 text-sm text-left text-gray-700 dark:text-gray-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 hover:text-violet-700 dark:hover:text-violet-300 rounded-lg transition-colors flex items-center gap-2.5 font-medium"
+          >
+            <span className="text-base">{PERSONAL_AI_INFO.icon}</span>
+            {PERSONAL_AI_INFO.name}
+            <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-400 rounded-full font-medium">
+              Private
+            </span>
           </button>
         </div>
 

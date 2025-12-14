@@ -5,8 +5,9 @@ import { QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
 import { ConversationMode, EmailType, AIModel } from '@/types';
 import { AI_MODELS } from '@/lib/ai-models';
 import { SpeechButton } from './chat/SpeechButton';
-import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, Upload, Quote, ChevronDown, Pencil, Lightbulb, Check } from 'lucide-react';
+import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, Upload, Quote, ChevronDown, Pencil, Lightbulb, Check, MailOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import EmailReferencePicker, { EmailReference } from './chat/EmailReferencePicker';
 
 interface ChatInputProps {
   onSend: (message: string, files?: File[]) => void | Promise<void>;
@@ -14,6 +15,7 @@ interface ChatInputProps {
   disabled?: boolean;
   isGenerating?: boolean;
   conversationId?: string | null;
+  brandId?: string | null;
   mode?: ConversationMode;
   draftContent?: string;
   onDraftChange?: (content: string) => void;
@@ -30,6 +32,10 @@ interface ChatInputProps {
   // Quoted text reference from email copy
   quotedText?: string;
   onClearQuote?: () => void;
+  // Custom placeholder text (overrides mode-based default)
+  placeholder?: string;
+  // Hide the mode selector and email type controls (for Personal AI mode)
+  isSimpleMode?: boolean;
 }
 
 // Expose methods to parent components via ref
@@ -44,10 +50,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   disabled, 
   isGenerating, 
   conversationId,
+  brandId,
   mode = 'email_copy',
   draftContent = '',
   onDraftChange,
   onModeChange,
+  placeholder: customPlaceholder,
+  isSimpleMode = false,
   selectedModel = 'anthropic/claude-sonnet-4.5',
   onModelChange,
   emailType = 'design',
@@ -60,6 +69,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 }, ref) {
   const [message, setMessage] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [emailReferences, setEmailReferences] = useState<EmailReference[]>([]);
+  const [showEmailPicker, setShowEmailPicker] = useState(false);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState<string[]>([]);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -79,6 +91,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const modePickerRef = useRef<HTMLDivElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const emailTypePickerRef = useRef<HTMLDivElement>(null);
+  const attachmentMenuRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const onDraftChangeRef = useRef(onDraftChange);
   const justSentRef = useRef(false);
@@ -183,6 +196,19 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showEmailTypePicker]);
+
+  // Close attachment menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(event.target as Node)) {
+        setShowAttachmentMenu(false);
+      }
+    };
+    if (showAttachmentMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showAttachmentMenu]);
 
   // Keyboard navigation for dropdowns
   useEffect(() => {
@@ -335,7 +361,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   }, []);
 
   const handleSend = () => {
-    if ((message.trim() || files.length > 0 || quotedText) && !disabled) {
+    if ((message.trim() || files.length > 0 || quotedText || emailReferences.length > 0) && !disabled) {
       const trimmed = message.trim();
       let finalMessage = trimmed;
 
@@ -356,6 +382,14 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         onClearQuote?.();
       }
 
+      // Prepend email references if present
+      if (emailReferences.length > 0) {
+        const refBlocks = emailReferences.map((ref, idx) => {
+          return `---\nReferenced Email ${idx + 1} (from "${ref.conversationTitle}"):\n${ref.content}\n---`;
+        }).join('\n\n');
+        finalMessage = `${refBlocks}\n\n${finalMessage}`;
+      }
+
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
@@ -372,6 +406,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       
       onSend(finalMessage, files);
       setFiles([]);
+      setEmailReferences([]);
       
       setTimeout(() => {
         justSentRef.current = false;
@@ -457,6 +492,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   };
 
   const getPlaceholder = () => {
+    if (customPlaceholder) return customPlaceholder;
     if (mode === 'planning') return "Ask a question, explore ideas, or plan a campaign...";
     if (mode === 'flow') return "Describe the automation flow you want to create...";
     return "Describe the email you'd like to create...";
@@ -562,16 +598,33 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             </div>
           )}
 
-          {/* File Previews */}
-          {files.length > 0 && (
+          {/* File & Email Reference Previews */}
+          {(files.length > 0 || emailReferences.length > 0) && (
             <div className="px-4 pt-4 flex flex-wrap gap-2">
+              {/* File Attachments */}
               {files.map((file, index) => (
-                <div key={index} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700/50 px-3 py-1.5 rounded-lg text-xs group">
+                <div key={`file-${index}`} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700/50 px-3 py-1.5 rounded-lg text-xs group">
                   {file.type.startsWith('image/') ? <ImageIcon className="w-3.5 h-3.5 text-blue-500" /> : <FileTextIcon className="w-3.5 h-3.5 text-gray-500" />}
                   <span className="max-w-[150px] truncate">{file.name}</span>
                   <button 
                     onClick={() => removeFile(index)}
                     className="ml-1 p-0.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-gray-600"
+                  >
+                    <XIcon className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              
+              {/* Email Reference Attachments */}
+              {emailReferences.map((ref, index) => (
+                <div key={`ref-${index}`} className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/50 px-3 py-1.5 rounded-lg text-xs group">
+                  <MailOpen className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="max-w-[180px] truncate text-blue-700 dark:text-blue-300" title={ref.conversationTitle}>
+                    {ref.preview.slice(0, 40)}{ref.preview.length > 40 ? '...' : ''}
+                  </span>
+                  <button 
+                    onClick={() => setEmailReferences(prev => prev.filter((_, i) => i !== index))}
+                    className="ml-1 p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-400 hover:text-blue-600"
                   >
                     <XIcon className="w-3 h-3" />
                   </button>
@@ -605,15 +658,71 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 multiple 
                 onChange={handleFileSelect}
               />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-md cursor-pointer"
-                title="Attach files"
-              >
-                <PaperclipIcon className="w-4 h-4" />
-              </button>
+              
+              {/* Attachment Button with Menu */}
+              <div className="relative" ref={attachmentMenuRef}>
+                <button
+                  onClick={() => {
+                    // If no brandId (simple mode or no brand context), just open file picker
+                    if (!brandId) {
+                      fileInputRef.current?.click();
+                    } else {
+                      setShowAttachmentMenu(!showAttachmentMenu);
+                    }
+                  }}
+                  className={cn(
+                    "p-1.5 rounded-md cursor-pointer transition-colors",
+                    showAttachmentMenu
+                      ? "text-blue-500 bg-blue-50 dark:bg-blue-900/30"
+                      : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  )}
+                  title="Attach files or reference emails"
+                >
+                  <PaperclipIcon className="w-4 h-4" />
+                </button>
+                
+                {/* Attachment Menu Dropdown */}
+                {showAttachmentMenu && (
+                  <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg min-w-[200px] z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom-left">
+                    <div className="p-1">
+                      <button
+                        onClick={() => {
+                          fileInputRef.current?.click();
+                          setShowAttachmentMenu(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
+                      >
+                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
+                          <Upload className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">Upload File</p>
+                          <p className="text-xs text-gray-500">Images, documents, etc.</p>
+                        </div>
+                      </button>
+                      
+                      <button
+                        onClick={() => {
+                          setShowEmailPicker(true);
+                          setShowAttachmentMenu(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
+                      >
+                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center group-hover:bg-blue-100 dark:group-hover:bg-blue-900/50 transition-colors">
+                          <MailOpen className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">Reference Email</p>
+                          <p className="text-xs text-gray-500">From another conversation</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
-              {/* Options Pill Container */}
+              {/* Options Pill Container - hidden in simple mode */}
+              {!isSimpleMode && (
               <div className="flex items-center bg-gray-50 dark:bg-gray-800/60 rounded-full px-1 py-0.5 border border-gray-100 dark:border-gray-700/50">
                 {/* Mode Dropdown (Plan/Write) */}
                 <div className="relative" ref={modePickerRef}>
@@ -805,6 +914,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   </div>
                 )}
               </div>
+              )}
             </div>
 
             {/* Right: Voice & Send */}
@@ -843,13 +953,13 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                       <rect x="6" y="6" width="12" height="12" rx="2" />
                     </svg>
                   </button>
-                ) : (
+                )                 : (
                   <button
                     onClick={handleSend}
-                    disabled={(!message.trim() && files.length === 0 && !quotedText) || disabled}
+                    disabled={(!message.trim() && files.length === 0 && !quotedText && emailReferences.length === 0) || disabled}
                     className={cn(
                       "flex items-center justify-center w-7 h-7 rounded-full",
-                      (!message.trim() && files.length === 0 && !quotedText) || disabled
+                      (!message.trim() && files.length === 0 && !quotedText && emailReferences.length === 0) || disabled
                         ? "text-gray-300 dark:text-gray-600 cursor-not-allowed"
                         : "text-white bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 cursor-pointer"
                     )}
@@ -864,6 +974,19 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           </div>
         </div>
       </div>
+      
+      {/* Email Reference Picker Modal */}
+      {brandId && (
+        <EmailReferencePicker
+          open={showEmailPicker}
+          onOpenChange={setShowEmailPicker}
+          brandId={brandId}
+          currentConversationId={conversationId}
+          onSelect={(reference) => {
+            setEmailReferences(prev => [...prev, reference]);
+          }}
+        />
+      )}
     </div>
   );
 });
