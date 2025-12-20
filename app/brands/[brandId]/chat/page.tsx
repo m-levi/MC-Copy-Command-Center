@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, use, useMemo, useCallback, lazy, Suspense, startTransition, createContext, useContext } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, OrganizationMember, EmailType, FlowType, FlowOutline, FlowConversation, FlowOutlineData, BulkActionType, ProductLink } from '@/types';
+import { Brand, Conversation, Message, AIModel, AIStatus, PromptTemplate, ConversationMode, BaseConversationMode, OrganizationMember, EmailType, FlowType, FlowOutline, FlowConversation, FlowOutlineData, BulkActionType, ProductLink } from '@/types';
 import { AI_MODELS, normalizeModelId } from '@/lib/ai-models';
 import ChatSidebarEnhanced from '@/components/ChatSidebarEnhanced';
 import { useSidebarState } from '@/hooks/useSidebarState';
@@ -26,7 +26,6 @@ const FlowNavigation = lazy(() => import('@/components/FlowNavigation'));
 const ApproveOutlineButton = lazy(() => import('@/components/ApproveOutlineButton'));
 const ConversationOptionsMenu = lazy(() => import('@/components/ConversationOptionsMenu'));
 const ShareModal = lazy(() => import('@/components/ShareModal'));
-const CommentsSidebar = lazy(() => import('@/components/CommentsSidebar'));
 import ActiveJobsIndicator from '@/components/ActiveJobsIndicator';
 import { FilterType } from '@/components/ConversationFilterDropdown';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -145,15 +144,9 @@ function SidebarPanelWrapper({
 }
 
 // Artifact Sidebar Panel - Shows the resizable artifact sidebar
-function ArtifactSidebarPanel({
-  conversationId,
-  onQuoteText,
-}: {
-  conversationId?: string;
-  onQuoteText?: (text: string) => void;
-}) {
+function ArtifactSidebarPanel({ onQuoteText }: { onQuoteText?: (text: string) => void }) {
   const artifactContext = useOptionalArtifactContext();
-
+  
   // Don't render panel at all if sidebar is closed
   if (!artifactContext?.isSidebarOpen) {
     return null;
@@ -172,15 +165,34 @@ function ArtifactSidebarPanel({
         maxSize={50}
         className="min-w-0"
       >
-        <ArtifactSidebar conversationId={conversationId} onQuoteText={onQuoteText} />
+        <ArtifactSidebar onQuoteText={onQuoteText} />
       </ResizablePanel>
     </>
   );
 }
 
+// Wrapper to provide artifact context to the entire chat area
+function ArtifactContextWrapper({ 
+  conversationId, 
+  messages,
+  isStreaming,
+  children 
+}: { 
+  conversationId: string; 
+  messages: Message[];
+  isStreaming: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <ArtifactProvider conversationId={conversationId}>
+      <ArtifactMessageProcessor messages={messages} isStreaming={isStreaming} />
+      {children}
+    </ArtifactProvider>
+  );
+}
+
 // Component that processes AI messages and creates/updates artifacts
 const globalProcessedMessageIds = new Set<string>();
-const globalStreamingOpenedFor = new Set<string>(); // Track messages where we opened sidebar during streaming
 
 function ArtifactMessageProcessor({ 
   messages, 
@@ -192,79 +204,6 @@ function ArtifactMessageProcessor({
   const artifactContext = useOptionalArtifactContext();
   const isProcessingRef = useRef(false);
 
-  // Effect 1: Open sidebar immediately when streaming email content is detected
-  // For EDITS (sidebar open with active artifact), start streaming immediately
-  useEffect(() => {
-    if (!artifactContext || !isStreaming) return;
-
-    const latestAIMessage = [...messages].reverse().find(m => m.role === 'assistant');
-    if (!latestAIMessage) return;
-
-    // Don't re-open for same message
-    if (globalStreamingOpenedFor.has(latestAIMessage.id)) return;
-    
-    // Don't trigger for already processed messages
-    if (globalProcessedMessageIds.has(latestAIMessage.id)) return;
-
-    // Check if this is an edit scenario (sidebar open with active artifact)
-    const isEditMode = artifactContext.activeArtifact !== null && artifactContext.isSidebarOpen;
-    
-    // For edits, start streaming immediately to show live updates
-    // For new artifacts, wait for email content markers
-    const hasArtifactContent = artifactContext.hasArtifactContent(latestAIMessage.content);
-    
-    if (isEditMode || hasArtifactContent) {
-      // Mark that we've opened for this message
-      globalStreamingOpenedFor.add(latestAIMessage.id);
-      
-      // Start streaming mode in artifact context
-      artifactContext.startStreaming(latestAIMessage.id);
-      
-      // Update streaming content as it comes in
-      artifactContext.updateStreamingContent(latestAIMessage.content);
-    }
-  }, [messages, isStreaming, artifactContext]);
-
-  // Effect 2: Update streaming content while streaming
-  // Note: We intentionally exclude artifactContext from deps to avoid infinite loop
-  // The updateStreamingContent function is stable and only the content changes
-  const lastStreamedContentRef = useRef<string>('');
-  useEffect(() => {
-    if (!artifactContext || !isStreaming) {
-      lastStreamedContentRef.current = '';
-      return;
-    }
-
-    const latestAIMessage = [...messages].reverse().find(m => m.role === 'assistant');
-    if (!latestAIMessage) return;
-
-    // IMPORTANT: Don't re-trigger streaming for already processed messages
-    // This prevents the "stuck in writing mode" bug after edits complete
-    if (globalProcessedMessageIds.has(latestAIMessage.id)) return;
-
-    // Only update if we've already opened the sidebar for streaming AND content changed
-    if (globalStreamingOpenedFor.has(latestAIMessage.id)) {
-      // Avoid unnecessary updates if content hasn't changed
-      if (latestAIMessage.content !== lastStreamedContentRef.current) {
-        lastStreamedContentRef.current = latestAIMessage.content;
-        artifactContext.updateStreamingContent(latestAIMessage.content);
-      }
-    } else {
-      // Fallback: If streaming is active and we have an open sidebar with an artifact,
-      // we should still update the streaming content even if Effect 1 didn't catch it
-      const isEditMode = artifactContext.activeArtifact !== null && artifactContext.isSidebarOpen;
-      if (isEditMode && latestAIMessage.content !== lastStreamedContentRef.current) {
-        // Late-add to opened set and start streaming
-        globalStreamingOpenedFor.add(latestAIMessage.id);
-        artifactContext.startStreaming(latestAIMessage.id);
-        lastStreamedContentRef.current = latestAIMessage.content;
-        artifactContext.updateStreamingContent(latestAIMessage.content);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, isStreaming]);
-
-  // Effect 3: Process completed message and create artifact
   useEffect(() => {
     if (!artifactContext || isStreaming || isProcessingRef.current) return;
 
@@ -276,22 +215,8 @@ function ArtifactMessageProcessor({
 
     isProcessingRef.current = true;
 
-    // Finish streaming mode if it was active
-    if (globalStreamingOpenedFor.has(latestAIMessage.id)) {
-      artifactContext.finishStreaming();
-      globalStreamingOpenedFor.delete(latestAIMessage.id);
-    }
-
     const hasArtifactContent = artifactContext.hasArtifactContent(latestAIMessage.content);
     if (!hasArtifactContent) {
-      globalProcessedMessageIds.add(latestAIMessage.id);
-      isProcessingRef.current = false;
-      return;
-    }
-
-    // Check if artifact already exists for this message (prevents duplicates on page refresh)
-    const existingArtifact = artifactContext.findArtifactByMessageId(latestAIMessage.id);
-    if (existingArtifact) {
       globalProcessedMessageIds.add(latestAIMessage.id);
       isProcessingRef.current = false;
       return;
@@ -342,14 +267,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [commentsSidebarCollapsed, setCommentsSidebarCollapsed] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('commentsSidebarCollapsed') !== 'false';
-    }
-    return true;
-  });
-  const [focusedMessageIdForComments, setFocusedMessageIdForComments] = useState<string | null>(null);
-  const [highlightedTextForComment, setHighlightedTextForComment] = useState<string | null>(null);
   const [quotedText, setQuotedText] = useState<string>('');
   const [messageCommentCounts, setMessageCommentCounts] = useState<Record<string, number>>({});
   const [messageComments, setMessageComments] = useState<Record<string, Array<{ id: string; quoted_text?: string; content: string }>>>({});
@@ -1614,17 +1531,34 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   const handleToggleMode = async (newMode: ConversationMode) => {
     if (!currentConversation || messages.length > 0) return;
     
+    // Check if this is a custom mode (starts with 'custom_')
+    const isCustomModeValue = typeof newMode === 'string' && newMode.startsWith('custom_');
+    
+    // For database, use base mode ('email_copy' for custom modes)
+    // Custom modes are essentially specialized versions of email_copy mode
+    const dbMode: BaseConversationMode = isCustomModeValue ? 'email_copy' : newMode as BaseConversationMode;
+    
     try {
-      const { error } = await supabase
-        .from('conversations')
-        .update({ mode: newMode })
-        .eq('id', currentConversation.id);
+      // Only update database if we're switching to a different base mode
+      if (currentConversation.mode !== dbMode) {
+        const { error } = await supabase
+          .from('conversations')
+          .update({ mode: dbMode })
+          .eq('id', currentConversation.id);
 
-      if (error) throw error;
+        if (error) throw error;
+        setCurrentConversation({ ...currentConversation, mode: dbMode });
+      }
 
+      // Update local state with the actual mode (including custom mode prefix)
       setConversationMode(newMode);
-      setCurrentConversation({ ...currentConversation, mode: newMode });
-      toast.success(`Switched to ${newMode === 'planning' ? 'Chat' : 'Writing'} mode`);
+      
+      // Show appropriate toast message
+      if (isCustomModeValue) {
+        toast.success('Custom mode applied');
+      } else {
+        toast.success(`Switched to ${newMode === 'planning' ? 'Chat' : 'Writing'} mode`);
+      }
     } catch (error) {
       logger.error('Error updating mode:', error);
       toast.error('Failed to update mode');
@@ -1698,9 +1632,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     setIsGeneratingFlow(false);
     setFlowGenerationProgress(0);
     setRegeneratingMessageId(null);
-    setFocusedMessageIdForComments(null);
-    setHighlightedTextForComment(null);
-    
+
     // Check for cached messages - if available, use them immediately (no loading state)
     const cached = getCachedMessages(conversationId);
     const hasCachedMessages = cached && cached.length > 0;
@@ -1862,20 +1794,6 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Don't show error - this is a background operation
     }
   }, [currentConversation]);
-
-  // Reload comment counts when comments sidebar opens
-  useEffect(() => {
-    if (!commentsSidebarCollapsed && currentConversation && messages.length > 0) {
-      loadCommentCounts(messages.map(m => m.id));
-    }
-  }, [commentsSidebarCollapsed, currentConversation, messages.length, loadCommentCounts]);
-
-  // Persist comments sidebar collapsed state
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('commentsSidebarCollapsed', String(commentsSidebarCollapsed));
-    }
-  }, [commentsSidebarCollapsed]);
 
   const handleRenameConversation = async (conversationId: string, newTitle: string) => {
     try {
@@ -3754,9 +3672,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           currentConversation={currentConversation}
           parentFlow={parentFlow}
           brandId={brandId}
-          commentsSidebarCollapsed={commentsSidebarCollapsed}
           showConversationMenu={showConversationMenu}
-          onToggleCommentsSidebar={() => setCommentsSidebarCollapsed(!commentsSidebarCollapsed)}
           onToggleConversationMenu={() => setShowConversationMenu(!showConversationMenu)}
           onShowShareModal={() => setShowShareModal(true)}
           onNavigateToParent={() => {
@@ -3803,7 +3719,23 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                 <div className="space-y-6">{flowUIElement}</div>
               </div>
             ) : (
-              <ChatEmptyState mode={conversationMode} onNewConversation={handleNewConversation} />
+              <ChatEmptyState 
+                mode={conversationMode} 
+                brandId={brandId}
+                onNewConversation={handleNewConversation}
+                onSuggestionClick={(prompt) => {
+                  setDraftContent(prompt);
+                  // Small delay to ensure the textarea updates, then focus
+                  setTimeout(() => {
+                    const textarea = document.querySelector('textarea[placeholder*="Describe"]') as HTMLTextAreaElement;
+                    if (textarea) {
+                      textarea.focus();
+                      // Move cursor to end
+                      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+                    }
+                  }, 50);
+                }}
+              />
             )
           ) : messages.length > 50 ? (
             /* Use virtualized list for long conversations (50+ messages) */
@@ -3911,19 +3843,17 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   commentCount={messageCommentCounts[message.id] || 0}
                   commentsData={messageComments[message.id] || []}
                   conversationId={currentConversation?.id}
-                  onCommentClick={(highlightedText) => {
-                    // If highlighted text, it's for inline comment box (handled in ChatMessage)
-                    // If no highlighted text, it's clicking "View comments" - open sidebar
-                    if (!highlightedText) {
-                      setFocusedMessageIdForComments(message.id);
-                      setCommentsSidebarCollapsed(false);
-                    }
-                    // Reload comment counts after inline comment is added
+                  onCommentClick={() => {
+                    // Reload comment counts after comment is added
                     if (messages.length > 0) {
                       loadCommentCounts(messages.map(m => m.id));
                     }
                   }}
                   onReferenceInChat={(text) => setQuotedText(text)}
+                  onSendPrompt={!sending ? (prompt) => {
+                    // Send the quick action prompt as a user message
+                    handleSendMessage(prompt);
+                  } : undefined}
                 />
                   ));
                 })()}
@@ -4047,9 +3977,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           <ChatInput
             onSend={handleSendMessage}
             onStop={handleStopGeneration}
-            disabled={sending}
+            disabled={false}
             isGenerating={sending}
             conversationId={currentConversation.id}
+            brandId={brandId}
             mode={conversationMode}
             draftContent={draftContent}
             onDraftChange={handleDraftChange}
@@ -4101,67 +4032,19 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         </div>
         </ResizablePanel>
 
-        {/* Comments Sidebar - Resizable */}
-        {!commentsSidebarCollapsed && currentConversation && (
-          <>
-            <ResizableHandle 
-              withHandle 
-              className="w-px bg-gray-200 dark:bg-gray-700 hover:bg-blue-500 dark:hover:bg-blue-500 transition-all data-[resize-handle-active]:bg-blue-500"
-              style={{ cursor: 'col-resize' }}
-            />
-            <ResizablePanel 
-              id="comments-panel"
-              defaultSize={25} 
-              minSize={15} 
-              maxSize={40}
-              className="min-w-0"
-            >
-              <Suspense fallback={
-                <div className="h-full bg-white dark:bg-gray-950 p-4">
-                  <div className="space-y-4">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="animate-pulse flex gap-3">
-                        <div className="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-800"></div>
-                        <div className="flex-1 space-y-2">
-                          <div className="h-3 bg-gray-200 dark:bg-gray-800 rounded w-24"></div>
-                          <div className="h-3 bg-gray-200 dark:bg-gray-800 rounded w-full"></div>
-                          <div className="h-3 bg-gray-200 dark:bg-gray-800 rounded w-3/4"></div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              }>
-                <CommentsSidebar
-                  conversationId={currentConversation.id}
-                  focusedMessageId={focusedMessageIdForComments}
-                  highlightedText={highlightedTextForComment}
-                  onHighlightedTextUsed={() => setHighlightedTextForComment(null)}
-                  onSendToChat={(text) => {
-                    setDraftContent(prev => prev ? `${prev}\n\n${text}` : text);
-                    // Clear any existing quoted text to prevent duplication
-                    setQuotedText('');
-                  }}
-                />
-              </Suspense>
-            </ResizablePanel>
-          </>
-        )}
-
-        {/* Artifact Sidebar - Shows email artifacts for editing/reviewing */}
+        {/* Artifact Sidebar - Shows email artifacts for editing/reviewing, including comments */}
         {currentConversation && (
-          <ArtifactSidebarPanel 
-            conversationId={currentConversation.id} 
-            onQuoteText={(text) => setQuotedText(text)}
-          />
+          <ArtifactSidebarPanel onQuoteText={setQuotedText} />
         )}
       </ResizablePanelGroup>
     </div>
   );
 
-  // Wrap with ArtifactProvider when we have a conversation with a real ID
-  // (Skip temp- IDs used during optimistic UI updates)
-  if (currentConversation && !currentConversation.id.startsWith('temp-')) {
+  // Wrap with ArtifactProvider when we have a conversation
+  if (currentConversation) {
+    // #region agent log
+    console.log('[DEBUG-E] Rendering ArtifactProvider wrapper', { conversationId: currentConversation.id, isTempId: currentConversation.id?.startsWith('temp-') });
+    // #endregion
     return (
       <ArtifactProvider conversationId={currentConversation.id}>
         <ArtifactMessageProcessor messages={messages} isStreaming={sending} />

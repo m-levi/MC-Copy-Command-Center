@@ -5,14 +5,119 @@ import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Brand, BrandDocument } from '@/types';
 import { useBrandAutoSave } from '@/hooks/useBrandAutoSave';
-import BrandSettingsTabs from '@/components/BrandSettingsTabs';
+import BrandDetailsTab from '@/components/BrandDetailsTab';
+import BrandStyleGuideTab from '@/components/BrandStyleGuideTab';
+import BrandGuidelinesTab from '@/components/BrandGuidelinesTab';
+import BrandMemoriesTab from '@/components/BrandMemoriesTab';
+import BrandDosAndDontsTab from '@/components/BrandDosAndDontsTab';
 import BrandDocumentManager from '@/components/BrandDocumentManager';
-import BrandFileManager from '@/components/BrandFileManager';
 import StarredEmailsManager from '@/components/StarredEmailsManager';
+import { DocumentStorePanel, BrandOverviewCard } from '@/components/brand-settings';
 import toast from 'react-hot-toast';
 import { logger } from '@/lib/logger';
+import { cn } from '@/lib/utils';
+import {
+  ArrowLeft,
+  LayoutDashboard,
+  FileText,
+  Palette,
+  Shield,
+  Brain,
+  CheckCircle,
+  FolderOpen,
+  BookOpen,
+  Star,
+  Download,
+  Settings,
+  ChevronRight,
+  Sparkles,
+  Save,
+  Loader2,
+  AlertCircle,
+  MessageSquare,
+  Mic,
+} from 'lucide-react';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
+
+type SectionId = 
+  | 'overview' 
+  | 'details' 
+  | 'style-guide' 
+  | 'guidelines' 
+  | 'memories' 
+  | 'dos-donts'
+  | 'documents'
+  | 'knowledge-base'
+  | 'starred';
+
+interface NavItem {
+  id: SectionId;
+  label: string;
+  icon: React.ElementType;
+  description: string;
+  badge?: string;
+}
+
+const navItems: NavItem[] = [
+  { 
+    id: 'overview', 
+    label: 'Overview', 
+    icon: LayoutDashboard, 
+    description: 'Brand summary and quick stats' 
+  },
+  { 
+    id: 'details', 
+    label: 'Brand Details', 
+    icon: FileText, 
+    description: 'Core brand information' 
+  },
+  { 
+    id: 'style-guide', 
+    label: 'Style Guide', 
+    icon: Palette, 
+    description: 'Copywriting style and tone' 
+  },
+  { 
+    id: 'guidelines', 
+    label: 'Guidelines', 
+    icon: Shield, 
+    description: 'Brand rules and standards' 
+  },
+  { 
+    id: 'memories', 
+    label: 'Memories', 
+    icon: Brain, 
+    description: 'AI-powered brand memory',
+    badge: 'AI'
+  },
+  { 
+    id: 'dos-donts', 
+    label: "Do's & Don'ts", 
+    icon: CheckCircle, 
+    description: 'What to include and avoid' 
+  },
+  { 
+    id: 'documents', 
+    label: 'Document Store', 
+    icon: FolderOpen, 
+    description: 'Files and assets' 
+  },
+  { 
+    id: 'knowledge-base', 
+    label: 'Knowledge Base', 
+    icon: BookOpen, 
+    description: 'Reference documents' 
+  },
+  { 
+    id: 'starred', 
+    label: 'Starred Emails', 
+    icon: Star, 
+    description: 'Saved email examples' 
+  },
+];
 
 export default function BrandDetailsPage() {
   const params = useParams();
@@ -22,9 +127,9 @@ export default function BrandDetailsPage() {
 
   const [brand, setBrand] = useState<Brand | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showStarredEmails, setShowStarredEmails] = useState(false);
-  const [showDocuments, setShowDocuments] = useState(false);
-  const [showFileStore, setShowFileStore] = useState(false);
+  const [activeSection, setActiveSection] = useState<SectionId>('overview');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showStarredModal, setShowStarredModal] = useState(false);
 
   // Auto-save hook
   const { saveStatus, saveBrand } = useBrandAutoSave({
@@ -136,8 +241,7 @@ export default function BrandDetailsPage() {
       if (memories && memories.length > 0) {
         markdown += `---\n\n## Memories & Notes\n\n`;
         
-        // Group by category
-        const byCategory: Record<string, any[]> = {};
+        const byCategory: Record<string, typeof memories> = {};
         memories.forEach(memory => {
           if (!byCategory[memory.category]) {
             byCategory[memory.category] = [];
@@ -168,7 +272,6 @@ export default function BrandDetailsPage() {
       if (documents && documents.length > 0) {
         markdown += `---\n\n## Knowledge Base\n\n`;
         
-        // Group by type
         const byType: Record<string, BrandDocument[]> = {};
         documents.forEach(doc => {
           if (!byType[doc.doc_type]) {
@@ -226,15 +329,71 @@ export default function BrandDetailsPage() {
     }
   };
 
+  const renderSection = () => {
+    if (!brand) return null;
+
+    switch (activeSection) {
+      case 'overview':
+        return <BrandOverviewCard brand={brand} />;
+      case 'details':
+        return <BrandDetailsTab brand={brand} onUpdate={handleBrandUpdate} />;
+      case 'style-guide':
+        return <BrandStyleGuideTab brand={brand} onUpdate={handleBrandUpdate} />;
+      case 'guidelines':
+        return <BrandGuidelinesTab brand={brand} onUpdate={handleBrandUpdate} />;
+      case 'memories':
+        return <BrandMemoriesTab brandId={brand.id} />;
+      case 'dos-donts':
+        return <BrandDosAndDontsTab brandId={brand.id} />;
+      case 'documents':
+        return <DocumentStorePanel brandId={brand.id} brandName={brand.name} />;
+      case 'knowledge-base':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl text-white shadow-lg">
+                  <BookOpen className="w-6 h-6" />
+                </div>
+                Knowledge Base
+              </h2>
+              <p className="text-gray-600 dark:text-gray-400 mt-1">
+                Upload documents to enhance AI responses with brand-specific context
+              </p>
+            </div>
+            <BrandDocumentManager brandId={brand.id} brandName={brand.name} />
+          </div>
+        );
+      case 'starred':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl text-white shadow-lg">
+                  <Star className="w-6 h-6" />
+                </div>
+                Starred Emails
+              </h2>
+              <p className="text-gray-600 dark:text-gray-400 mt-1">
+                Saved email examples for reference and inspiration
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+              <StarredEmailsManager brandId={brand.id} inlineMode />
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-        <div className="max-w-5xl mx-auto px-6 py-8">
-          <div className="animate-pulse space-y-6">
-            <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded w-1/3"></div>
-            <div className="h-64 bg-gray-200 dark:bg-gray-800 rounded"></div>
-            <div className="h-64 bg-gray-200 dark:bg-gray-800 rounded"></div>
-          </div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-gray-600 dark:text-gray-400">Loading brand...</p>
         </div>
       </div>
     );
@@ -243,165 +402,215 @@ export default function BrandDetailsPage() {
   if (!brand) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
-        <div className="text-center">
+        <div className="text-center max-w-md mx-auto px-4">
+          <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-gray-400" />
+          </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Brand not found</h1>
-          <button
-            onClick={() => router.push('/')}
-            className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
-          >
-            Go Back
-          </button>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">
+            The brand you're looking for doesn't exist or you don't have access to it.
+          </p>
+          <Button onClick={() => router.push('/')}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Dashboard
+          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 flex flex-col">
-      {/* Header */}
-      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 sticky top-0 z-40 shadow-sm">
-        <div className="max-w-6xl mx-auto px-6 py-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => router.push('/')}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all hover:scale-105 active:scale-95"
-                title="Back to brands"
-              >
-                <svg className="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-              </button>
-              <div>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center shadow-lg">
-                    <span className="text-white font-bold text-lg">{brand.name.charAt(0).toUpperCase()}</span>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex">
+      {/* Sidebar */}
+      <aside 
+        className={cn(
+          'fixed left-0 top-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 z-30 transition-all duration-300 flex flex-col',
+          sidebarCollapsed ? 'w-16' : 'w-64'
+        )}
+      >
+        {/* Sidebar Header */}
+        <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/')}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            </button>
+            {!sidebarCollapsed && (
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center shadow-md flex-shrink-0">
+                    <span className="text-white font-bold text-sm">
+                      {brand.name.charAt(0).toUpperCase()}
+                    </span>
                   </div>
-                  <div>
-                    <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-                      {brand.name}
-                    </h1>
-                    <div className="flex items-center gap-2 mt-1">
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Brand Settings</p>
-                      <span className="text-gray-300 dark:text-gray-600">•</span>
-                      <p className="text-xs text-gray-400 dark:text-gray-500">
-                        Last updated {new Date(brand.updated_at || brand.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">
+                    {brand.name}
+                  </span>
                 </div>
               </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {/* Document Store Button */}
-              <button
-                onClick={() => setShowFileStore(true)}
-                className="px-4 py-2 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow-md flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
-                </svg>
-                Files
-              </button>
-              {/* Knowledge Base Button */}
-              <button
-                onClick={() => setShowDocuments(true)}
-                className="px-4 py-2 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/40 dark:hover:bg-purple-900/60 text-purple-800 dark:text-purple-300 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow-md flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                </svg>
-                Knowledge Base
-              </button>
-              {/* Starred Emails Button */}
-              <button
-                onClick={() => setShowStarredEmails(true)}
-                className="px-4 py-2 bg-yellow-100 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:hover:bg-yellow-900/60 text-yellow-800 dark:text-yellow-300 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow-md flex items-center gap-2"
-              >
-                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                  <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                </svg>
-                Starred Emails
-              </button>
-              {/* Export button */}
-              <button
-                onClick={handleExport}
-                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 dark:from-blue-500 dark:to-blue-600 dark:hover:from-blue-600 dark:hover:to-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Export
-              </button>
-            </div>
+            )}
           </div>
         </div>
-      </header>
 
-      {/* Main content with tabs */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <BrandSettingsTabs
-          brand={brand}
-          onUpdate={handleBrandUpdate}
-          saveStatus={saveStatus}
-        />
-      </div>
-
-      {/* Starred Emails Modal */}
-      {showStarredEmails && (
-        <StarredEmailsManager
-          brandId={brandId}
-          onClose={() => setShowStarredEmails(false)}
-        />
-      )}
-
-      {/* Knowledge Base Modal */}
-      {showDocuments && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Knowledge Base</h2>
-              <button
-                onClick={() => setShowDocuments(false)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all"
-              >
-                <svg className="w-6 h-6 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              <BrandDocumentManager brandId={brandId} brandName={brand.name} />
-            </div>
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto py-4 px-3">
+          <div className="space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeSection === item.id;
+              
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveSection(item.id)}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left group',
+                    isActive
+                      ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                  )}
+                >
+                  <Icon className={cn(
+                    'w-5 h-5 flex-shrink-0',
+                    isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'
+                  )} />
+                  {!sidebarCollapsed && (
+                    <>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">{item.label}</span>
+                          {item.badge && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded">
+                              {item.badge}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <ChevronRight className={cn(
+                        'w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity',
+                        isActive && 'opacity-100'
+                      )} />
+                    </>
+                  )}
+                </button>
+              );
+            })}
           </div>
-        </div>
-      )}
+        </nav>
 
-      {/* Document Store Modal */}
-      {showFileStore && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
+        {/* Sidebar Footer */}
+        <div className="p-4 border-t border-gray-200 dark:border-gray-800">
+          {!sidebarCollapsed && (
+            <div className="space-y-2">
+              <Link
+                href={`/brands/${brand.id}/chat`}
+                className="flex items-center gap-2 w-full px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                <MessageSquare className="w-4 h-4" />
+                Start Chat
+              </Link>
+              <Link
+                href={`/brands/${brand.id}/voice-builder`}
+                className="flex items-center gap-2 w-full px-3 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                <Mic className="w-4 h-4" />
+                Voice Builder
+              </Link>
+            </div>
+          )}
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className={cn(
+              'flex items-center justify-center w-full p-2 mt-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors',
+              sidebarCollapsed && 'mx-auto'
+            )}
+          >
+            <ChevronRight className={cn(
+              'w-5 h-5 text-gray-400 transition-transform',
+              sidebarCollapsed ? 'rotate-0' : 'rotate-180'
+            )} />
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main 
+        className={cn(
+          'flex-1 transition-all duration-300',
+          sidebarCollapsed ? 'ml-16' : 'ml-64'
+        )}
+      >
+        {/* Top Bar */}
+        <header className="sticky top-0 z-20 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800">
+          <div className="max-w-6xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Document Store</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Upload and manage files for {brand.name}
+                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                  {navItems.find(item => item.id === activeSection)?.label}
+                </h1>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {navItems.find(item => item.id === activeSection)?.description}
                 </p>
               </div>
-              <button
-                onClick={() => setShowFileStore(false)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all"
-              >
-                <svg className="w-6 h-6 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              <BrandFileManager brandId={brandId} brandName={brand.name} />
+              
+              <div className="flex items-center gap-3">
+                {/* Save Status */}
+                {saveStatus !== 'idle' && (
+                  <div className={cn(
+                    'flex items-center gap-2 px-3 py-1.5 rounded-full text-sm',
+                    saveStatus === 'saving' && 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400',
+                    saveStatus === 'saved' && 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400',
+                    saveStatus === 'error' && 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
+                  )}>
+                    {saveStatus === 'saving' && (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    )}
+                    {saveStatus === 'saved' && (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Saved</span>
+                      </>
+                    )}
+                    {saveStatus === 'error' && (
+                      <>
+                        <AlertCircle className="w-4 h-4" />
+                        <span>Error</span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Export Button */}
+                <Button
+                  variant="outline"
+                  onClick={handleExport}
+                  className="shadow-sm"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </Button>
+              </div>
             </div>
           </div>
+        </header>
+
+        {/* Content Area */}
+        <div className="max-w-6xl mx-auto px-6 py-8">
+          {renderSection()}
         </div>
+      </main>
+
+      {/* Starred Emails Modal (for backwards compatibility if needed) */}
+      {showStarredModal && (
+        <StarredEmailsManager
+          brandId={brandId}
+          onClose={() => setShowStarredModal(false)}
+        />
       )}
     </div>
   );

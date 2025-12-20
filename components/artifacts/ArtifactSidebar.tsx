@@ -2,7 +2,7 @@
 
 import React, { memo, useCallback, useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
-import { useArtifactContext } from '@/contexts/ArtifactContext';
+import { useArtifactContext, ArtifactTabView } from '@/contexts/ArtifactContext';
 import { ArtifactVariant, getArtifactKindConfig } from '@/types/artifacts';
 import { EmailArtifactView } from './EmailArtifactView';
 import { ArtifactVersionHistory } from './ArtifactVersionHistory';
@@ -46,8 +46,6 @@ interface ArtifactSidebarProps {
   onQuoteText?: (text: string) => void;
 }
 
-type TabView = 'content' | 'history' | 'comments';
-
 export const ArtifactSidebar = memo(function ArtifactSidebar({ 
   className,
   conversationId,
@@ -63,18 +61,21 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
     selectVariant,
     shareArtifact,
     deleteArtifact,
-    currentArtifactKind,
-    getKindConfig,
+    activeTab,
+    setActiveTab,
   } = useArtifactContext();
+
+  // Get current artifact kind - default to 'email' for now
+  const currentArtifactKind = useMemo(() => {
+    return activeArtifact?.kind || streamingState.artifactKind || 'email';
+  }, [activeArtifact?.kind, streamingState.artifactKind]);
 
   // Get configuration for current artifact kind
   const kindConfig = useMemo(() => {
-    return getKindConfig(currentArtifactKind);
-  }, [getKindConfig, currentArtifactKind]);
+    return getArtifactKindConfig(currentArtifactKind);
+  }, [currentArtifactKind]);
 
   const KindIcon = ARTIFACT_KIND_ICONS[currentArtifactKind] || MailIcon;
-
-  const [activeTab, setActiveTab] = useState<TabView>('content');
   const [showArtifactPicker, setShowArtifactPicker] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [justShared, setJustShared] = useState(false);
@@ -86,7 +87,7 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
   const handleCommentText = useCallback((text: string) => {
     setHighlightedTextForComment(text);
     setActiveTab('comments');
-  }, []);
+  }, [setActiveTab]);
 
   const handleClose = useCallback(() => {
     closeSidebar();
@@ -140,18 +141,22 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
       <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            {streamingState.isStreaming && !activeArtifact ? (
-              // Streaming without artifact - show writing indicator
+            {activeTab === 'comments' && !activeArtifact ? (
+              // Comments view without artifact - show comments header
+              <div className="flex items-center gap-2">
+                <MessageSquareIcon className="w-4 h-4 text-blue-500" />
+                <span className="font-semibold text-gray-900 dark:text-white">
+                  Comments
+                </span>
+              </div>
+            ) : streamingState.isStreaming && !activeArtifact ? (
+              // Streaming without artifact - clean writing indicator
               <div className="flex items-center gap-2">
                 <KindIcon className="w-4 h-4 text-blue-500" />
-                <div className="flex gap-0.5">
-                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                <span className="font-semibold text-blue-600 dark:text-blue-400">
-                  Writing {kindConfig.label}...
+                <span className="font-semibold text-gray-900 dark:text-white">
+                  Writing {kindConfig.label}
                 </span>
+                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
               </div>
             ) : artifacts.length > 1 ? (
               <div className="relative">
@@ -286,41 +291,53 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
           </div>
         </div>
 
-        {/* Only show tabs when we have an artifact (not during streaming-only) */}
-        {activeArtifact && (
+        {/* Show tabs when we have an artifact OR when on comments tab */}
+        {(activeArtifact || activeTab === 'comments') && (
           <div className="flex items-center gap-1 px-4 pb-2">
-            <TabButton 
-              active={activeTab === 'content'} 
-              onClick={() => setActiveTab('content')}
-            >
-              <KindIcon className="w-3.5 h-3.5" />
-              {kindConfig.label}
-            </TabButton>
-            {/* Only show comments tab if the artifact kind supports comments */}
-            {kindConfig.supportsComments && (
+            {/* Content and History tabs only available with an artifact */}
+            {activeArtifact && (
               <TabButton 
-                active={activeTab === 'comments'} 
-                onClick={() => setActiveTab('comments')}
+                active={activeTab === 'content'} 
+                onClick={() => setActiveTab('content')}
               >
-                <MessageSquareIcon className="w-3.5 h-3.5" />
-                Comments
+                <KindIcon className="w-3.5 h-3.5" />
+                {kindConfig.label}
               </TabButton>
             )}
+            {/* Comments tab - always available when sidebar is open */}
             <TabButton 
-              active={activeTab === 'history'} 
-              onClick={() => setActiveTab('history')}
-              badge={versionCount > 1 ? `${versionCount}` : undefined}
+              active={activeTab === 'comments'} 
+              onClick={() => setActiveTab('comments')}
             >
-              <HistoryIcon className="w-3.5 h-3.5" />
-              History
+              <MessageSquareIcon className="w-3.5 h-3.5" />
+              Comments
             </TabButton>
+            {activeArtifact && (
+              <TabButton 
+                active={activeTab === 'history'} 
+                onClick={() => setActiveTab('history')}
+                badge={versionCount > 1 ? `${versionCount}` : undefined}
+              >
+                <HistoryIcon className="w-3.5 h-3.5" />
+                History
+              </TabButton>
+            )}
           </div>
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {streamingState.isStreaming && !activeArtifact ? (
+        {/* Comments tab - works with or without an active artifact */}
+        {activeTab === 'comments' && conversationId ? (
+          <ArtifactComments
+            artifactId={activeArtifact?.id || null}
+            conversationId={conversationId}
+            highlightedText={highlightedTextForComment}
+            selectedVariant={activeArtifact?.selected_variant || 'a'}
+            onHighlightedTextUsed={() => setHighlightedTextForComment(null)}
+          />
+        ) : streamingState.isStreaming && !activeArtifact ? (
           // Show streaming content even without an artifact yet
           <StreamingEmailView content={streamingState.partialContent} />
         ) : !activeArtifact ? (
@@ -329,14 +346,6 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
           <ArtifactVersionHistory
             artifactId={activeArtifact.id}
             onClose={() => setActiveTab('content')}
-          />
-        ) : activeTab === 'comments' ? (
-          <ArtifactComments
-            artifactId={activeArtifact.id}
-            conversationId={conversationId || activeArtifact.conversation_id}
-            highlightedText={highlightedTextForComment}
-            selectedVariant={activeArtifact.selected_variant || 'a'}
-            onHighlightedTextUsed={() => setHighlightedTextForComment(null)}
           />
         ) : (
           <EmailArtifactView
@@ -411,15 +420,13 @@ function StreamingEmailView({ content }: { content: string }) {
   const [selectedVersion, setSelectedVersion] = useState<'a' | 'b' | 'c'>('a');
   
   // Parse streaming content to detect versions
-  const { versions, currentlyStreaming, beforeContent } = useMemo(() => {
-    // Check which versions are available or being written
+  const { versions, currentlyStreaming } = useMemo(() => {
     const versionAMatch = content.match(/<version_a>([\s\S]*?)(<\/version_a>|$)/i);
     const versionBMatch = content.match(/<version_b>([\s\S]*?)(<\/version_b>|$)/i);
     const versionCMatch = content.match(/<version_c>([\s\S]*?)(<\/version_c>|$)/i);
     
     const versions: { id: 'a' | 'b' | 'c'; content: string; isComplete: boolean; approach?: string }[] = [];
     
-    // Extract approach from content
     const extractApproach = (text: string) => {
       const match = text.match(/^\*\*Approach:\*\*\s*(.+?)(?:\n|$)/im);
       return match ? match[1].trim() : undefined;
@@ -455,7 +462,6 @@ function StreamingEmailView({ content }: { content: string }) {
       });
     }
     
-    // Determine what's currently streaming
     let currentlyStreaming: 'a' | 'b' | 'c' | null = null;
     if (versions.length > 0) {
       const lastVersion = versions[versions.length - 1];
@@ -464,11 +470,7 @@ function StreamingEmailView({ content }: { content: string }) {
       }
     }
     
-    // Get content before version tags
-    const beforeMatch = content.match(/^([\s\S]*?)<version_/i);
-    const beforeContent = beforeMatch ? beforeMatch[1].trim() : '';
-    
-    return { versions, currentlyStreaming, beforeContent };
+    return { versions, currentlyStreaming };
   }, [content]);
   
   // Auto-select the version being written
@@ -483,60 +485,93 @@ function StreamingEmailView({ content }: { content: string }) {
   const currentVersion = versions.find(v => v.id === selectedVersion);
   const isCurrentVersionStreaming = currentlyStreaming === selectedVersion;
   
-  // Clean content for display
-  const displayContent = currentVersion?.content
-    .replace(/^\*\*Approach:\*\*\s*.+?\n*/im, '') // Remove approach line from content
-    .replace(/^```\n?/gm, '')
-    .replace(/\n?```$/gm, '')
-    .trim() || '';
+  // Clean and format content for display
+  const displayContent = useMemo(() => {
+    if (!currentVersion?.content) return '';
+    return currentVersion.content
+      .replace(/^\*\*Approach:\*\*\s*.+?\n*/im, '')
+      .replace(/^```\n?/gm, '')
+      .replace(/\n?```$/gm, '')
+      .trim();
+  }, [currentVersion?.content]);
+
+  // Format lines like RawView does
+  const formattedLines = useMemo(() => {
+    if (!displayContent) return [];
+    const knownLabels = ['Headline', 'Subhead', 'Subheadline', 'Body', 'CTA', 'Accent', 'Quote', 'Attribution', 'Product Name', 'Price', 'One-liner', 'Code', 'Message', 'Expiry'];
+    const labelPattern = new RegExp(`^(${knownLabels.join('|')}):`, 'i');
+    
+    return displayContent.split('\n').map((line, index) => {
+      const trimmed = line.trim();
+      
+      if (!trimmed) return { type: 'empty', key: index };
+      
+      // Section headers like **HERO**
+      const blockMatch = trimmed.match(/^\*\*([A-Z][A-Z0-9 _-]*)\*\*$/);
+      if (blockMatch) {
+        return { type: 'section', content: blockMatch[1], key: index };
+      }
+      
+      // Field labels like "Headline: text"
+      const fieldMatch = trimmed.match(labelPattern);
+      if (fieldMatch) {
+        const colonIndex = trimmed.indexOf(':');
+        const label = trimmed.slice(0, colonIndex);
+        const value = trimmed.slice(colonIndex + 1).trim();
+        return { type: 'field', label, value, key: index };
+      }
+      
+      // Bullet points
+      if (/^[•\-\*]\s+/.test(trimmed)) {
+        return { type: 'bullet', content: trimmed.replace(/^[•\-\*]\s+/, ''), key: index };
+      }
+      
+      return { type: 'text', content: trimmed, key: index };
+    });
+  }, [displayContent]);
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header with version selector */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200 dark:border-gray-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20">
+      {/* Minimal header with version selector */}
+      <div className="flex-shrink-0 px-4 py-2.5 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex gap-0.5">
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
-            <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
-              Writing email copy...
-            </span>
+          {/* Version tabs */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">Version:</span>
+            {(['a', 'b', 'c'] as const).map((v) => {
+              const version = versions.find(ver => ver.id === v);
+              const isAvailable = !!version;
+              const isStreaming = currentlyStreaming === v;
+              const isSelected = selectedVersion === v;
+              
+              return (
+                <button
+                  key={v}
+                  onClick={() => isAvailable && setSelectedVersion(v)}
+                  disabled={!isAvailable}
+                  className={cn(
+                    'w-7 h-7 rounded-lg text-xs font-bold transition-all relative',
+                    isSelected
+                      ? 'bg-blue-500 text-white shadow-sm'
+                      : isAvailable
+                        ? 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:border-blue-300'
+                        : 'bg-gray-100 dark:bg-gray-800/50 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                  )}
+                >
+                  {v.toUpperCase()}
+                  {isStreaming && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                  )}
+                </button>
+              );
+            })}
           </div>
           
-          {/* Version tabs */}
-          {versions.length > 0 && (
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">Version:</span>
-              {(['a', 'b', 'c'] as const).map((v) => {
-                const version = versions.find(ver => ver.id === v);
-                const isAvailable = !!version;
-                const isStreaming = currentlyStreaming === v;
-                const isSelected = selectedVersion === v;
-                
-                return (
-                  <button
-                    key={v}
-                    onClick={() => isAvailable && setSelectedVersion(v)}
-                    disabled={!isAvailable}
-                    className={cn(
-                      'w-8 h-8 rounded-lg text-xs font-bold transition-all relative',
-                      isSelected
-                        ? 'bg-blue-500 text-white shadow-md scale-105'
-                        : isAvailable
-                          ? 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'
-                          : 'bg-gray-100 dark:bg-gray-800/50 text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                    )}
-                  >
-                    {v.toUpperCase()}
-                    {isStreaming && (
-                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                    )}
-                  </button>
-                );
-              })}
+          {/* Subtle streaming indicator */}
+          {isCurrentVersionStreaming && (
+            <div className="flex items-center gap-1.5 text-blue-500">
+              <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+              <span className="text-xs font-medium">Writing...</span>
             </div>
           )}
         </div>
@@ -544,13 +579,6 @@ function StreamingEmailView({ content }: { content: string }) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {/* Before content (AI intro) */}
-        {beforeContent && (
-          <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-            {beforeContent}
-          </div>
-        )}
-        
         {currentVersion ? (
           <div className="space-y-3">
             {/* Approach card */}
@@ -568,38 +596,63 @@ function StreamingEmailView({ content }: { content: string }) {
               </div>
             )}
             
-            {/* Email content */}
+            {/* Formatted email content */}
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-              <pre className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono leading-relaxed">
-                {displayContent}
+              <div className="text-sm leading-relaxed space-y-1">
+                {formattedLines.map((line) => {
+                  if (line.type === 'empty') {
+                    return <div key={line.key} className="h-2" />;
+                  }
+                  if (line.type === 'section') {
+                    return (
+                      <div key={line.key} className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider pt-3 pb-1 first:pt-0 border-b border-gray-100 dark:border-gray-700 mb-2">
+                        {line.content}
+                      </div>
+                    );
+                  }
+                  if (line.type === 'field') {
+                    return (
+                      <div key={line.key} className="text-gray-800 dark:text-gray-200 font-mono">
+                        <span className="font-semibold text-gray-600 dark:text-gray-400">{line.label}:</span>{' '}
+                        <span>{line.value}</span>
+                      </div>
+                    );
+                  }
+                  if (line.type === 'bullet') {
+                    return (
+                      <div key={line.key} className="text-gray-800 dark:text-gray-200 pl-2 font-mono">
+                        <span className="text-gray-400 mr-1">•</span>
+                        {line.content}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={line.key} className="text-gray-800 dark:text-gray-200 font-mono">
+                      {line.content}
+                    </div>
+                  );
+                })}
+                
+                {/* Cursor indicator */}
                 {isCurrentVersionStreaming && (
-                  <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-0.5" />
+                  <span className="inline-block w-0.5 h-4 bg-blue-500 animate-pulse ml-0.5 rounded-full" />
                 )}
-              </pre>
-            </div>
-            
-            {/* Progress indicator */}
-            {isCurrentVersionStreaming && (
-              <div className="flex items-center justify-center gap-2 py-2 text-blue-500">
-                <div className="flex gap-0.5">
-                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                <span className="text-xs">Writing Version {selectedVersion.toUpperCase()}...</span>
               </div>
-            )}
+            </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3">
-              <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
+          /* Initial loading state before any version appears */
+          <div className="space-y-3 animate-pulse">
+            <div className="h-16 bg-violet-50 dark:bg-violet-900/20 rounded-lg" />
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+              <div className="h-4 bg-gray-100 dark:bg-gray-700 rounded w-1/4" />
+              <div className="h-4 bg-gray-100 dark:bg-gray-700 rounded w-3/4" />
+              <div className="h-4 bg-gray-100 dark:bg-gray-700 rounded w-1/2" />
+              <div className="h-8" />
+              <div className="h-4 bg-gray-100 dark:bg-gray-700 rounded w-1/4" />
+              <div className="h-4 bg-gray-100 dark:bg-gray-700 rounded w-full" />
+              <div className="h-4 bg-gray-100 dark:bg-gray-700 rounded w-2/3" />
             </div>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Preparing email versions...
-            </p>
           </div>
         )}
       </div>
@@ -608,4 +661,10 @@ function StreamingEmailView({ content }: { content: string }) {
 }
 
 export default ArtifactSidebar;
+
+
+
+
+
+
 

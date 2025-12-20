@@ -11,3 +11,4 @@ export { default as StructuredEmailRenderer, isStructuredEmailCopy } from './Str
 export { EmailActionsBar } from './EmailActionsBar';
 export { default as EmailReferencePicker } from './EmailReferencePicker';
 export type { EmailReference } from './EmailReferencePicker';
+export { QuickActionChips } from './QuickActionChips';

@@ -401,7 +401,7 @@ export default function ConversationCard({
                 </div>
                 
                 {/* Email title */}
-                <span className="text-xs font-medium flex-1 truncate">
+                <span className="text-sm font-medium flex-1 truncate">
                   {child.flow_email_title || `Email ${child.flow_sequence_order}`}
                 </span>
 

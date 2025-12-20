@@ -1,10 +1,10 @@
 import { streamText, CoreMessage, LanguageModel } from 'ai';
 import { gateway, getToolsForModel, getProviderOptionsWithWebSearch, MODELS } from '@/lib/ai-providers';
 import { getModelById, normalizeModelId } from '@/lib/ai-models';
-import { Message, FlowType } from '@/types';
+import { Message, FlowType, isCustomMode, getCustomModeId } from '@/types';
 import { extractConversationContext } from '@/lib/conversation-memory';
 import { buildFlowOutlinePrompt, buildConversationalFlowPrompt } from '@/lib/flow-prompts';
-import { buildSystemPrompt, buildBrandInfo, buildContextInfo } from '@/lib/chat-prompts';
+import { buildSystemPrompt, buildBrandInfo, buildContextInfo, buildCustomModePrompt } from '@/lib/chat-prompts';
 import { buildDesignEmailV2Prompt } from '@/lib/prompts/design-email-v2.prompt';
 import { getActiveDebugPromptFast, determinePromptType } from '@/lib/debug-prompts';
 import { messageQueue } from '@/lib/queue/message-queue';
@@ -20,10 +20,15 @@ export const runtime = 'edge';
 export async function POST(req: Request) {
   try {
     logger.log('[Chat API] Received request');
-    const { messages, modelId: rawModelId, brandContext, regenerateSection, conversationId, conversationMode, emailType, isFlowMode, flowType, attachments } = await req.json();
+    const { messages, modelId: rawModelId, brandContext, regenerateSection, conversationId, conversationMode, emailType, isFlowMode, flowType, attachments, customModeId } = await req.json();
     
     // Normalize legacy model IDs to AI Gateway format
     const modelId = normalizeModelId(rawModelId);
+    
+    // Check if this is a custom mode (format: custom_<uuid>)
+    const isCustomModeRequest = conversationMode && isCustomMode(conversationMode);
+    const customModeIdFromMode = isCustomModeRequest ? getCustomModeId(conversationMode) : null;
+    const effectiveCustomModeId = customModeId || customModeIdFromMode;
     
     logger.log('[Chat API] Request params:', { 
       rawModelId,
@@ -36,7 +41,9 @@ export async function POST(req: Request) {
       hasMessages: !!messages,
       hasBrandContext: !!brandContext,
       hasAttachments: !!(attachments && attachments.length > 0),
-      attachmentCount: attachments?.length || 0
+      attachmentCount: attachments?.length || 0,
+      isCustomMode: isCustomModeRequest,
+      customModeId: effectiveCustomModeId,
     });
 
     const model = getModelById(modelId);
@@ -54,24 +61,58 @@ export async function POST(req: Request) {
     const supabase = createEdgeClient();
 
     // PERFORMANCE: Run ALL async operations in parallel
-    // This includes: user auth and debug prompts
+    // This includes: user auth, debug prompts, and custom mode fetch
     // NOTE: Memory is now handled by Supermemory (external service)
     const effectiveEmailType = emailType || 'design';
     const promptType = determinePromptType(effectiveEmailType as 'design' | 'letter', isFlowMode);
     
     const [
       userResult,
-      debugPromptResult
+      debugPromptResult,
+      customModeResult,
     ] = await Promise.all([
       // User authentication (needed for debug prompts, queue mode, and Supermemory)
       supabase.auth.getUser(),
       
       // Debug prompts - uses optimized single-query function
       getActiveDebugPromptFast(supabase, promptType),
+      
+      // Fetch custom mode if provided (with all config fields)
+      effectiveCustomModeId 
+        ? supabase
+            .from('custom_modes')
+            .select('id, name, system_prompt, base_mode, tools, context_sources, output_config, model_config')
+            .eq('id', effectiveCustomModeId)
+            .single()
+        : Promise.resolve({ data: null, error: null }),
     ]);
     
     // Extract user from result
     const user = userResult.data?.user;
+    const customMode = customModeResult?.data;
+    
+    // Extract custom mode configuration (with defaults for backward compatibility)
+    const modeTools = customMode?.tools || {
+      web_search: true,
+      memory: true,
+      product_search: true,
+      image_generation: false,
+      code_execution: false,
+    };
+    const modeContextSources = customMode?.context_sources || {
+      brand_voice: true,
+      brand_details: true,
+      product_catalog: false,
+      past_emails: false,
+      web_research: false,
+      custom_documents: [],
+    };
+    const modeOutputConfig = customMode?.output_config || {
+      type: 'freeform',
+      email_format: null,
+      show_thinking: false,
+      version_count: 1,
+    };
 
     // Build system prompt with brand context, RAG, and memory
     let systemPrompt: string;
@@ -95,8 +136,20 @@ Copywriting Style Guide: ${brandContext?.copywriting_style_guide || 'N/A'}
 ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
       `.trim();
 
+    // Custom mode: Use the custom mode's system prompt
+    if (customMode && customMode.system_prompt) {
+      logger.log('[Chat API] Using custom mode:', customMode.name);
+      const userMessages = messages.filter((m: Message) => m.role === 'user');
+      const latestUserMessage = userMessages[userMessages.length - 1]?.content || '';
+      
+      systemPrompt = buildCustomModePrompt(customMode.system_prompt, brandContext, {
+        conversationContext,
+        userMessage: latestUserMessage,
+        contextSources: modeContextSources,
+      });
+      processedMessages = messages;
     // Flow mode: Use conversational flow prompt for guided flow creation
-    if (conversationMode === 'flow') {
+    } else if (conversationMode === 'flow') {
       logger.log('[Chat API] Using conversational flow prompt');
       systemPrompt = buildConversationalFlowPrompt(brandInfo);
     } else if (isFlowMode && flowType) {
@@ -332,7 +385,14 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
     // Wrap model with Supermemory for persistent brand+user memory
     // This automatically injects memory context into every LLM call
     // Skip for Personal AI mode - no brand-specific memory needed
-    if (isSupermemoryConfigured() && brandContext?.id && user?.id && !isPersonalAIMode) {
+    // Also respect mode configuration: only enable if modeTools.memory is true
+    const shouldEnableMemory = isSupermemoryConfigured() && 
+                               brandContext?.id && 
+                               user?.id && 
+                               !isPersonalAIMode && 
+                               modeTools.memory;
+    
+    if (shouldEnableMemory) {
       const supermemoryUserId = getSupermemoryUserId(brandContext.id, user.id);
       logger.log('[Chat API] Wrapping model with Supermemory:', { supermemoryUserId });
       
@@ -341,10 +401,11 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
       });
     }
 
-    // Build tools based on provider
+    // Build tools based on provider and mode configuration
     // - Anthropic: Uses explicit web_search tool
     // - OpenAI/Google: Web search configured via provider options
-    const tools = getToolsForModel(modelId, websiteUrl);
+    // Only include web_search tool if mode allows it
+    const tools = modeTools.web_search ? getToolsForModel(modelId, websiteUrl) : {};
 
     logger.log(`[Chat API] Starting stream with ${model.provider} model`);
     logger.log(`[Chat API] System prompt length: ${systemPrompt.length}`);
@@ -362,9 +423,25 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
       })));
     }
 
+    // Log mode configuration
+    if (customMode) {
+      logger.log('[Chat API] Custom mode configuration:', {
+        modeName: customMode.name,
+        webSearchEnabled: modeTools.web_search,
+        memoryEnabled: modeTools.memory,
+        outputType: modeOutputConfig.type,
+        versionCount: modeOutputConfig.version_count,
+      });
+    }
+
     // Use Vercel AI SDK streamText with AI Gateway
     let result;
     try {
+      // Only include web search in provider options if mode allows it
+      const providerOptions = modeTools.web_search 
+        ? getProviderOptionsWithWebSearch(modelId, 10000, websiteUrl)
+        : {};
+      
       result = await streamText({
         model: aiModel,
         system: systemPrompt,
@@ -372,7 +449,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         tools,
         maxRetries: 2,
         // Extended thinking/reasoning + web search for all supported providers
-        providerOptions: getProviderOptionsWithWebSearch(modelId, 10000, websiteUrl),
+        providerOptions,
       });
       logger.log('[Chat API] streamText result received successfully');
     } catch (streamError) {

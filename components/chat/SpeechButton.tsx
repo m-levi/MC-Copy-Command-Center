@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { MicIcon, SquareIcon } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 
 // Speech recognition types
 interface CustomSpeechRecognition extends EventTarget {
@@ -206,7 +205,7 @@ export function SpeechButton({
   // Recording UI - expanded state
   if (isListening) {
     return (
-      <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 rounded-full pl-3 pr-1 py-1 border border-red-200 dark:border-red-800/50 animate-in fade-in slide-in-from-right-2 duration-200">
+      <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-lg pl-3 pr-1 py-1 animate-in fade-in slide-in-from-right-2 duration-200">
         {/* Pulsing indicator */}
         <span className="relative flex h-2 w-2">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
@@ -214,16 +213,16 @@ export function SpeechButton({
         </span>
         
         {/* Duration */}
-        <span className="text-xs font-mono font-medium text-red-600 dark:text-red-400 tabular-nums">
+        <span className="text-xs font-mono font-medium text-gray-600 dark:text-gray-300 tabular-nums">
           {formatTime(duration)}
         </span>
         
         {/* Waveform animation */}
-        <div className="flex items-center gap-px h-4 mx-1">
+        <div className="flex items-center gap-0.5 h-4 mx-1">
           {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
-              className="w-0.5 bg-red-500 dark:bg-red-400 rounded-full animate-pulse"
+              className="w-0.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"
               style={{
                 height: `${40 + Math.random() * 60}%`,
                 animationDelay: `${i * 150}ms`,
@@ -234,39 +233,36 @@ export function SpeechButton({
         </div>
         
         {/* Stop button */}
-        <Button
+        <button
           onClick={toggleListening}
-          size="icon"
-          variant="ghost"
-          className="h-7 w-7 p-0 bg-red-500 hover:bg-red-600 text-white rounded-full ml-1"
+          className="flex items-center justify-center h-6 w-6 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-md hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors ml-0.5"
           title="Stop listening"
         >
-          <SquareIcon className="h-3 w-3" fill="currentColor" />
-        </Button>
+          <SquareIcon className="h-2.5 w-2.5" fill="currentColor" />
+        </button>
       </div>
     );
   }
 
-  // Default button state
+  // Default button state - matches send button style
   return (
-    <Button
+    <button
       onClick={toggleListening}
       disabled={disabled || !isSupported}
-      size="icon"
-      variant="ghost"
       className={cn(
-        "h-9 w-9 rounded-full transition-all duration-200",
+        "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150",
         "bg-gray-100 dark:bg-gray-800",
         "text-gray-500 dark:text-gray-400",
-        "hover:bg-red-50 dark:hover:bg-red-900/30",
-        "hover:text-red-500 dark:hover:text-red-400",
-        "disabled:opacity-50 disabled:cursor-not-allowed",
+        "hover:bg-gray-200 dark:hover:bg-gray-700",
+        "hover:text-gray-700 dark:hover:text-gray-200",
+        "disabled:opacity-40 disabled:cursor-not-allowed",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500",
         className
       )}
-      title={isSupported ? "Start voice input" : "Voice input not supported"}
+      title={isSupported ? "Voice input" : "Voice input not supported"}
     >
-      <MicIcon className="h-5 w-5" />
-    </Button>
+      <MicIcon className="w-4 h-4" />
+    </button>
   );
 }
 

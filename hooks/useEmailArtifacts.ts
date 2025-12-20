@@ -4,22 +4,28 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { 
   EmailArtifactWithContent,
-  ArtifactVariant,
-  ArtifactVersion,
-  EmailArtifactMetadata,
+  ArtifactVariant 
 } from '@/types/artifacts';
 import { parseEmailVersions } from '@/lib/email-version-parser';
 import toast from 'react-hot-toast';
-
-// =====================================================
-// EMAIL ARTIFACTS HOOK
-// Extends base artifact functionality with email-specific features
-// =====================================================
 
 interface UseEmailArtifactsOptions {
   conversationId: string;
 }
 
+// Simplified artifact version type matching actual DB schema
+interface ArtifactVersion {
+  id: string;
+  artifact_id: string;
+  version: number;
+  content: string;
+  title: string;
+  change_type: string;
+  triggered_by_message_id?: string;
+  created_at: string;
+}
+
+// Create artifact input
 interface CreateArtifactInput {
   title?: string;
   content?: string;
@@ -59,46 +65,6 @@ interface UseEmailArtifactsReturn {
   refetch: () => Promise<void>;
 }
 
-/**
- * Transforms raw DB artifact into flattened EmailArtifactWithContent
- */
-function transformToEmailArtifact(raw: any): EmailArtifactWithContent {
-  const metadata = raw.metadata || {};
-  return {
-    id: raw.id,
-    kind: 'email',
-    type: 'email',
-    conversation_id: raw.conversation_id,
-    user_id: raw.user_id,
-    title: raw.title || 'Email Copy',
-    content: raw.content,
-    version: raw.version,
-    created_at: raw.created_at,
-    updated_at: raw.updated_at,
-    
-    // Flatten metadata
-    status: metadata.status || 'draft',
-    is_shared: metadata.is_shared || false,
-    share_token: metadata.share_token,
-    shared_at: metadata.shared_at,
-    email_type: metadata.email_type,
-    selected_variant: metadata.selected_variant || 'a',
-    source_message_id: metadata.source_message_id,
-    
-    // Variant content
-    version_a_content: metadata.version_a_content,
-    version_a_approach: metadata.version_a_approach,
-    version_b_content: metadata.version_b_content,
-    version_b_approach: metadata.version_b_approach,
-    version_c_content: metadata.version_c_content,
-    version_c_approach: metadata.version_c_approach,
-    
-    // Version info
-    version_count: raw.version,
-    current_version_number: raw.version,
-  };
-}
-
 export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions): UseEmailArtifactsReturn {
   const [artifacts, setArtifacts] = useState<EmailArtifactWithContent[]>([]);
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
@@ -107,15 +73,22 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
   
   const supabase = createClient();
 
+  // #region agent log
+  console.log('[DEBUG-A] useEmailArtifacts called', { conversationId, isTempId: conversationId?.startsWith('temp-') });
+  // #endregion
+
   // Active artifact computed from state
   const activeArtifact = useMemo(() => {
     if (!activeArtifactId) return artifacts[0] || null;
     return artifacts.find(a => a.id === activeArtifactId) || null;
   }, [artifacts, activeArtifactId]);
 
-  // ===== FETCH =====
+  // Fetch artifacts for conversation
   const fetchArtifacts = useCallback(async () => {
-    // Skip for temp conversation IDs
+    // #region agent log
+    console.log('[DEBUG-B] fetchArtifacts called', { conversationId, isTempId: conversationId?.startsWith('temp-') });
+    // #endregion
+    // Skip for temp conversation IDs - they haven't been saved to database yet
     if (!conversationId || conversationId.startsWith('temp-')) {
       setIsLoading(false);
       setArtifacts([]);
@@ -126,64 +99,157 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
     setError(null);
     
     try {
+      // #region agent log
+      console.log('[DEBUG-C] About to query Supabase', { conversationId, isTempId: conversationId?.startsWith('temp-') });
+      // #endregion
+      // Query artifacts table directly
       const { data, error: fetchError } = await supabase
         .from('artifacts')
         .select('*')
         .eq('conversation_id', conversationId)
         .eq('kind', 'email')
-        .order('created_at', { ascending: false });
-
-      // Check if we have data - if so, proceed even with error object
-      // Supabase sometimes returns empty error objects
-      if (!data && fetchError) {
-        const msg = fetchError.message;
-        if (typeof msg === 'string' && msg.trim().length > 0) {
-          console.error('Error fetching artifacts:', fetchError);
-          setError('Failed to load email artifacts');
-        }
+        .order('created_at', { ascending: true });
+      
+      // Check for actual errors (not just empty error objects)
+      if (fetchError && (fetchError.message || fetchError.code)) {
+        // #region agent log
+        console.log('[DEBUG-ERR] Supabase query error', { conversationId, isTempId: conversationId?.startsWith('temp-'), errorMessage: fetchError.message, errorCode: fetchError.code });
+        // #endregion
+        console.error('Supabase artifacts query failed:', fetchError.message || fetchError.code);
         setArtifacts([]);
         return;
       }
-
-      const transformed = (data || []).map(transformToEmailArtifact);
-      setArtifacts(transformed);
+      
+      if (!data) {
+        setArtifacts([]);
+        return;
+      }
+      
+      // Map to expected type
+      const mapped: EmailArtifactWithContent[] = data.map(row => {
+        const metadata = row.metadata || {};
+        return {
+          id: row.id,
+          kind: 'email' as const,
+          type: 'email' as const,
+          conversation_id: row.conversation_id,
+          user_id: row.user_id,
+          title: row.title || 'Untitled Email',
+          content: metadata.version_a_content || row.content || '',
+          version: row.version || 1,
+          status: 'draft' as const,
+          is_shared: metadata.is_shared === true,
+          share_token: metadata.share_token,
+          shared_at: metadata.shared_at,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          email_type: (metadata.email_type || 'design') as 'design' | 'letter' | 'flow',
+          version_count: row.version || 1,
+          selected_variant: (metadata.selected_variant || 'a') as ArtifactVariant,
+          source_message_id: metadata.source_message_id,
+          version_a_content: metadata.version_a_content || row.content,
+          version_a_approach: metadata.version_a_approach,
+          version_b_content: metadata.version_b_content,
+          version_b_approach: metadata.version_b_approach,
+          version_c_content: metadata.version_c_content,
+          version_c_approach: metadata.version_c_approach,
+        };
+      });
+      
+      setArtifacts(mapped);
     } catch (err) {
-      console.error('Error fetching artifacts:', err);
-      setError('Failed to load email artifacts');
+      // Catch any unexpected errors
+      console.error('Unexpected error in fetchArtifacts:', err);
       setArtifacts([]);
     } finally {
       setIsLoading(false);
     }
-  }, [supabase, conversationId]);
+  }, [conversationId, supabase]);
 
-  // Auto-fetch on mount and when conversationId changes
+  // Initial fetch
   useEffect(() => {
     fetchArtifacts();
   }, [fetchArtifacts]);
 
-  // ===== CREATE ARTIFACT =====
+  // Create a new artifact
   const createArtifact = useCallback(async (data: CreateArtifactInput): Promise<EmailArtifactWithContent | null> => {
-    if (!conversationId || conversationId.startsWith('temp-')) {
-      return null;
-    }
-
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString('en-US', { 
+      // Build metadata with variant content
+      const metadata: Record<string, unknown> = {
+        email_type: 'design',
+        selected_variant: 'a',
+        is_shared: false,
+      };
+
+      if (data.version_a_content) metadata.version_a_content = data.version_a_content;
+      if (data.version_a_approach) metadata.version_a_approach = data.version_a_approach;
+      if (data.version_b_content) metadata.version_b_content = data.version_b_content;
+      if (data.version_b_approach) metadata.version_b_approach = data.version_b_approach;
+      if (data.version_c_content) metadata.version_c_content = data.version_c_content;
+      if (data.version_c_approach) metadata.version_c_approach = data.version_c_approach;
+      if (data.message_id) metadata.source_message_id = data.message_id;
+
+      // Generate a unique title if not provided
+      const timestamp = new Date().toLocaleTimeString('en-US', { 
         hour: 'numeric', 
         minute: '2-digit',
         hour12: true 
       });
-      const defaultTitle = data.title || `Email Draft (${timeStr})`;
+      const defaultTitle = `Email Draft (${timestamp})`;
 
-      // Build metadata with variant content
-      const metadata: EmailArtifactMetadata = {
+      // Create the artifact in the artifacts table
+      const { data: artifact, error: artifactError } = await supabase
+        .from('artifacts')
+        .insert({
+          conversation_id: conversationId,
+          user_id: user.id,
+          kind: 'email',
+          title: data.title || defaultTitle,
+          content: data.content || data.version_a_content || '',
+          version: 1,
+          metadata,
+        })
+        .select()
+        .single();
+
+      if (artifactError) throw artifactError;
+
+      // Also create initial version record
+      await supabase
+        .from('artifact_versions')
+        .insert({
+          artifact_id: artifact.id,
+          version: 1,
+          content: data.content || data.version_a_content || '',
+          title: artifact.title,
+          change_type: 'created',
+          triggered_by_message_id: data.message_id,
+        });
+
+      await fetchArtifacts();
+      setActiveArtifactId(artifact.id);
+      
+      // Return mapped artifact
+      return {
+        id: artifact.id,
+        kind: 'email' as const,
+        type: 'email' as const,
+        conversation_id: artifact.conversation_id,
+        user_id: artifact.user_id,
+        title: artifact.title,
+        content: data.version_a_content || data.content || '',
+        version: 1,
+        status: 'draft' as const,
+        is_shared: false,
+        created_at: artifact.created_at,
+        updated_at: artifact.updated_at,
+        email_type: 'design' as const,
+        version_count: 1,
+        selected_variant: 'a' as const,
         source_message_id: data.message_id,
-        status: 'draft',
-        selected_variant: 'a',
         version_a_content: data.version_a_content,
         version_a_approach: data.version_a_approach,
         version_b_content: data.version_b_content,
@@ -191,69 +257,30 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
         version_c_content: data.version_c_content,
         version_c_approach: data.version_c_approach,
       };
-
-      // Use version_a_content as the primary content, or fallback to content
-      const primaryContent = data.version_a_content || data.content || '';
-
-      const artifactData = {
-        conversation_id: conversationId,
-        user_id: user.id,
-        kind: 'email',
-        title: defaultTitle,
-        content: primaryContent,
-        version: 1,
-        metadata,
-      };
-
-      const { data: newArtifact, error: createError } = await supabase
-        .from('artifacts')
-        .insert(artifactData)
-        .select()
-        .single();
-
-      if (createError) throw createError;
-
-      // Create initial version
-      await supabase.from('artifact_versions').insert({
-        artifact_id: newArtifact.id,
-        version: 1,
-        content: primaryContent,
-        title: defaultTitle,
-        change_type: 'created',
-        triggered_by_message_id: data.message_id,
-        metadata,
-      });
-
-      const transformed = transformToEmailArtifact(newArtifact);
-      setArtifacts(prev => [transformed, ...prev]);
-      setActiveArtifactId(transformed.id);
-      
-      return transformed;
     } catch (err) {
       console.error('Error creating artifact:', err);
       toast.error('Failed to create email artifact');
       return null;
     }
-  }, [supabase, conversationId]);
+  }, [supabase, conversationId, fetchArtifacts]);
 
-  // ===== CREATE FROM MESSAGE (parse email versions) =====
+  // Create artifact from AI message content
   const createArtifactFromMessage = useCallback(async (
-    messageId: string, 
-    content: string, 
+    messageId: string,
+    content: string,
     title?: string
   ): Promise<EmailArtifactWithContent | null> => {
-    // Parse A/B/C versions from content
+    // Parse content for A/B/C versions
     const parsed = parseEmailVersions(content);
     
-    // Extract versions by ID
     const versionA = parsed.versions.find(v => v.id === 'a');
     const versionB = parsed.versions.find(v => v.id === 'b');
     const versionC = parsed.versions.find(v => v.id === 'c');
-    
+
     return createArtifact({
-      title,
       message_id: messageId,
-      content,
+      title: title || 'Email Draft',
+      content: versionA?.content || content,
       version_a_content: versionA?.content,
       version_a_approach: versionA?.note,
       version_b_content: versionB?.content,
@@ -263,7 +290,7 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
     });
   }, [createArtifact]);
 
-  // ===== ADD VERSION =====
+  // Add a new version to an artifact
   const addVersion = useCallback(async (
     artifactId: string,
     content: string,
@@ -271,27 +298,18 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
   ): Promise<ArtifactVersion | null> => {
     try {
       const artifact = artifacts.find(a => a.id === artifactId);
-      if (!artifact) return null;
+      if (!artifact) throw new Error('Artifact not found');
 
-      const newVersionNumber = artifact.version + 1;
+      const newVersionNumber = (artifact.version_count ?? artifact.version ?? 1) + 1;
 
-      // Parse new content for A/B/C versions
+      // Parse the content for A/B/C variants
       const parsed = parseEmailVersions(content);
       const versionA = parsed.versions.find(v => v.id === 'a');
       const versionB = parsed.versions.find(v => v.id === 'b');
       const versionC = parsed.versions.find(v => v.id === 'c');
-      
-      const newMetadata: EmailArtifactMetadata = {
-        source_message_id: artifact.source_message_id,
-        status: artifact.status,
-        selected_variant: artifact.selected_variant,
-        version_a_content: versionA?.content || artifact.version_a_content,
-        version_a_approach: versionA?.note || artifact.version_a_approach,
-        version_b_content: versionB?.content || artifact.version_b_content,
-        version_b_approach: versionB?.note || artifact.version_b_approach,
-        version_c_content: versionC?.content || artifact.version_c_content,
-        version_c_approach: versionC?.note || artifact.version_c_approach,
-      };
+
+      // Use primary content
+      const primaryContent = versionA?.content || content;
 
       // Create version record
       const { data: version, error: versionError } = await supabase
@@ -299,115 +317,79 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
         .insert({
           artifact_id: artifactId,
           version: newVersionNumber,
-          content: versionA?.content || content,
+          content: primaryContent,
           title: artifact.title,
-          change_type: 'edited',
-          change_summary: changeSummary,
-          metadata: newMetadata,
+          change_type: changeSummary || 'edited',
         })
         .select()
         .single();
 
-      // Check if we have valid data - if so, ignore any error object
-      // Supabase sometimes returns empty error objects alongside valid data
-      if (!version && versionError) {
-        // Only log/fail on errors with actual meaningful content
-        // The message must be a real string (not object, not undefined, not empty)
-        const msg = versionError.message;
-        const code = versionError.code;
-        const hasRealMessage = typeof msg === 'string' && msg.trim().length > 0;
-        const hasErrorCode = typeof code === 'string' && code.length > 0;
+      if (versionError) throw versionError;
 
-        if (hasRealMessage || hasErrorCode) {
-          console.error('Error creating version:', versionError);
-          toast.error('Failed to save changes');
-          return null;
-        }
-        // Empty error object with no message or code - this often happens with RLS issues
-        // Try to verify if the version was actually created
-        const { data: verifyData } = await supabase
-          .from('artifact_versions')
-          .select('id')
-          .eq('artifact_id', artifactId)
-          .eq('version', newVersionNumber)
-          .maybeSingle();
+      // Build updated metadata with variant content
+      const currentMetadata = (artifact as any).metadata || {};
+      const updatedMetadata = {
+        ...currentMetadata,
+        version_a_content: versionA?.content || primaryContent,
+        version_a_approach: versionA?.note || currentMetadata.version_a_approach,
+        version_b_content: versionB?.content || currentMetadata.version_b_content,
+        version_b_approach: versionB?.note || currentMetadata.version_b_approach,
+        version_c_content: versionC?.content || currentMetadata.version_c_content,
+        version_c_approach: versionC?.note || currentMetadata.version_c_approach,
+      };
 
-        if (!verifyData) {
-          // Version wasn't created - likely RLS policy issue
-          console.error('Error creating version: Insert failed silently (possible RLS issue)');
-          toast.error('Failed to save changes - please check permissions');
-          return null;
-        }
-      }
-
-      // Update artifact
-      const { error: updateError } = await supabase
+      // Update main artifact with new content and metadata
+      await supabase
         .from('artifacts')
         .update({ 
           version: newVersionNumber,
-          content: versionA?.content || content,
-          metadata: newMetadata,
+          content: primaryContent,
+          metadata: updatedMetadata,
           updated_at: new Date().toISOString(),
         })
         .eq('id', artifactId);
 
-      // Only log real errors with actual message content
-      if (updateError) {
-        const msg = updateError.message;
-        if (typeof msg === 'string' && msg.trim().length > 0) {
-          console.error('Error updating artifact:', updateError);
-        }
-      }
-
       await fetchArtifacts();
-      return version as ArtifactVersion;
-    } catch (err: any) {
-      // Only log/show error if it has actual content
-      if (err?.message) {
-        console.error('Error adding version:', err);
-        toast.error('Failed to save changes');
-      }
+      toast.success(`Version ${newVersionNumber} saved`);
+      
+      return version;
+    } catch (err) {
+      console.error('Error adding version:', err);
+      toast.error('Failed to save new version');
       return null;
     }
   }, [supabase, artifacts, fetchArtifacts]);
 
-  // ===== SELECT VARIANT =====
+  // Select a variant (A, B, or C)
   const selectVariant = useCallback(async (artifactId: string, variant: ArtifactVariant) => {
     try {
       const artifact = artifacts.find(a => a.id === artifactId);
       if (!artifact) return;
 
-      const updatedMetadata = {
-        ...artifact,
-        selected_variant: variant,
-      };
-
-      await supabase
+      // Update metadata with new selected variant
+      const { error } = await supabase
         .from('artifacts')
         .update({ 
           metadata: {
-            source_message_id: artifact.source_message_id,
-            status: artifact.status,
+            ...((artifact as any).metadata || {}),
             selected_variant: variant,
-            version_a_content: artifact.version_a_content,
-            version_a_approach: artifact.version_a_approach,
-            version_b_content: artifact.version_b_content,
-            version_b_approach: artifact.version_b_approach,
-            version_c_content: artifact.version_c_content,
-            version_c_approach: artifact.version_c_approach,
           }
         })
         .eq('id', artifactId);
 
+      if (error) throw error;
+
+      // Update local state immediately
       setArtifacts(prev => prev.map(a => 
         a.id === artifactId ? { ...a, selected_variant: variant } : a
       ));
     } catch (err) {
       console.error('Error selecting variant:', err);
+      toast.error('Failed to select variant');
     }
   }, [supabase, artifacts]);
 
-  // ===== UPDATE TITLE =====
+  // Update artifact title
   const updateTitle = useCallback(async (artifactId: string, title: string) => {
     try {
       const { error } = await supabase
@@ -426,12 +408,12 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
     }
   }, [supabase]);
 
-  // ===== SET ACTIVE ARTIFACT =====
+  // Set active artifact
   const setActiveArtifact = useCallback((artifactId: string | null) => {
     setActiveArtifactId(artifactId);
   }, []);
 
-  // ===== DELETE ARTIFACT =====
+  // Delete artifact
   const deleteArtifact = useCallback(async (artifactId: string) => {
     try {
       const { error } = await supabase
@@ -454,27 +436,20 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
     }
   }, [supabase, activeArtifactId]);
 
-  // ===== SHARE ARTIFACT =====
+  // Share artifact
   const shareArtifact = useCallback(async (artifactId: string): Promise<string | null> => {
     try {
       const artifact = artifacts.find(a => a.id === artifactId);
       if (!artifact) return null;
 
+      // Generate a simple share token
       const shareToken = `share_${artifactId}_${Date.now().toString(36)}`;
 
       const { error: updateError } = await supabase
         .from('artifacts')
         .update({ 
           metadata: {
-            source_message_id: artifact.source_message_id,
-            status: artifact.status,
-            selected_variant: artifact.selected_variant,
-            version_a_content: artifact.version_a_content,
-            version_a_approach: artifact.version_a_approach,
-            version_b_content: artifact.version_b_content,
-            version_b_approach: artifact.version_b_approach,
-            version_c_content: artifact.version_c_content,
-            version_c_approach: artifact.version_c_approach,
+            ...((artifact as any).metadata || {}),
             share_token: shareToken,
             is_shared: true,
             shared_at: new Date().toISOString(),
@@ -485,54 +460,38 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
       if (updateError) throw updateError;
 
       await fetchArtifacts();
-
-      const shareUrl = `${window.location.origin}/share/email/${shareToken}`;
       
-      // Try to copy to clipboard, but don't fail if it doesn't work
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        toast.success('Share link copied to clipboard!');
-      } catch (clipboardError) {
-        // Clipboard API might fail in non-secure context or without user activation
-        // Still show success but without "copied" message
-        toast.success('Share link created!');
-        console.debug('Clipboard not available:', clipboardError);
-      }
-
+      const shareUrl = `${window.location.origin}/share/email/${shareToken}`;
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success('Share link copied to clipboard!');
+      
       return shareUrl;
-    } catch (err: any) {
-      // Only log/show error if it has actual content
-      if (err?.message) {
-        console.error('Error sharing artifact:', err);
-        toast.error('Failed to create share link');
-      }
+    } catch (err) {
+      console.error('Error sharing artifact:', err);
+      toast.error('Failed to create share link');
       return null;
     }
   }, [supabase, artifacts, fetchArtifacts]);
 
-  // ===== UNSHARE ARTIFACT =====
+  // Unshare artifact
   const unshareArtifact = useCallback(async (artifactId: string) => {
     try {
       const artifact = artifacts.find(a => a.id === artifactId);
       if (!artifact) return;
 
-      await supabase
+      const { error } = await supabase
         .from('artifacts')
         .update({ 
           metadata: {
-            source_message_id: artifact.source_message_id,
-            status: artifact.status,
-            selected_variant: artifact.selected_variant,
-            version_a_content: artifact.version_a_content,
-            version_a_approach: artifact.version_a_approach,
-            version_b_content: artifact.version_b_content,
-            version_b_approach: artifact.version_b_approach,
-            version_c_content: artifact.version_c_content,
-            version_c_approach: artifact.version_c_approach,
+            ...((artifact as any).metadata || {}),
+            share_token: null,
             is_shared: false,
+            shared_at: null,
           }
         })
         .eq('id', artifactId);
+
+      if (error) throw error;
 
       await fetchArtifacts();
       toast.success('Share link removed');
@@ -542,7 +501,7 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
     }
   }, [supabase, artifacts, fetchArtifacts]);
 
-  // ===== GET VERSION HISTORY =====
+  // Get version history
   const getVersionHistory = useCallback(async (artifactId: string): Promise<ArtifactVersion[]> => {
     try {
       const { data, error } = await supabase
@@ -552,7 +511,8 @@ export function useEmailArtifacts({ conversationId }: UseEmailArtifactsOptions):
         .order('version', { ascending: false });
 
       if (error) throw error;
-      return (data || []) as ArtifactVersion[];
+      
+      return data || [];
     } catch (err) {
       console.error('Error fetching version history:', err);
       return [];

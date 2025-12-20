@@ -52,7 +52,10 @@ export interface Brand {
 }
 
 export type ConversationType = 'email' | 'automation';
-export type ConversationMode = 'planning' | 'email_copy' | 'flow';
+// Base conversation modes stored in database
+export type BaseConversationMode = 'planning' | 'email_copy' | 'flow';
+// Full conversation mode type including custom modes (custom_<uuid>)
+export type ConversationMode = BaseConversationMode | `custom_${string}`;
 export type EmailType = 'design' | 'letter' | 'flow';
 export type EmailStyle = Extract<EmailType, 'design' | 'letter'>;
 
@@ -475,5 +478,285 @@ export type ConversationSortOption =
   | 'title' 
   | 'message_count' 
   | 'creator';
+
+// ============================================================================
+// Custom Modes Types
+// ============================================================================
+
+// Available mode colors
+export type ModeColor = 'blue' | 'purple' | 'pink' | 'green' | 'yellow' | 'red' | 'indigo' | 'cyan' | 'orange' | 'gray';
+
+// Mode color metadata for UI styling
+export const MODE_COLOR_META: Record<ModeColor, {
+  bg: string;
+  text: string;
+  border: string;
+  darkBg: string;
+  darkText: string;
+  darkBorder: string;
+}> = {
+  blue: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200', darkBg: 'dark:bg-blue-900/30', darkText: 'dark:text-blue-300', darkBorder: 'dark:border-blue-800' },
+  purple: { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200', darkBg: 'dark:bg-purple-900/30', darkText: 'dark:text-purple-300', darkBorder: 'dark:border-purple-800' },
+  pink: { bg: 'bg-pink-100', text: 'text-pink-700', border: 'border-pink-200', darkBg: 'dark:bg-pink-900/30', darkText: 'dark:text-pink-300', darkBorder: 'dark:border-pink-800' },
+  green: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', darkBg: 'dark:bg-green-900/30', darkText: 'dark:text-green-300', darkBorder: 'dark:border-green-800' },
+  yellow: { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200', darkBg: 'dark:bg-yellow-900/30', darkText: 'dark:text-yellow-300', darkBorder: 'dark:border-yellow-800' },
+  red: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200', darkBg: 'dark:bg-red-900/30', darkText: 'dark:text-red-300', darkBorder: 'dark:border-red-800' },
+  indigo: { bg: 'bg-indigo-100', text: 'text-indigo-700', border: 'border-indigo-200', darkBg: 'dark:bg-indigo-900/30', darkText: 'dark:text-indigo-300', darkBorder: 'dark:border-indigo-800' },
+  cyan: { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-200', darkBg: 'dark:bg-cyan-900/30', darkText: 'dark:text-cyan-300', darkBorder: 'dark:border-cyan-800' },
+  orange: { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200', darkBg: 'dark:bg-orange-900/30', darkText: 'dark:text-orange-300', darkBorder: 'dark:border-orange-800' },
+  gray: { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200', darkBg: 'dark:bg-gray-800', darkText: 'dark:text-gray-300', darkBorder: 'dark:border-gray-700' },
+};
+
+// Available mode icons (emojis)
+export const MODE_ICONS = [
+  '💬', '✍️', '📝', '💡', '🎯', '🚀', '⚡', '🔥', '💎', '🌟',
+  '📧', '✉️', '📬', '📮', '💌', '📨', '🎨', '🖌️', '✨', '🎭',
+  '📊', '📈', '📉', '💹', '📋', '📌', '🔍', '🔎', '💼', '🎪',
+  '🎬', '🎥', '📸', '🎤', '🎧', '🎹', '🎸', '🎺', '🎷', '🥁',
+];
+
+// =============================================================================
+// CUSTOM MODES - Enhanced Configuration Types
+// =============================================================================
+
+// Base mode determines core behavior pattern
+export type ModeBaseType = 'chat' | 'create' | 'analyze';
+
+// Tool configuration - what the AI can do
+export interface ModeToolsConfig {
+  web_search: boolean;
+  memory: boolean;
+  product_search: boolean;
+  image_generation: boolean;
+  code_execution: boolean;
+}
+
+// Context sources - what information to include
+export interface ModeContextConfig {
+  brand_voice: boolean;
+  brand_details: boolean;
+  product_catalog: boolean;
+  past_emails: boolean;
+  web_research: boolean;
+  custom_documents: string[];  // Document IDs
+}
+
+// Output configuration
+export type ModeOutputType = 'freeform' | 'structured' | 'email' | 'code' | 'analysis';
+export type ModeEmailFormat = 'design' | 'letter' | 'any' | null;
+
+export interface ModeOutputConfig {
+  type: ModeOutputType;
+  email_format: ModeEmailFormat;
+  show_thinking: boolean;
+  version_count: number;
+}
+
+// Model preferences
+export interface ModeModelConfig {
+  preferred: string | null;
+  allow_override: boolean;
+  temperature: number | null;
+}
+
+// Mode category for organization
+export type ModeCategory = 'email' | 'research' | 'brand' | 'product' | 'strategy' | 'custom' | null;
+
+// Default configurations
+export const DEFAULT_MODE_TOOLS: ModeToolsConfig = {
+  web_search: true,
+  memory: true,
+  product_search: true,
+  image_generation: false,
+  code_execution: false,
+};
+
+export const DEFAULT_MODE_CONTEXT: ModeContextConfig = {
+  brand_voice: true,
+  brand_details: true,
+  product_catalog: false,
+  past_emails: false,
+  web_research: false,
+  custom_documents: [],
+};
+
+export const DEFAULT_MODE_OUTPUT: ModeOutputConfig = {
+  type: 'freeform',
+  email_format: null,
+  show_thinking: false,
+  version_count: 1,
+};
+
+export const DEFAULT_MODE_MODEL: ModeModelConfig = {
+  preferred: null,
+  allow_override: true,
+  temperature: null,
+};
+
+// Custom Mode interface (enhanced)
+export interface CustomMode {
+  id: string;
+  user_id: string;
+  name: string;
+  description?: string;
+  icon: string;
+  color: ModeColor;
+  system_prompt: string;
+  
+  // Enhanced configuration
+  base_mode: ModeBaseType;
+  tools: ModeToolsConfig;
+  context_sources: ModeContextConfig;
+  output_config: ModeOutputConfig;
+  model_config: ModeModelConfig;
+  
+  // Organization
+  category?: ModeCategory;
+  tags?: string[];
+  
+  // Sharing & inheritance
+  is_shared: boolean;
+  is_template: boolean;
+  parent_mode_id?: string;
+  organization_id?: string;
+  
+  // Status
+  is_active: boolean;
+  is_default: boolean;
+  sort_order: number;
+  
+  // Usage stats
+  usage_count: number;
+  last_used_at?: string;
+  
+  // Timestamps
+  created_at: string;
+  updated_at: string;
+}
+
+// Mode Template (for shared/public templates)
+export interface ModeTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  icon: string;
+  color: ModeColor;
+  category?: ModeCategory;
+  tags?: string[];
+  
+  // Content
+  system_prompt: string;
+  base_mode: ModeBaseType;
+  tools: ModeToolsConfig;
+  context_sources: ModeContextConfig;
+  output_config: ModeOutputConfig;
+  model_config: ModeModelConfig;
+  
+  // Metadata
+  is_official: boolean;
+  is_public: boolean;
+  created_by?: string;
+  organization_id?: string;
+  
+  // Stats
+  use_count: number;
+  rating_sum: number;
+  rating_count: number;
+  
+  created_at: string;
+  updated_at: string;
+}
+
+// Mode Document (custom document context)
+export interface ModeDocument {
+  id: string;
+  mode_id: string;
+  name: string;
+  content: string;
+  content_type: 'text' | 'markdown' | 'json';
+  file_size?: number;
+  word_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Helper to create a new mode with defaults
+export function createDefaultMode(partial: Partial<CustomMode> & { name: string; system_prompt: string }): Omit<CustomMode, 'id' | 'user_id' | 'created_at' | 'updated_at'> {
+  return {
+    name: partial.name,
+    description: partial.description || '',
+    icon: partial.icon || '💬',
+    color: partial.color || 'blue',
+    system_prompt: partial.system_prompt,
+    base_mode: partial.base_mode || 'create',
+    tools: partial.tools || { ...DEFAULT_MODE_TOOLS },
+    context_sources: partial.context_sources || { ...DEFAULT_MODE_CONTEXT },
+    output_config: partial.output_config || { ...DEFAULT_MODE_OUTPUT },
+    model_config: partial.model_config || { ...DEFAULT_MODE_MODEL },
+    category: partial.category || null,
+    tags: partial.tags || [],
+    is_shared: partial.is_shared || false,
+    is_template: partial.is_template || false,
+    parent_mode_id: partial.parent_mode_id,
+    organization_id: partial.organization_id,
+    is_active: partial.is_active ?? true,
+    is_default: partial.is_default || false,
+    sort_order: partial.sort_order || 0,
+    usage_count: partial.usage_count || 0,
+    last_used_at: partial.last_used_at,
+  };
+}
+
+// Mode Version (for history tracking)
+export interface ModeVersion {
+  id: string;
+  mode_id: string;
+  version_number: number;
+  system_prompt: string;
+  notes?: string;
+  created_at: string;
+  created_by?: string;
+}
+
+// Mode Test Result (for sandbox/analytics)
+export interface ModeTestResult {
+  id: string;
+  user_id: string;
+  mode_id?: string;
+  mode_name?: string;
+  mode_color?: ModeColor;
+  system_prompt_snapshot?: string;
+  test_input: string;
+  test_output?: string;
+  model_used: string;
+  brand_id?: string;
+  brand_name?: string;
+  response_time_ms?: number;
+  token_count?: number;
+  rating?: number;
+  notes?: string;
+  is_comparison: boolean;
+  comparison_group_id?: string;
+  created_at: string;
+}
+
+// Helper to check if a mode string represents a custom mode (e.g., 'custom_abc123')
+export function isCustomMode(mode: string | ConversationMode | CustomMode | null | undefined): boolean {
+  if (!mode) return false;
+  // Check if it's a CustomMode object
+  if (typeof mode === 'object' && 'system_prompt' in mode) return true;
+  // Check if it's a custom mode string (starts with 'custom_')
+  if (typeof mode === 'string' && mode.startsWith('custom_')) return true;
+  return false;
+}
+
+// Extract the custom mode ID from a mode string (e.g., 'custom_abc123' -> 'abc123')
+export function getCustomModeId(mode: string | null | undefined): string | null {
+  if (!mode || typeof mode !== 'string') return null;
+  if (mode.startsWith('custom_')) {
+    return mode.replace('custom_', '');
+  }
+  return null;
+}
 
 

@@ -42,6 +42,8 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
 
   const navItems = [
     { name: 'Profile', href: '/settings/profile', icon: UserIcon },
+    { name: 'Prompt Library', href: '/settings/prompts', icon: SparklesIcon },
+    { name: 'Mode Lab', href: '/settings/modes', icon: FlaskIcon },
     { name: 'Notifications', href: '/settings/notifications', icon: BellIcon },
     { name: 'Security', href: '/settings/security', icon: LockIcon },
     { name: 'Team', href: '/settings/team', icon: UsersIcon, adminOnly: true },
@@ -199,6 +201,18 @@ function BellIcon({ className }: { className?: string }) {
   );
 }
 
+function SparklesIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+    </svg>
+  );
+}
 
-
-
+function FlaskIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l.8 1.6a2.25 2.25 0 01-2.012 3.1H5.412a2.25 2.25 0 01-2.012-3.1l.8-1.6" />
+    </svg>
+  );
+}

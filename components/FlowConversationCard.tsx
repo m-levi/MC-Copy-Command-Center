@@ -175,7 +175,7 @@ export default function FlowConversationCard({
                     }`}>
                       #{child.flow_sequence_order}
                     </span>
-                    <span className={`text-xs font-medium truncate ${
+                    <span className={`text-sm font-medium truncate ${
                       isActive && child.id === conversation.id ? 'text-white' : 'text-gray-900 dark:text-gray-100'
                     }`}>
                       {child.flow_email_title || child.title}

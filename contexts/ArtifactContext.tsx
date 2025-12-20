@@ -7,16 +7,10 @@ import {
   ArtifactVariant,
   ArtifactStreamingState,
   CreateEmailArtifact,
-  ArtifactKind,
-  ARTIFACT_KIND_REGISTRY,
-  ArtifactKindConfig,
 } from '@/types/artifacts';
 
-// =====================================================
-// ARTIFACT CONTEXT
-// Provides artifact management throughout the app
-// Currently focused on email, extensible for other types
-// =====================================================
+// Tab types for artifact sidebar
+export type ArtifactTabView = 'content' | 'history' | 'comments';
 
 // ===== Context Interface =====
 interface ArtifactContextValue {
@@ -29,10 +23,13 @@ interface ArtifactContextValue {
   // ===== Sidebar State =====
   isSidebarOpen: boolean;
   isSidebarPinned: boolean;
+  activeTab: ArtifactTabView;
   openSidebar: () => void;
+  openSidebarToTab: (tab: ArtifactTabView) => void;
   closeSidebar: () => void;
   toggleSidebar: () => void;
   toggleSidebarPin: () => void;
+  setActiveTab: (tab: ArtifactTabView) => void;
   
   // ===== Active Artifact Management =====
   setActiveArtifact: (artifactId: string | null) => void;
@@ -48,7 +45,7 @@ interface ArtifactContextValue {
   getVersionHistory: (artifactId: string) => Promise<unknown[]>;
   restoreVersion: (artifactId: string, versionId: string) => Promise<void>;
   
-  // ===== Variant Selection (Email-specific) =====
+  // ===== Variant Selection =====
   selectVariant: (artifactId: string, variant: ArtifactVariant) => Promise<void>;
   
   // ===== Sharing =====
@@ -69,11 +66,6 @@ interface ArtifactContextValue {
   // ===== Utilities =====
   refetch: () => Promise<void>;
   getActiveVariantContent: () => string | undefined;
-  
-  // ===== Extensibility =====
-  currentArtifactKind: ArtifactKind;
-  getKindConfig: (kind: ArtifactKind) => ArtifactKindConfig;
-  supportedKinds: ArtifactKind[];
 }
 
 // ===== Context =====
@@ -83,15 +75,13 @@ const ArtifactContext = createContext<ArtifactContextValue | null>(null);
 interface ArtifactProviderProps {
   children: React.ReactNode;
   conversationId: string;
-  defaultKind?: ArtifactKind;
 }
 
 // ===== Provider Component =====
-export function ArtifactProvider({ 
-  children, 
-  conversationId,
-  defaultKind = 'email',
-}: ArtifactProviderProps) {
+export function ArtifactProvider({ children, conversationId }: ArtifactProviderProps) {
+  // #region agent log
+  console.log('[DEBUG-D] ArtifactProvider rendered', { conversationId, isTempId: conversationId?.startsWith('temp-') });
+  // #endregion
   // Use the hook
   const {
     artifacts,
@@ -114,6 +104,7 @@ export function ArtifactProvider({
   // ===== Sidebar State =====
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const [activeTab, setActiveTabState] = useState<ArtifactTabView>('content');
   
   // ===== Streaming State =====
   const [streamingState, setStreamingState] = useState<ArtifactStreamingState>({
@@ -132,6 +123,11 @@ export function ArtifactProvider({
     setIsSidebarOpen(true);
   }, []);
   
+  const openSidebarToTab = useCallback((tab: ArtifactTabView) => {
+    setActiveTabState(tab);
+    setIsSidebarOpen(true);
+  }, []);
+  
   const closeSidebar = useCallback(() => {
     setIsSidebarOpen(false);
     setIsSidebarPinned(false);
@@ -143,6 +139,10 @@ export function ArtifactProvider({
   
   const toggleSidebarPin = useCallback(() => {
     setIsSidebarPinned(prev => !prev);
+  }, []);
+  
+  const setActiveTab = useCallback((tab: ArtifactTabView) => {
+    setActiveTabState(tab);
   }, []);
 
   // ===== Active Artifact Management =====
@@ -211,15 +211,14 @@ export function ArtifactProvider({
   }, [unshareArtifactHook]);
 
   // ===== Streaming =====
-  const startStreaming = useCallback((messageIdOrArtifactId: string, variant?: ArtifactVariant) => {
+  const startStreaming = useCallback((artifactId: string, variant?: ArtifactVariant) => {
     setStreamingState({
       isStreaming: true,
-      artifactId: messageIdOrArtifactId,
+      artifactId,
       artifactKind: 'email',
       streamingVariant: variant || 'a',
       partialContent: '',
     });
-    // Open sidebar immediately when streaming starts
     setIsSidebarOpen(true);
   }, []);
   
@@ -242,33 +241,27 @@ export function ArtifactProvider({
 
   // ===== Message Integration =====
   const hasArtifactContent = useCallback((content: string): boolean => {
-    // Check for version tags from AI (primary format)
-    if (/<version_[abc]>/i.test(content)) return true;
-    // Check for markdown version headers
     if (/## Version [ABC]/i.test(content)) return true;
     if (/\*\*Version [ABC]\*\*/i.test(content)) return true;
-    // Check for structured email markers
     if (/\*\*(HERO|SUBJECT|TEXT|CTA|BUTTON)\*\*/i.test(content)) return true;
-    // Check for email section markers
-    if (/\[(HERO|SUBJECT|TEXT|CTA|BUTTON)\]/i.test(content)) return true;
     return false;
   }, []);
   
   const processAIResponse = useCallback(async (
-    messageId: string,
-    content: string,
+    messageId: string, 
+    content: string, 
     isEdit = false
   ): Promise<EmailArtifactWithContent | null> => {
     if (!hasArtifactContent(content)) return null;
-
-    // IMPORTANT: Check if an artifact already exists for this message
-    // This prevents duplicates when the page is refreshed
-    const existingArtifact = artifacts.find(a => a.source_message_id === messageId);
-    if (existingArtifact) {
-      // Artifact already exists for this message - don't create duplicate
-      return existingArtifact;
-    }
-
+    
+    const existingArtifactId = activeArtifact?.source_message_id === messageId 
+      ? activeArtifact.id 
+      : null;
+    
+    const existingArtifact = existingArtifactId 
+      ? artifacts.find(a => a.id === existingArtifactId)
+      : null;
+    
     if (isEdit && activeArtifact) {
       await addVersion(activeArtifact.id, content, 'Updated based on feedback');
       await refetch();
@@ -298,15 +291,6 @@ export function ArtifactProvider({
     }
   }, [activeArtifact]);
 
-  // ===== Extensibility =====
-  const getKindConfig = useCallback((kind: ArtifactKind) => {
-    return ARTIFACT_KIND_REGISTRY[kind];
-  }, []);
-
-  const supportedKinds = useMemo<ArtifactKind[]>(() => {
-    return Object.keys(ARTIFACT_KIND_REGISTRY) as ArtifactKind[];
-  }, []);
-
   // ===== Context Value =====
   const value = useMemo<ArtifactContextValue>(() => ({
     artifacts,
@@ -316,10 +300,13 @@ export function ArtifactProvider({
     
     isSidebarOpen,
     isSidebarPinned,
+    activeTab,
     openSidebar,
+    openSidebarToTab,
     closeSidebar,
     toggleSidebar,
     toggleSidebarPin,
+    setActiveTab,
     setActiveArtifact,
     focusArtifact,
     
@@ -347,11 +334,6 @@ export function ArtifactProvider({
     
     refetch,
     getActiveVariantContent,
-    
-    // Extensibility
-    currentArtifactKind: defaultKind,
-    getKindConfig,
-    supportedKinds,
   }), [
     artifacts,
     activeArtifact,
@@ -359,10 +341,13 @@ export function ArtifactProvider({
     error,
     isSidebarOpen,
     isSidebarPinned,
+    activeTab,
     openSidebar,
+    openSidebarToTab,
     closeSidebar,
     toggleSidebar,
     toggleSidebarPin,
+    setActiveTab,
     setActiveArtifact,
     focusArtifact,
     createArtifact,
@@ -383,9 +368,6 @@ export function ArtifactProvider({
     hasArtifactContent,
     refetch,
     getActiveVariantContent,
-    defaultKind,
-    getKindConfig,
-    supportedKinds,
   ]);
 
   return (

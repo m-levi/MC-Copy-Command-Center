@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 /* View Transitions API for smoother page navigation */
@@ -5,22 +6,26 @@
   navigation: auto;
 }
 
-/* 
- * Font loading is handled by next/font in layout.tsx
- * Uses Geist Sans and Geist Mono for consistent, optimized font delivery
- * CSS variables --font-geist-sans and --font-geist-mono are set by next/font
- */
+/* Font display optimization for faster text rendering */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: local('Inter');
+}
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --font-switzer: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans: var(--font-switzer);
+  --font-mono: var(--font-geist-mono);
 }
 
 .dark {
@@ -31,7 +36,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-switzer);
 }
 
 /* Markdown styles for chat messages */
@@ -97,7 +102,7 @@ body {
   padding: 0.125rem 0.375rem;
   border-radius: 0.375rem;
   font-size: 0.875em;
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   color: #dc2626;
   font-weight: 500;
 }
@@ -268,43 +273,6 @@ body {
 
 .animate-in {
   animation: fade-in 0.3s ease-out;
-}
-
-/* Zoom in animations for dropdowns and menus */
-@keyframes zoom-in-95 {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.animate-in.zoom-in-95 {
-  animation: zoom-in-95 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.animate-in.fade-in {
-  animation: fade-in 0.15s ease-out;
-}
-
-.animate-in.fade-in.zoom-in-95 {
-  animation: zoom-in-95 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Origin utilities for animations */
-.origin-top {
-  transform-origin: top center;
-}
-
-.origin-top-left {
-  transform-origin: top left;
-}
-
-.origin-top-right {
-  transform-origin: top right;
 }
 
 /* Slide in from bottom */
@@ -501,24 +469,6 @@ html {
   outline: none;
 }
 
-/* Touch manipulation for better mobile interaction */
-.touch-manipulation {
-  touch-action: manipulation;
-}
-
-/* Prevent text selection on interactive elements (better for touch) */
-.select-none-interactive {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-
-/* Minimum tap target size for accessibility (44x44px recommended) */
-.min-tap-target {
-  min-width: 44px;
-  min-height: 44px;
-}
-
 /* Custom shadow utilities - lighter feel */
 .shadow-light-sm {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
@@ -557,36 +507,4 @@ html {
 .dark .shadow-light-lg {
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3),
               0 4px 6px -4px rgba(0, 0, 0, 0.2);
-}
-
-/* Comment Selection Styling - Amber theme for text highlighting */
-.comment-selection-area::selection,
-.comment-selection-area *::selection {
-  background-color: rgba(251, 191, 36, 0.35); /* amber-400/35 */
-  color: inherit;
-}
-
-.dark .comment-selection-area::selection,
-.dark .comment-selection-area *::selection {
-  background-color: rgba(245, 158, 11, 0.3); /* amber-500/30 */
-  color: inherit;
-}
-
-/* Smooth selection transition */
-.comment-selection-area {
-  -webkit-tap-highlight-color: rgba(251, 191, 36, 0.2);
-}
-
-/* Comment highlight underline animation */
-@keyframes highlight-pulse {
-  0%, 100% {
-    text-decoration-color: rgba(251, 191, 36, 0.6);
-  }
-  50% {
-    text-decoration-color: rgba(251, 191, 36, 0.9);
-  }
-}
-
-.highlight-pulse {
-  animation: highlight-pulse 2s ease-in-out infinite;
 }

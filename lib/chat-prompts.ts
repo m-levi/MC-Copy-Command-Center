@@ -356,6 +356,75 @@ export function buildSectionRegenerationPrompt(
 }
 
 /**
+ * Build prompt for custom modes
+ * Replaces template variables in a custom system prompt
+ * Respects context_sources configuration for what info to include
+ */
+export function buildCustomModePrompt(
+  systemPrompt: string,
+  brandContext: any,
+  options: {
+    conversationContext?: any;
+    memoryContext?: string;
+    userMessage?: string;
+    contextSources?: {
+      brand_voice: boolean;
+      brand_details: boolean;
+      product_catalog: boolean;
+      past_emails: boolean;
+      web_research: boolean;
+      custom_documents: string[];
+    };
+  } = {}
+): string {
+  const contextSources = options.contextSources || {
+    brand_voice: true,
+    brand_details: true,
+    product_catalog: false,
+    past_emails: false,
+    web_research: false,
+    custom_documents: [],
+  };
+
+  // Build brand info based on context sources
+  let brandInfo = '';
+  if (contextSources.brand_details && brandContext) {
+    brandInfo = `Brand Name: ${brandContext.name || 'N/A'}\n`;
+    if (brandContext.brand_details) {
+      brandInfo += `Brand Details: ${brandContext.brand_details}\n`;
+    }
+    if (brandContext.website_url) {
+      brandInfo += `Website: ${brandContext.website_url}\n`;
+    }
+  }
+  if (contextSources.brand_voice && brandContext) {
+    if (brandContext.brand_guidelines) {
+      brandInfo += `Brand Guidelines: ${brandContext.brand_guidelines}\n`;
+    }
+    if (brandContext.copywriting_style_guide) {
+      brandInfo += `Copywriting Style Guide: ${brandContext.copywriting_style_guide}\n`;
+    }
+  }
+  brandInfo = brandInfo.trim() || buildBrandInfo(brandContext);
+  
+  const contextInfo = buildContextInfo(options.conversationContext);
+  const hostname = getHostnameFromUrl(brandContext?.website_url);
+  const websiteHint = hostname ? ` (including ${hostname})` : '';
+
+  return systemPrompt
+    .replace(/\{\{BRAND_INFO\}\}/g, brandInfo)
+    .replace(/\{\{BRAND_NAME\}\}/g, brandContext?.name || '')
+    .replace(/\{\{WEBSITE_URL\}\}/g, brandContext?.website_url || '')
+    .replace(/\{\{WEBSITE_HINT\}\}/g, websiteHint)
+    .replace(/\{\{COPY_BRIEF\}\}/g, options.userMessage || '')
+    .replace(/\{\{USER_MESSAGE\}\}/g, options.userMessage || '')
+    .replace(/\{\{CONTEXT_INFO\}\}/g, contextInfo)
+    .replace(/\{\{MEMORY_CONTEXT\}\}/g, options.memoryContext || '')
+    .replace(/\{\{PRODUCTS\}\}/g, '') // Product context populated by product_search tool if enabled
+    .replace(/\{\{RAG_CONTEXT\}\}/g, ''); // RAG disabled
+}
+
+/**
  * Main system prompt builder - routes to appropriate prompt
  */
 export function buildSystemPrompt(
@@ -367,6 +436,7 @@ export function buildSystemPrompt(
     conversationMode?: string;
     memoryContext?: string;
     emailType?: string;
+    customModePrompt?: string; // For custom modes
   } = {}
 ): string {
   const brandInfo = buildBrandInfo(brandContext);
@@ -388,6 +458,14 @@ export function buildSystemPrompt(
       options.regenerateSection.title,
       context
     );
+  }
+
+  // Custom mode - use the provided custom prompt
+  if (options.customModePrompt) {
+    return buildCustomModePrompt(options.customModePrompt, brandContext, {
+      conversationContext: options.conversationContext,
+      memoryContext: options.memoryContext,
+    });
   }
 
   // Planning mode

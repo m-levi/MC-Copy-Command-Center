@@ -125,7 +125,7 @@ export default function VirtualizedConversationList({
   const renderConversation = (conversation: ConversationWithStatus) => (
     <div 
       key={conversation.id} 
-      className="pl-2 pr-1 py-0.5"
+      className="pl-2 pr-1"
       data-conversation-id={conversation.id}
     >
       <ConversationListItem

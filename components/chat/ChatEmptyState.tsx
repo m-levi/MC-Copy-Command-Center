@@ -1,14 +1,129 @@
 'use client';
 
 import { ConversationMode } from '@/types';
+import { useChatSuggestions, ChatSuggestion } from '@/hooks/useChatSuggestions';
+import { RefreshCw, Sparkles, Lightbulb, Pencil, ArrowRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface ChatEmptyStateProps {
   mode: ConversationMode;
+  brandId?: string | null;
   onNewConversation: () => void;
+  onSuggestionClick?: (prompt: string) => void;
   isPersonalAI?: boolean;
 }
 
-export default function ChatEmptyState({ mode, onNewConversation, isPersonalAI = false }: ChatEmptyStateProps) {
+const categoryColors: Record<string, { bg: string; text: string; border: string }> = {
+  campaign: { 
+    bg: 'bg-blue-50 dark:bg-blue-950/30', 
+    text: 'text-blue-600 dark:text-blue-400',
+    border: 'border-blue-200 dark:border-blue-800/50'
+  },
+  content: { 
+    bg: 'bg-purple-50 dark:bg-purple-950/30', 
+    text: 'text-purple-600 dark:text-purple-400',
+    border: 'border-purple-200 dark:border-purple-800/50'
+  },
+  strategy: { 
+    bg: 'bg-emerald-50 dark:bg-emerald-950/30', 
+    text: 'text-emerald-600 dark:text-emerald-400',
+    border: 'border-emerald-200 dark:border-emerald-800/50'
+  },
+  optimization: { 
+    bg: 'bg-amber-50 dark:bg-amber-950/30', 
+    text: 'text-amber-600 dark:text-amber-400',
+    border: 'border-amber-200 dark:border-amber-800/50'
+  },
+};
+
+function SuggestionCard({ 
+  suggestion, 
+  onClick,
+  index 
+}: { 
+  suggestion: ChatSuggestion; 
+  onClick: () => void;
+  index: number;
+}) {
+  const colors = categoryColors[suggestion.category] || categoryColors.content;
+  
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "group relative w-full text-left p-4 rounded-xl border transition-all duration-200",
+        "bg-white dark:bg-gray-900/50 hover:bg-gray-50 dark:hover:bg-gray-800/70",
+        "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700",
+        "hover:shadow-md hover:-translate-y-0.5",
+        "animate-in fade-in slide-in-from-bottom-2"
+      )}
+      style={{ animationDelay: `${index * 75}ms`, animationFillMode: 'both' }}
+    >
+      {/* Category indicator */}
+      <div className={cn(
+        "absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wide",
+        colors.bg, colors.text
+      )}>
+        {suggestion.category}
+      </div>
+      
+      {/* Icon */}
+      <div className="flex items-start gap-3">
+        <div className={cn(
+          "flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-xl",
+          colors.bg
+        )}>
+          {suggestion.icon}
+        </div>
+        
+        <div className="flex-1 min-w-0 pr-16">
+          <h4 className="font-semibold text-gray-900 dark:text-white text-sm leading-tight mb-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+            {suggestion.title}
+          </h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+            {suggestion.description}
+          </p>
+        </div>
+      </div>
+      
+      {/* Hover arrow */}
+      <div className="absolute right-4 bottom-4 opacity-0 group-hover:opacity-100 transition-opacity">
+        <ArrowRight className="w-4 h-4 text-blue-500" />
+      </div>
+    </button>
+  );
+}
+
+function SuggestionSkeleton({ index }: { index: number }) {
+  return (
+    <div 
+      className="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/50 animate-pulse"
+      style={{ animationDelay: `${index * 100}ms` }}
+    >
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-lg bg-gray-200 dark:bg-gray-700" />
+        <div className="flex-1 space-y-2">
+          <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
+          <div className="h-3 bg-gray-100 dark:bg-gray-800 rounded w-full" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ChatEmptyState({ 
+  mode, 
+  brandId,
+  onNewConversation, 
+  onSuggestionClick,
+  isPersonalAI = false 
+}: ChatEmptyStateProps) {
+  const { suggestions, isLoading, refresh } = useChatSuggestions({
+    brandId: brandId || null,
+    mode,
+    enabled: !isPersonalAI && !!brandId,
+  });
+
   // Personal AI mode: show a different empty state
   if (isPersonalAI) {
     return (
@@ -52,67 +167,119 @@ export default function ChatEmptyState({ mode, onNewConversation, isPersonalAI =
     );
   }
 
+  const hasSuggestions = suggestions.length > 0 || isLoading;
+  const ModeIcon = mode === 'planning' ? Lightbulb : Pencil;
+
   return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center max-w-2xl px-4 sm:px-6">
-        <div className="mb-6 flex justify-center">
-          {mode === 'planning' ? (
-            <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center">
-              <svg className="w-12 h-12 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
+    <div className="flex items-center justify-center h-full px-4 sm:px-6">
+      <div className="w-full max-w-3xl">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="mb-4 flex justify-center">
+            <div className={cn(
+              "w-16 h-16 rounded-2xl flex items-center justify-center shadow-sm",
+              mode === 'planning' 
+                ? "bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-900/30 dark:to-teal-900/30" 
+                : "bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30"
+            )}>
+              <ModeIcon className={cn(
+                "w-8 h-8",
+                mode === 'planning' 
+                  ? "text-emerald-600 dark:text-emerald-400" 
+                  : "text-blue-600 dark:text-blue-400"
+              )} />
             </div>
-          ) : (
-            <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center">
-              <svg className="w-12 h-12 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-            </div>
-          )}
-        </div>
-        <h3 className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-2">
-          {mode === 'planning' 
-            ? 'Your Brand Strategy Partner' 
-            : 'Create Your Email'}
-        </h3>
-        <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mb-6">
-          {mode === 'planning'
-            ? 'Get marketing advice, brainstorm campaigns, explore creative ideas, and develop winning strategies for your brand.'
-            : 'Describe the email you want to create and I\'ll generate it for you with high-converting copy.'}
-        </p>
-        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 text-left">
-          <p className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
-            {mode === 'planning' ? '💡 What You Can Do Here:' : '✉️ Email Copy Mode Tips:'}
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            {mode === 'planning' ? 'What can I help you plan?' : 'What would you like to create?'}
+          </h2>
+          <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 max-w-lg mx-auto">
+            {mode === 'planning' 
+              ? 'I can help with strategy, brainstorming, campaign planning, and marketing advice.'
+              : 'Describe the email you want and I\'ll create high-converting copy tailored to your brand.'}
           </p>
-          {mode === 'planning' ? (
-            <div className="space-y-3">
-              <div className="text-sm text-blue-800 dark:text-blue-200">
-                <p className="font-medium mb-1">💬 Get Marketing Advice</p>
-                <p className="text-xs ml-3">"What are best practices for abandoned cart emails?"</p>
-              </div>
-              <div className="text-sm text-blue-800 dark:text-blue-200">
-                <p className="font-medium mb-1">🎨 Brainstorm Creative Ideas</p>
-                <p className="text-xs ml-3">"I need creative campaign ideas for our new product launch"</p>
-              </div>
-              <div className="text-sm text-blue-800 dark:text-blue-200">
-                <p className="font-medium mb-1">🎯 Develop Strategy</p>
-                <p className="text-xs ml-3">"Help me plan a re-engagement campaign for inactive customers"</p>
-              </div>
-              <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-800">
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  <strong>Note:</strong> When we develop a campaign concept together, I'll offer to create it in Writing mode.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-              <li>• Be specific about your product or offer</li>
-              <li>• Mention your target audience</li>
-              <li>• Include any key details like discounts or timeframes</li>
-              <li>• Provide context about the email's purpose and goal</li>
-            </ul>
-          )}
         </div>
+
+        {/* Suggestions Section */}
+        {hasSuggestions && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <span className="font-medium">Suggested for you</span>
+              </div>
+              {!isLoading && (
+                <button
+                  onClick={refresh}
+                  className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Refresh</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {isLoading ? (
+                <>
+                  <SuggestionSkeleton index={0} />
+                  <SuggestionSkeleton index={1} />
+                  <SuggestionSkeleton index={2} />
+                  <SuggestionSkeleton index={3} />
+                </>
+              ) : (
+                suggestions.map((suggestion, index) => (
+                  <SuggestionCard
+                    key={suggestion.id}
+                    suggestion={suggestion}
+                    index={index}
+                    onClick={() => onSuggestionClick?.(suggestion.prompt)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Fallback tips when no suggestions */}
+        {!hasSuggestions && !isLoading && (
+          <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+              {mode === 'planning' ? '💡 Quick start ideas:' : '✉️ Tips for great emails:'}
+            </p>
+            {mode === 'planning' ? (
+              <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-2">
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-500 mt-0.5">•</span>
+                  <span>Ask for marketing advice on specific topics</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-500 mt-0.5">•</span>
+                  <span>Brainstorm campaign ideas for upcoming events</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-500 mt-0.5">•</span>
+                  <span>Plan re-engagement or retention strategies</span>
+                </li>
+              </ul>
+            ) : (
+              <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-2">
+                <li className="flex items-start gap-2">
+                  <span className="text-blue-500 mt-0.5">•</span>
+                  <span>Be specific about your product or offer</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-blue-500 mt-0.5">•</span>
+                  <span>Mention your target audience</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-blue-500 mt-0.5">•</span>
+                  <span>Include key details like discounts or timeframes</span>
+                </li>
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -168,4 +335,3 @@ export function PreparingResponseIndicator() {
     </div>
   );
 }
-

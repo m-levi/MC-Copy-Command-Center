@@ -505,3 +505,9 @@ export default function BrandFileManager({ brandId, brandName }: BrandFileManage
     </div>
   );
 }
+
+
+
+
+
+

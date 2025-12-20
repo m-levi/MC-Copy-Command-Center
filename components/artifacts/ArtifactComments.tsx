@@ -25,7 +25,7 @@ interface Comment {
 }
 
 interface ArtifactCommentsProps {
-  artifactId: string;
+  artifactId?: string | null;  // Optional - when null, shows all conversation comments
   conversationId: string;
   highlightedText?: string | null;
   selectedVariant?: 'a' | 'b' | 'c';
@@ -96,10 +96,13 @@ export const ArtifactComments = memo(function ArtifactComments({
     }
   }, [highlightedText]);
 
-  // Fetch comments for this artifact
+  // Fetch comments - either for specific artifact or all conversation comments
   const fetchComments = useCallback(async () => {
-    // Skip if no valid IDs
-    if (!conversationId || !artifactId) {
+    // #region agent log
+    console.log('[DEBUG-D] fetchComments entry:', { conversationId, artifactId });
+    // #endregion
+    // Skip if no conversation ID
+    if (!conversationId) {
       setIsLoading(false);
       setComments([]);
       return;
@@ -120,16 +123,47 @@ export const ArtifactComments = memo(function ArtifactComments({
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true });
 
+      // #region agent log
+      console.log('[DEBUG-AB] Supabase query result:', {
+        hasData: !!data,
+        dataLength: data?.length,
+        hasError: !!error,
+        errorType: error ? typeof error : null,
+        errorKeys: error ? Object.keys(error) : [],
+        errorMessage: error?.message,
+        errorCode: error?.code,
+        errorStringified: error ? JSON.stringify(error) : null,
+        errorRaw: error
+      });
+      // #endregion
+
       // Only treat as error if there's actual error info (not empty object)
       if (error && (error.message || error.code)) {
+        // #region agent log
+        console.log('[DEBUG-A] Error branch taken:', {
+          errorMessage: error.message,
+          errorCode: error.code,
+          errorMessageTruthy: !!error.message,
+          errorCodeTruthy: !!error.code
+        });
+        // #endregion
         console.error('Error fetching comments:', error);
         setComments([]);
         return;
       }
 
-      // Filter to only artifact comments for this artifact
-      const artifactComments = (data || [])
-        .filter((c: any) => c.metadata?.artifact_id === artifactId)
+      // Filter comments based on whether we have an artifactId
+      // If artifactId is provided, only show artifact-specific comments
+      // Otherwise, show all conversation comments
+      const filteredComments = (data || [])
+        .filter((c: any) => {
+          if (artifactId) {
+            // Only show comments for this specific artifact
+            return c.metadata?.artifact_id === artifactId;
+          }
+          // Show all comments when no artifact is selected
+          return true;
+        })
         .map((c: any) => ({
           id: c.id,
           content: c.content,
@@ -141,8 +175,22 @@ export const ArtifactComments = memo(function ArtifactComments({
           artifact_variant: c.metadata?.artifact_variant,
         }));
 
-      setComments(artifactComments);
+      // #region agent log
+      console.log('[DEBUG-SUCCESS] Comments filtered:', { totalComments: filteredComments.length });
+      // #endregion
+
+      setComments(filteredComments);
     } catch (err: any) {
+      // #region agent log
+      console.log('[DEBUG-C] Catch block triggered:', {
+        errType: typeof err,
+        errMessage: err?.message,
+        errCode: err?.code,
+        errKeys: err ? Object.keys(err) : [],
+        errStringified: err ? JSON.stringify(err) : null,
+        errRaw: err
+      });
+      // #endregion
       // Only log if it's a real error with message
       if (err?.message) {
         console.error('Error fetching comments:', err);
@@ -458,3 +506,9 @@ function CommentCard({
 }
 
 export default ArtifactComments;
+
+
+
+
+
+

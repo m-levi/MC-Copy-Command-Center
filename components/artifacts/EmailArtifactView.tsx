@@ -307,12 +307,8 @@ export const EmailArtifactView = memo(function EmailArtifactView({
 
         {isStreaming && (
           <div className="mx-4 mt-4 flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm text-blue-600 dark:text-blue-400">
-            <div className="flex gap-0.5">
-              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
-            <span>Writing...</span>
+            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+            <span className="font-medium">Updating...</span>
           </div>
         )}
 
@@ -454,7 +450,7 @@ function RawView({ content, isStreaming }: { content: string; isStreaming: boole
         })}
         
         {isStreaming && (
-          <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse" />
+          <span className="inline-block w-0.5 h-4 bg-blue-500 animate-pulse ml-0.5 rounded-full" />
         )}
       </div>
     </div>
@@ -501,4 +497,10 @@ function PreviewView({ content }: { content: string }) {
 }
 
 export default EmailArtifactView;
+
+
+
+
+
+
 

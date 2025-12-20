@@ -246,3 +246,9 @@ metadata: {
 - `ArtifactProvider` - Wraps chat page to provide artifact state
 - `useArtifactContext` - Access artifact state and actions
 - `useOptionalArtifactContext` - Safe hook that returns null outside provider
+
+
+
+
+
+

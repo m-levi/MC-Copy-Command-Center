@@ -496,3 +496,9 @@ function EmailActionsBarBase({ emailContent, productLinks = [], className = '' }
 
 export const EmailActionsBar = memo(EmailActionsBarBase);
 export default EmailActionsBar;
+
+
+
+
+
+

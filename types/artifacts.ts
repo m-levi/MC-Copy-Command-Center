@@ -379,3 +379,9 @@ export function getArtifactKindConfig(kind: ArtifactKind): ArtifactKindConfig {
 export function artifactSupportsVariants(kind: ArtifactKind): boolean {
   return ARTIFACT_KIND_REGISTRY[kind]?.supportsVariants ?? false;
 }
+
+
+
+
+
+
