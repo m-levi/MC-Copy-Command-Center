@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import {
   PlusIcon,
@@ -12,18 +12,21 @@ import {
   Loader2Icon,
   SparklesIcon,
   InfoIcon,
+  SlashIcon,
+  SearchIcon,
 } from 'lucide-react';
 import { usePromptLibrary } from '@/hooks/usePromptLibrary';
-import { 
-  SavedPrompt, 
-  CreatePromptInput, 
+import {
+  SavedPrompt,
+  CreatePromptInput,
   PROMPT_ICONS,
 } from '@/types/prompts';
 import { ConversationMode } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
-const MODE_LABELS: Record<ConversationMode, string> = {
+const MODE_LABELS: Record<string, string> = {
+  assistant: 'Assistant',
   email_copy: 'Email',
   flow: 'Flow',
   planning: 'Planning',
@@ -34,11 +37,28 @@ export default function PromptsSettingsPage() {
   const [showEditor, setShowEditor] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<SavedPrompt | null>(null);
   const [orderedPrompts, setOrderedPrompts] = useState<SavedPrompt[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Sync ordered prompts when prompts change
   useEffect(() => {
     setOrderedPrompts(prompts);
   }, [prompts]);
+
+  // Filter prompts by search query
+  const filteredPrompts = useMemo(() => {
+    if (!searchQuery.trim()) return orderedPrompts;
+
+    const query = searchQuery.toLowerCase().trim();
+    return orderedPrompts.filter(
+      (prompt) =>
+        prompt.name.toLowerCase().includes(query) ||
+        (prompt.description?.toLowerCase().includes(query) ?? false) ||
+        prompt.prompt.toLowerCase().includes(query) ||
+        (prompt.slash_command?.toLowerCase().includes(query) ?? false)
+    );
+  }, [orderedPrompts, searchQuery]);
+
+  const isSearching = searchQuery.trim().length > 0;
 
   const handleSave = async (input: CreatePromptInput) => {
     if (editingPrompt) {
@@ -85,10 +105,10 @@ export default function PromptsSettingsPage() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-            Prompt Library
+            Quick Actions
           </h2>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Quick prompts that appear as shortcuts in chat.
+            Create shortcuts that appear as buttons in chat and can be triggered with slash commands.
           </p>
         </div>
         <button
@@ -96,26 +116,59 @@ export default function PromptsSettingsPage() {
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium hover:from-violet-600 hover:to-indigo-700 transition-all shadow-sm"
         >
           <PlusIcon className="w-4 h-4" />
-          New Prompt
+          New Shortcut
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="mb-6 p-4 bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30 rounded-xl border border-violet-100 dark:border-violet-900/50">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white">
-            <SparklesIcon className="w-5 h-5" />
+      {/* Search */}
+      {orderedPrompts.length > 0 && (
+        <div className="mb-6">
+          <div className="relative">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search shortcuts by name, description, or command..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all text-sm"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <XIcon className="w-4 h-4" />
+              </button>
+            )}
           </div>
-          <div>
-            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-              {activeCount} Active Prompts
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Drag to reorder • Click to edit
+          {isSearching && (
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              {filteredPrompts.length === 0
+                ? 'No shortcuts found'
+                : `Showing ${filteredPrompts.length} of ${orderedPrompts.length} shortcut${orderedPrompts.length !== 1 ? 's' : ''}`}
             </p>
+          )}
+        </div>
+      )}
+
+      {/* Stats */}
+      {!isSearching && (
+        <div className="mb-6 p-4 bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30 rounded-xl border border-violet-100 dark:border-violet-900/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white">
+              <SparklesIcon className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                {activeCount} Active Shortcuts
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Drag to reorder • Click to edit
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Info Box */}
       <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-xl border border-blue-200 dark:border-blue-900/50">
@@ -123,8 +176,8 @@ export default function PromptsSettingsPage() {
           <InfoIcon className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-sm text-blue-800 dark:text-blue-200">
-              These prompts appear as quick action buttons below AI responses in chat. 
-              Clicking them sends the prompt to continue the conversation.
+              Shortcuts appear as quick action buttons below AI responses in chat. 
+              You can also enable a slash command (e.g., <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/50 rounded text-xs font-mono">/subjects</code>) to trigger them from the input field.
             </p>
           </div>
         </div>
@@ -137,17 +190,116 @@ export default function PromptsSettingsPage() {
             <SparklesIcon className="w-8 h-8 text-violet-500" />
           </div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-            No Prompts Yet
+            No Shortcuts Yet
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Create your first quick prompt to speed up your workflow.
+            Create your first shortcut to speed up your workflow.
           </p>
         </div>
+      ) : isSearching && filteredPrompts.length === 0 ? (
+        <div className="text-center py-12 px-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
+          <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center mx-auto mb-4">
+            <SearchIcon className="w-7 h-7 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+            No shortcuts match your search
+          </h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Try adjusting your search terms
+          </p>
+          <button
+            onClick={() => setSearchQuery('')}
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-medium rounded-lg transition-colors text-sm"
+          >
+            Clear Search
+          </button>
+        </div>
+      ) : isSearching ? (
+        /* When searching, show a static list (no reorder) */
+        <div className="space-y-2">
+          {filteredPrompts.map((prompt) => (
+            <div
+              key={prompt.id}
+              className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${
+                prompt.is_active
+                  ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+                  : 'bg-gray-50 dark:bg-gray-900/50 border-gray-200 dark:border-gray-800 opacity-60'
+              }`}
+            >
+              <div className="text-gray-300 dark:text-gray-600">
+                <GripVerticalIcon className="w-5 h-5" />
+              </div>
+
+              <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-xl">
+                {prompt.icon}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h4 className="font-medium text-gray-900 dark:text-gray-100">
+                    {prompt.name}
+                  </h4>
+                  {prompt.slash_command && (
+                    <code className="px-1.5 py-0.5 text-[10px] font-mono bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded">
+                      /{prompt.slash_command}
+                    </code>
+                  )}
+                  {prompt.is_default && (
+                    <span className="px-1.5 py-0.5 text-[10px] font-medium bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded">
+                      Default
+                    </span>
+                  )}
+                </div>
+                {prompt.description && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 truncate mb-1">
+                    {prompt.description}
+                  </p>
+                )}
+                <div className="flex gap-1">
+                  {prompt.modes.map(mode => (
+                    <span
+                      key={mode}
+                      className="px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded"
+                    >
+                      {MODE_LABELS[mode]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setEditingPrompt(prompt); setShowEditor(true); }}
+                  className="p-2 rounded-lg text-gray-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+                >
+                  <PencilIcon className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleDelete(prompt.id, prompt.is_default)}
+                  className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  title={prompt.is_default ? 'Disable shortcut' : 'Delete shortcut'}
+                >
+                  <TrashIcon className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => updatePrompt(prompt.id, { is_active: !prompt.is_active })}
+                  className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors ${
+                    prompt.is_active ? 'bg-gradient-to-r from-violet-500 to-indigo-600' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform ${
+                    prompt.is_active ? 'translate-x-6' : 'translate-x-0'
+                  }`} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
-        <Reorder.Group 
-          axis="y" 
-          values={orderedPrompts} 
-          onReorder={handleReorder} 
+        <Reorder.Group
+          axis="y"
+          values={orderedPrompts}
+          onReorder={handleReorder}
           className="space-y-2"
         >
           {orderedPrompts.map((prompt) => (
@@ -173,6 +325,11 @@ export default function PromptsSettingsPage() {
                   <h4 className="font-medium text-gray-900 dark:text-gray-100">
                     {prompt.name}
                   </h4>
+                  {prompt.slash_command && (
+                    <code className="px-1.5 py-0.5 text-[10px] font-mono bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded">
+                      /{prompt.slash_command}
+                    </code>
+                  )}
                   {prompt.is_default && (
                     <span className="px-1.5 py-0.5 text-[10px] font-medium bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded">
                       Default
@@ -206,7 +363,7 @@ export default function PromptsSettingsPage() {
                 <button
                   onClick={() => handleDelete(prompt.id, prompt.is_default)}
                   className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                  title={prompt.is_default ? 'Disable prompt' : 'Delete prompt'}
+                  title={prompt.is_default ? 'Disable shortcut' : 'Delete shortcut'}
                 >
                   <TrashIcon className="w-4 h-4" />
                 </button>
@@ -256,9 +413,17 @@ function PromptEditor({
   const [description, setDescription] = useState(prompt?.description || '');
   const [icon, setIcon] = useState(prompt?.icon || '💬');
   const [promptText, setPromptText] = useState(prompt?.prompt || '');
+  const [slashCommand, setSlashCommand] = useState(prompt?.slash_command || '');
   const [modes, setModes] = useState<ConversationMode[]>(prompt?.modes || ['email_copy']);
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Normalize slash command input (remove leading slash and spaces, lowercase)
+  const handleSlashCommandChange = (value: string) => {
+    // Remove leading slash if user types it, remove spaces, lowercase
+    const normalized = value.replace(/^\//, '').replace(/\s/g, '').toLowerCase();
+    setSlashCommand(normalized);
+  };
 
   const handleSave = async () => {
     if (!name.trim() || !promptText.trim()) return;
@@ -269,6 +434,7 @@ function PromptEditor({
       description: description.trim() || undefined,
       icon,
       prompt: promptText.trim(),
+      slash_command: slashCommand.trim() || undefined,
       modes,
     });
     setIsSaving(false);
@@ -299,7 +465,7 @@ function PromptEditor({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {isEditing ? 'Edit Prompt' : 'New Prompt'}
+            {isEditing ? 'Edit Shortcut' : 'New Shortcut'}
           </h2>
           <button
             onClick={onCancel}
@@ -367,6 +533,30 @@ function PromptEditor({
             className="w-full px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500"
           />
 
+          {/* Slash Command */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Slash Command <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <SlashIcon className="w-4 h-4 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                value={slashCommand}
+                onChange={(e) => handleSlashCommandChange(e.target.value)}
+                placeholder="e.g., subjects"
+                className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 font-mono text-sm"
+              />
+            </div>
+            {slashCommand && (
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                Type <code className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-mono">/{slashCommand}</code> in chat to trigger this shortcut
+              </p>
+            )}
+          </div>
+
           {/* Prompt Text */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -425,7 +615,7 @@ function PromptEditor({
             ) : (
               <>
                 <CheckIcon className="w-4 h-4" />
-                {isEditing ? 'Save Changes' : 'Create Prompt'}
+                {isEditing ? 'Save Changes' : 'Create Shortcut'}
               </>
             )}
           </button>
@@ -434,4 +624,11 @@ function PromptEditor({
     </motion.div>
   );
 }
+
+
+
+
+
+
+
 
