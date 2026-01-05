@@ -3,9 +3,9 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 import GlobalKeyboardShortcuts from "@/components/GlobalKeyboardShortcuts";
-import DebugPanel from "@/components/DebugPanel";
-import DebugPromptSelector from "@/components/DebugPromptSelector";
 import PageTransition from "@/components/PageTransition";
+import { BackgroundGenerationProvider } from "@/contexts/BackgroundGenerationContext";
+import DebugComponentsWrapper from "@/components/DebugComponentsWrapper";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,17 +28,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <ThemeProvider>
-          <PageTransition>
-            {children}
-          </PageTransition>
-          <GlobalKeyboardShortcuts />
-          <DebugPanel />
-          <DebugPromptSelector />
+          <BackgroundGenerationProvider>
+            <PageTransition>
+              {children}
+            </PageTransition>
+            <GlobalKeyboardShortcuts />
+            <DebugComponentsWrapper />
+          </BackgroundGenerationProvider>
         </ThemeProvider>
       </body>
     </html>

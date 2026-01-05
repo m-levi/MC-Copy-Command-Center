@@ -239,3 +239,25 @@ GRANT EXECUTE ON FUNCTION get_mode_version_count TO authenticated;
 GRANT EXECUTE ON FUNCTION restore_mode_version TO authenticated;
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

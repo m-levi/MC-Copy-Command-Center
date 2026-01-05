@@ -55,7 +55,7 @@ export default function BrandStyleGuideTab({ brand, onUpdate }: BrandStyleGuideT
             </p>
           </div>
           <button
-            onClick={() => router.push(`/brands/${brand.id}/voice-builder`)}
+            onClick={() => router.push(`/brands/${brand.id}/brand-builder`)}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-sm hover:shadow-md flex items-center gap-2 ${
               brandVoice || copywritingStyleGuide
                 ? 'border border-violet-600 dark:border-violet-500 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/30'
@@ -65,7 +65,7 @@ export default function BrandStyleGuideTab({ brand, onUpdate }: BrandStyleGuideT
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
             </svg>
-            {brandVoice || copywritingStyleGuide ? 'Rebuild Voice' : 'Build Brand Voice'}
+            {brandVoice || copywritingStyleGuide ? 'Rebuild Brand' : 'Build Brand'}
           </button>
         </div>
 

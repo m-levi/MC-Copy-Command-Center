@@ -10,7 +10,8 @@ import { stripCampaignTags } from '@/lib/campaign-parser';
 import { logger } from '@/lib/logger';
 import { cleanMessageContent } from '@/lib/chat-utils';
 import { cn } from '@/lib/utils';
-import { CopyIcon, RefreshCwIcon, ThumbsUpIcon, ThumbsDownIcon, CheckIcon, MessageSquareIcon, ChevronLeftIcon, ChevronRightIcon, Quote } from 'lucide-react';
+import { CopyIcon, RefreshCwIcon, ThumbsUpIcon, ThumbsDownIcon, CheckIcon, MessageSquareIcon, ChevronLeftIcon, ChevronRightIcon, Quote, FileTextIcon, Sparkles } from 'lucide-react';
+import { useOptionalArtifactContext, ArtifactSuggestion } from '@/contexts/ArtifactContext';
 
 // AI Elements imports
 import {
@@ -36,6 +37,7 @@ import {
 import InlineCommentBox from '../InlineCommentBox';
 import { ChatMessageUser, ProductLinksSection } from '@/components/chat';
 import SubjectLineGeneratorInline from '../SubjectLineGeneratorInline';
+import { InlineArtifactCard } from './InlineArtifactCard';
 
 // Type for message versions (branches)
 export interface MessageVersion {
@@ -104,7 +106,11 @@ const ChatMessageModern = memo(function ChatMessageModern({
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null);
   const [showInlineCommentBox, setShowInlineCommentBox] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [savingAsEmail, setSavingAsEmail] = useState(false);
   const supabase = createClient();
+  
+  // Artifact context for saving emails
+  const artifactContext = useOptionalArtifactContext();
 
   // Ensure component is mounted for portal
   useEffect(() => {
@@ -268,6 +274,107 @@ const ChatMessageModern = memo(function ChatMessageModern({
       toast('👎 Feedback noted. Try regenerating for a better result.', { icon: '💡' });
     }
   }, [onReaction]);
+  
+  // Check if an artifact exists for this message
+  // Include artifacts array in dependency to re-compute when new artifacts are created
+  const existingArtifact = useMemo(() => {
+    if (!artifactContext || isUser) return null;
+    return artifactContext.findArtifactByMessageId(message.id);
+  }, [artifactContext, artifactContext?.artifacts, isUser, message.id]);
+
+  // Check if this message has artifact content (for streaming card)
+  const hasArtifactContent = useMemo(() => {
+    if (!artifactContext || isUser) return false;
+    return artifactContext.hasArtifactContent(messageContent);
+  }, [artifactContext, isUser, messageContent]);
+
+  // Determine if we should show artifact card instead of inline content
+  // Show card when: artifact exists OR content has artifact markers (version_a, etc.)
+  const shouldShowArtifactCard = useMemo(() => {
+    // During streaming, show streaming card if content has artifact markers
+    if (isStreaming && hasArtifactContent) return true;
+    // After streaming, show artifact card if artifact exists
+    if (existingArtifact) return true;
+    // Show card for content that has artifact markers (will auto-create artifact)
+    if (hasArtifactContent) return true;
+    return false;
+  }, [isStreaming, hasArtifactContent, existingArtifact]);
+  
+  // Check if this message has artifact content that can be saved (legacy - for manual save)
+  const artifactSuggestion = useMemo((): ArtifactSuggestion | null => {
+    if (!artifactContext || isUser || isStreaming) return null;
+    
+    // Check if an artifact already exists for this message
+    if (existingArtifact) return null;
+    
+    // Check pending suggestions
+    const pendingSuggestion = artifactContext.pendingSuggestions.get(message.id);
+    if (pendingSuggestion) return pendingSuggestion;
+    
+    // Check if content qualifies for suggestion
+    if (artifactContext.hasArtifactContent(messageContent)) {
+      return artifactContext.suggestArtifact(message.id, messageContent);
+    }
+    
+    return null;
+  }, [artifactContext, isUser, isStreaming, message.id, messageContent, existingArtifact]);
+  
+  // Check if there's an active artifact that could be updated (user is iterating on an email)
+  const canUpdateExistingArtifact = useMemo(() => {
+    if (!artifactContext || !artifactSuggestion) return false;
+    // If sidebar is open with an active artifact, user might want to update it
+    return artifactContext.activeArtifact !== null && artifactContext.isSidebarOpen;
+  }, [artifactContext, artifactSuggestion]);
+  
+  // Handle clicking the artifact card
+  const handleArtifactCardClick = useCallback(async () => {
+    if (!artifactContext) return;
+    
+    if (existingArtifact) {
+      // If artifact exists, focus it and open sidebar
+      artifactContext.focusArtifact(existingArtifact.id);
+    } else if (artifactSuggestion) {
+      // Auto-create artifact from suggestion and open sidebar
+      const artifact = await artifactContext.createArtifactFromSuggestion(artifactSuggestion);
+      if (artifact) {
+        artifactContext.focusArtifact(artifact.id);
+      }
+    } else {
+      // Just open sidebar
+      artifactContext.openSidebar();
+    }
+  }, [artifactContext, existingArtifact, artifactSuggestion]);
+  
+  // Handle saving as email artifact (create new or update existing)
+  const handleSaveAsEmail = useCallback(async (updateExisting = false) => {
+    if (!artifactSuggestion || !artifactContext) return;
+    
+    setSavingAsEmail(true);
+    try {
+      if (updateExisting && artifactContext.activeArtifact) {
+        // Add new version to existing artifact
+        await artifactContext.addVersion(
+          artifactContext.activeArtifact.id,
+          artifactSuggestion.content,
+          'Updated based on feedback'
+        );
+        // Remove the suggestion
+        artifactContext.dismissSuggestion(artifactSuggestion.messageId);
+        toast.success('✨ Email updated! New version added.');
+      } else {
+        // Create new artifact
+        const artifact = await artifactContext.createArtifactFromSuggestion(artifactSuggestion);
+        if (artifact) {
+          toast.success('✨ Email saved! View it in the sidebar.');
+        }
+      }
+    } catch (error) {
+      console.error('[ChatMessageModern] Failed to save as email:', error);
+      toast.error('Failed to save email');
+    } finally {
+      setSavingAsEmail(false);
+    }
+  }, [artifactSuggestion, artifactContext]);
 
   // For user messages, use the existing split component
   if (isUser) {
@@ -536,6 +643,16 @@ const ChatMessageModern = memo(function ChatMessageModern({
                 <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded w-full" />
                 <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded w-5/6" />
               </div>
+            </div>
+          ) : shouldShowArtifactCard ? (
+            /* Show artifact card instead of full email content - standard artifact pattern */
+            <div className="px-4 sm:px-6">
+              <InlineArtifactCard
+                artifact={existingArtifact || undefined}
+                isStreaming={isStreaming && hasArtifactContent}
+                streamingTitle="Email Copy"
+                onClick={handleArtifactCardClick}
+              />
             </div>
           ) : (
             <div className="px-4 sm:px-6">

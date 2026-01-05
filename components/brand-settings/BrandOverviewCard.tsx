@@ -15,7 +15,6 @@ import {
   ExternalLink,
   Sparkles,
   FolderOpen,
-  Mic,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -187,11 +186,11 @@ export default function BrandOverviewCard({ brand }: BrandOverviewCardProps) {
               Start Chat
             </Link>
             <Link
-              href={`/brands/${brand.id}/voice-builder`}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500/20 to-pink-500/20 hover:from-purple-500/30 hover:to-pink-500/30 rounded-lg text-sm font-medium transition-colors backdrop-blur-sm border border-purple-500/20"
+              href={`/brands/${brand.id}/brand-builder`}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 hover:from-indigo-500/30 hover:to-purple-500/30 rounded-lg text-sm font-medium transition-colors backdrop-blur-sm border border-indigo-500/20"
             >
-              <Mic className="w-4 h-4" />
-              Voice Builder
+              <Sparkles className="w-4 h-4" />
+              Brand Builder
             </Link>
           </div>
         </div>
@@ -249,6 +248,28 @@ export default function BrandOverviewCard({ brand }: BrandOverviewCardProps) {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

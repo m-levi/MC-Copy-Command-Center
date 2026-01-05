@@ -105,6 +105,23 @@ export const POST = withErrorHandling(async (req: NextRequest) => {
 
   const nextOrder = (maxOrder?.sort_order ?? -1) + 1;
 
+  // Validate slash_command if provided
+  const slashCommand = body.slash_command?.trim().toLowerCase().replace(/^\//, '').replace(/\s/g, '') || null;
+  
+  // Check for duplicate slash command for this user
+  if (slashCommand) {
+    const { data: existingCommand } = await supabase
+      .from('saved_prompts')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('slash_command', slashCommand)
+      .single();
+    
+    if (existingCommand) {
+      throw validationError(`Slash command "/${slashCommand}" is already in use`);
+    }
+  }
+
   // Create the prompt
   const { data: prompt, error } = await supabase
     .from('saved_prompts')
@@ -114,6 +131,7 @@ export const POST = withErrorHandling(async (req: NextRequest) => {
       description: body.description?.trim() || null,
       icon: body.icon || '💬',
       prompt: body.prompt.trim(),
+      slash_command: slashCommand,
       modes: body.modes || ['email_copy'],
       is_active: true,
       is_default: false,
@@ -129,4 +147,27 @@ export const POST = withErrorHandling(async (req: NextRequest) => {
 
   return NextResponse.json({ prompt }, { status: 201 });
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

@@ -458,11 +458,12 @@ export function buildDesignEmailV2Prompt(params: {
   websiteUrl?: string;
   brandName?: string;
   copyBrief: string;
+  ragContext?: string;
 }): {
   systemPrompt: string;
   userPrompt: string;
 } {
-  const { brandInfo, brandVoiceGuidelines, websiteUrl, brandName, copyBrief } = params;
+  const { brandInfo, brandVoiceGuidelines, websiteUrl, brandName, copyBrief, ragContext } = params;
 
   // Build system prompt with substitutions
   let systemPrompt = DESIGN_EMAIL_V2_SYSTEM_PROMPT
@@ -471,6 +472,11 @@ export function buildDesignEmailV2Prompt(params: {
     .replace(/{{BRAND_VOICE}}/g, brandVoiceGuidelines || 'No style guide provided.')
     .replace(/{{WEBSITE_URL}}/g, websiteUrl ? `Website: ${websiteUrl}` : '')
     .replace(/{{BRAND_NAME}}/g, brandName || 'the brand');
+
+  // Add RAG context if provided
+  if (ragContext) {
+    systemPrompt += `\n\n## RELEVANT CONTEXT FROM BRAND DOCUMENTS\n\n${ragContext}`;
+  }
 
   // Build user prompt
   const userPrompt = DESIGN_EMAIL_V2_USER_PROMPT

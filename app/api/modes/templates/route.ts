@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     ? (existingModes[0].sort_order || 0) + 1 
     : 0;
 
-  // Create mode from template with all configuration
+  // Create mode from template (simplified - just core fields)
   const { data, error } = await supabase
     .from('custom_modes')
     .insert({
@@ -78,15 +78,8 @@ export async function POST(request: Request) {
       is_active: true,
       is_default: false,
       sort_order: nextSortOrder,
-      // Enhanced configuration from template
-      base_mode: template.base_mode || 'create',
-      tools: template.tools || null,
-      context_sources: template.context_sources || null,
-      output_config: template.output_config || null,
-      category: template.category || null,
-      tags: template.tags || [],
     })
-    .select()
+    .select('id, user_id, name, description, icon, color, system_prompt, is_active, is_default, sort_order, created_at, updated_at')
     .single();
 
   if (error) {

@@ -3,12 +3,21 @@
 import React, { memo, useCallback, useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useArtifactContext, ArtifactTabView } from '@/contexts/ArtifactContext';
-import { ArtifactVariant, getArtifactKindConfig } from '@/types/artifacts';
+import { ArtifactVariant, ArtifactKind, getArtifactKindConfig, EmailArtifactWithContent, SpreadsheetColumn, SpreadsheetRow, ChecklistItem, CalendarSlot } from '@/types/artifacts';
 import { EmailArtifactView } from './EmailArtifactView';
+import { EmailBriefArtifactView } from './EmailBriefArtifactView';
+import { MarkdownArtifactView } from './MarkdownArtifactView';
+import { CodeArtifactView } from './CodeArtifactView';
+import { SpreadsheetArtifactView } from './SpreadsheetArtifactView';
+import { ChecklistArtifactView } from './ChecklistArtifactView';
+import { CalendarArtifactView } from './CalendarArtifactView';
+import { SubjectLinesArtifact, SubjectLineOption } from './SubjectLinesArtifact';
 import { ArtifactVersionHistory } from './ArtifactVersionHistory';
 import { ArtifactComments } from './ArtifactComments';
-import { 
-  XIcon, 
+import { GenerativeUIRenderer } from './GenerativeUIRenderer';
+import type { GenerativeUIBlock, GenerativeUIEvent } from '@/types/generative-ui';
+import {
+  XIcon,
   HistoryIcon,
   Share2Icon,
   ChevronDownIcon,
@@ -21,7 +30,20 @@ import {
   FileTextIcon,
   TypeIcon,
   FileEditIcon,
+  DownloadIcon,
+  FileIcon,
+  CodeIcon,
+  ClipboardCopyIcon,
+  ClipboardListIcon,
+  CopyIcon,
+  CalendarIcon,
 } from 'lucide-react';
+import {
+  exportAsMarkdown,
+  exportAsHtml,
+  exportAsPdf,
+  copyToClipboard,
+} from '@/lib/artifact-export';
 import toast from 'react-hot-toast';
 
 // =====================================================
@@ -38,18 +60,23 @@ const ARTIFACT_KIND_ICONS: Record<string, React.ComponentType<{ className?: stri
   template: FileTextIcon,
   subject_lines: TypeIcon,
   content_brief: FileEditIcon,
+  email_brief: ClipboardListIcon,
+  calendar: CalendarIcon,
 };
 
 interface ArtifactSidebarProps {
   className?: string;
   conversationId?: string;
   onQuoteText?: (text: string) => void;
+  /** Handler for generative UI actions that send messages to chat */
+  onSendMessage?: (message: string) => void;
 }
 
-export const ArtifactSidebar = memo(function ArtifactSidebar({ 
+export const ArtifactSidebar = memo(function ArtifactSidebar({
   className,
   conversationId,
   onQuoteText,
+  onSendMessage,
 }: ArtifactSidebarProps) {
   const {
     artifacts,
@@ -61,6 +88,7 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
     selectVariant,
     shareArtifact,
     deleteArtifact,
+    duplicateArtifact,
     activeTab,
     setActiveTab,
   } = useArtifactContext();
@@ -77,6 +105,7 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
 
   const KindIcon = ARTIFACT_KIND_ICONS[currentArtifactKind] || MailIcon;
   const [showArtifactPicker, setShowArtifactPicker] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [justShared, setJustShared] = useState(false);
   
@@ -107,11 +136,69 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
     }
   }, [activeArtifact, isSharing, shareArtifact]);
 
+  // Export handlers
+  const handleExportMarkdown = useCallback(async () => {
+    if (!activeArtifact) return;
+    setShowExportMenu(false);
+    await exportAsMarkdown(activeArtifact, activeArtifact.selected_variant || 'a');
+  }, [activeArtifact]);
+
+  const handleExportHtml = useCallback(async () => {
+    if (!activeArtifact) return;
+    setShowExportMenu(false);
+    await exportAsHtml(activeArtifact, activeArtifact.selected_variant || 'a');
+  }, [activeArtifact]);
+
+  const handleExportPdf = useCallback(async () => {
+    if (!activeArtifact) return;
+    setShowExportMenu(false);
+    await exportAsPdf(activeArtifact, activeArtifact.selected_variant || 'a');
+  }, [activeArtifact]);
+
+  const handleCopyToClipboard = useCallback(async () => {
+    if (!activeArtifact) return;
+    setShowExportMenu(false);
+    await copyToClipboard(activeArtifact, activeArtifact.selected_variant || 'a');
+  }, [activeArtifact]);
+
+  const handleDuplicate = useCallback(async () => {
+    if (!activeArtifact) return;
+    setShowExportMenu(false);
+    await duplicateArtifact(activeArtifact.id);
+  }, [activeArtifact, duplicateArtifact]);
+
   const handleVariantChange = useCallback((variant: ArtifactVariant) => {
     if (activeArtifact) {
       selectVariant(activeArtifact.id, variant);
     }
   }, [activeArtifact, selectVariant]);
+
+  // Handle generative UI actions
+  const handleGenerativeUIAction = useCallback((event: GenerativeUIEvent) => {
+    if (!onSendMessage) return;
+
+    const { action, value } = event;
+
+    if (action.type === 'send_message' && action.payload.message) {
+      // Replace placeholders in the message if needed
+      let message = action.payload.message;
+      if (value) {
+        if (Array.isArray(value)) {
+          message = message.replace('{{selected}}', value.join(', '));
+        } else {
+          message = message.replace('{{value}}', value);
+        }
+      }
+      onSendMessage(message);
+    }
+  }, [onSendMessage]);
+
+  // Extract generative UI blocks from artifact
+  // generative_ui is now a typed field on EmailArtifactWithContent
+  const generativeUIBlocks = useMemo<GenerativeUIBlock[]>(() => {
+    if (!activeArtifact) return [];
+    return activeArtifact.generative_ui || [];
+  }, [activeArtifact]);
 
   useEffect(() => {
     if (showArtifactPicker) {
@@ -120,6 +207,15 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
       return () => document.removeEventListener('click', handleClick);
     }
   }, [showArtifactPicker]);
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    if (showExportMenu) {
+      const handleClick = () => setShowExportMenu(false);
+      document.addEventListener('click', handleClick);
+      return () => document.removeEventListener('click', handleClick);
+    }
+  }, [showExportMenu]);
 
   const availableVariants = activeArtifact ? (['a', 'b', 'c'] as ArtifactVariant[]).filter(v => {
     if (v === 'a') return !!activeArtifact.version_a_content;
@@ -256,6 +352,65 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
           </div>
 
           <div className="flex items-center gap-1 flex-shrink-0">
+            {/* Export dropdown */}
+            {activeArtifact && (
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowExportMenu(!showExportMenu);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  title="Export"
+                >
+                  <DownloadIcon className="w-3.5 h-3.5" />
+                  Export
+                </button>
+
+                {showExportMenu && (
+                  <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50">
+                    <button
+                      onClick={handleCopyToClipboard}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <ClipboardCopyIcon className="w-4 h-4 text-gray-400" />
+                      Copy to clipboard
+                    </button>
+                    <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
+                    <button
+                      onClick={handleExportMarkdown}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <FileTextIcon className="w-4 h-4 text-gray-400" />
+                      Export as Markdown
+                    </button>
+                    <button
+                      onClick={handleExportHtml}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <CodeIcon className="w-4 h-4 text-gray-400" />
+                      Export as HTML
+                    </button>
+                    <button
+                      onClick={handleExportPdf}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <FileIcon className="w-4 h-4 text-gray-400" />
+                      Export as PDF
+                    </button>
+                    <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
+                    <button
+                      onClick={handleDuplicate}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <CopyIcon className="w-4 h-4 text-gray-400" />
+                      Duplicate artifact
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Only show share when we have an artifact and the kind supports sharing */}
             {activeArtifact && kindConfig.supportsSharing && (
               <button
@@ -281,7 +436,7 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
                 )}
               </button>
             )}
-            
+
             <button
               onClick={handleClose}
               className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -348,16 +503,34 @@ export const ArtifactSidebar = memo(function ArtifactSidebar({
             onClose={() => setActiveTab('content')}
           />
         ) : (
-          <EmailArtifactView
-            artifact={activeArtifact}
-            availableVariants={availableVariants}
-            selectedVariant={activeArtifact.selected_variant || 'a'}
-            onVariantChange={handleVariantChange}
-            isStreaming={streamingState.isStreaming}
-            streamingContent={streamingState.partialContent}
-            onCommentText={handleCommentText}
-            onQuoteText={onQuoteText}
-          />
+          <div className="flex flex-col h-full">
+            {/* Artifact content viewer based on kind */}
+            <div className="flex-1 overflow-y-auto">
+              <ArtifactContentViewer
+                artifact={activeArtifact}
+                availableVariants={availableVariants}
+                selectedVariant={activeArtifact.selected_variant || 'a'}
+                onVariantChange={handleVariantChange}
+                isStreaming={streamingState.isStreaming}
+                streamingContent={streamingState.partialContent}
+                onCommentText={handleCommentText}
+                onQuoteText={onQuoteText}
+              />
+            </div>
+
+            {/* Generative UI Footer */}
+            {generativeUIBlocks.length > 0 && (
+              <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-800 p-4 bg-gray-50 dark:bg-gray-800/50">
+                <GenerativeUIRenderer
+                  blocks={generativeUIBlocks}
+                  position="footer"
+                  onAction={handleGenerativeUIAction}
+                  disabled={streamingState.isStreaming}
+                  artifactId={activeArtifact.id}
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -400,6 +573,236 @@ function TabButton({
   );
 }
 
+// Renders the appropriate viewer based on artifact kind
+interface ArtifactContentViewerProps {
+  artifact: EmailArtifactWithContent;
+  availableVariants: ArtifactVariant[];
+  selectedVariant: ArtifactVariant;
+  onVariantChange: (variant: ArtifactVariant) => void;
+  isStreaming?: boolean;
+  streamingContent?: string;
+  onCommentText?: (text: string) => void;
+  onQuoteText?: (text: string) => void;
+}
+
+function ArtifactContentViewer({
+  artifact,
+  availableVariants,
+  selectedVariant,
+  onVariantChange,
+  isStreaming,
+  streamingContent,
+  onCommentText,
+  onQuoteText,
+}: ArtifactContentViewerProps) {
+  const kind = artifact.kind as ArtifactKind;
+
+  // Route to specialized viewers based on artifact kind
+  switch (kind) {
+    case 'markdown':
+      return (
+        <MarkdownArtifactView
+          content={artifact.content}
+          title={artifact.title}
+          isStreaming={isStreaming}
+        />
+      );
+
+    case 'code':
+      // Code artifact fields are now typed on EmailArtifactWithContent
+      return (
+        <CodeArtifactView
+          content={artifact.content}
+          title={artifact.title}
+          language={artifact.language || 'plaintext'}
+          filename={artifact.filename}
+          description={artifact.description}
+          isStreaming={isStreaming}
+        />
+      );
+
+    case 'spreadsheet':
+      // Spreadsheet fields are now typed on EmailArtifactWithContent
+      let columns: SpreadsheetColumn[] = artifact.columns || [];
+      let rows: SpreadsheetRow[] = artifact.rows || [];
+
+      // Fallback: parse from content if metadata is empty
+      if (columns.length === 0 && artifact.content) {
+        try {
+          const parsed = JSON.parse(artifact.content);
+          columns = parsed.columns || [];
+          rows = parsed.rows || [];
+        } catch {
+          // Parse as CSV
+          const lines = artifact.content.split('\n').filter(l => l.trim());
+          if (lines.length > 0) {
+            const headers = lines[0].split(',').map(h => h.trim());
+            columns = headers.map((h, i): SpreadsheetColumn => ({ id: `col-${i}`, name: h }));
+            rows = lines.slice(1).map((line, rowIdx): SpreadsheetRow => {
+              const cells: Record<string, string> = {};
+              line.split(',').forEach((val, colIdx) => {
+                cells[`col-${colIdx}`] = val.trim();
+              });
+              return { id: `row-${rowIdx}`, cells };
+            });
+          }
+        }
+      }
+      return (
+        <SpreadsheetArtifactView
+          columns={columns}
+          rows={rows}
+          title={artifact.title}
+          isStreaming={isStreaming}
+        />
+      );
+
+    case 'checklist':
+      // Checklist fields are now typed on EmailArtifactWithContent
+      let checklistItems: ChecklistItem[] = artifact.items || [];
+
+      // Fallback: parse from content if items are empty
+      if (checklistItems.length === 0 && artifact.content) {
+        try {
+          const parsed = JSON.parse(artifact.content);
+          checklistItems = Array.isArray(parsed) ? parsed : (parsed.items || []);
+        } catch {
+          // Parse markdown-style checklist
+          const lines = artifact.content.split('\n').filter(l => l.trim());
+          checklistItems = lines.map((line, idx): ChecklistItem => {
+            const checked = /^\s*-\s*\[x\]/i.test(line);
+            const text = line.replace(/^\s*-\s*\[[ x]?\]\s*/i, '').trim();
+            return { id: `item-${idx}`, text, checked };
+          });
+        }
+      }
+      return (
+        <ChecklistArtifactView
+          items={checklistItems}
+          title={artifact.title}
+          isStreaming={isStreaming}
+        />
+      );
+
+    case 'subject_lines':
+      // Parse subject line options from content
+      let subjectLineOptions: SubjectLineOption[] = [];
+      try {
+        if (artifact.content) {
+          const parsed = JSON.parse(artifact.content);
+          subjectLineOptions = Array.isArray(parsed) ? parsed : (parsed.options || []);
+        }
+      } catch {
+        // Parse from simple line format
+        const lines = artifact.content.split('\n').filter(l => l.trim());
+        subjectLineOptions = lines.map(line => ({ subject: line.trim() }));
+      }
+      return (
+        <SubjectLinesArtifact
+          options={subjectLineOptions}
+        />
+      );
+
+    case 'email_brief':
+      // Email brief artifact with approval workflow
+      // Use flattened fields from EmailArtifactWithContent
+      return (
+        <EmailBriefArtifactView
+          artifact={{
+            id: artifact.id,
+            title: artifact.title,
+            content: artifact.content,
+            metadata: {
+              campaign_type: artifact.campaign_type,
+              send_date: artifact.send_date,
+              target_segment: artifact.target_segment,
+              objective: artifact.objective,
+              key_message: artifact.key_message,
+              value_proposition: artifact.value_proposition,
+              product_ids: artifact.product_ids,
+              call_to_action: artifact.call_to_action,
+              subject_line_direction: artifact.subject_line_direction,
+              tone_notes: artifact.tone_notes,
+              content_guidelines: artifact.content_guidelines,
+              approval_status: artifact.approval_status || 'draft',
+              approved_by: artifact.approved_by,
+              approved_at: artifact.approved_at,
+              rejection_notes: artifact.rejection_notes,
+              calendar_artifact_id: artifact.calendar_artifact_id,
+            },
+          }}
+          isStreaming={isStreaming}
+          // TODO: Wire up approval handlers
+          // onApprove={...}
+          // onReject={...}
+          // onCreateEmail={...}
+        />
+      );
+
+    case 'calendar':
+      // Calendar artifact - visual email marketing calendar
+      // Parse calendar data from metadata or content
+      let calendarSlots: CalendarSlot[] = [];
+      let calendarMonth = '';
+
+      // Try to get from metadata first (stored via artifact.metadata)
+      const metadata = (artifact as unknown as { metadata?: { slots?: CalendarSlot[]; month?: string } }).metadata;
+      if (metadata?.slots && Array.isArray(metadata.slots)) {
+        calendarSlots = metadata.slots;
+        calendarMonth = metadata.month || '';
+      }
+
+      // Fallback: try to parse from content (JSON)
+      if (calendarSlots.length === 0 && artifact.content) {
+        try {
+          const parsed = JSON.parse(artifact.content);
+          calendarSlots = parsed.slots || parsed.calendar_slots || [];
+          calendarMonth = parsed.month || parsed.calendar_month || '';
+        } catch {
+          // Content is not JSON - use text content as description
+        }
+      }
+
+      // Default month to current if not set
+      if (!calendarMonth) {
+        const now = new Date();
+        calendarMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      }
+
+      return (
+        <CalendarArtifactView
+          slots={calendarSlots}
+          month={calendarMonth}
+          title={artifact.title}
+          isStreaming={isStreaming}
+          // TODO: Wire up slot click and email creation handlers
+          // onSlotClick={...}
+          // onCreateEmail={...}
+        />
+      );
+
+    // Default: email and other email-like artifacts
+    case 'email':
+    case 'flow':
+    case 'campaign':
+    case 'template':
+    case 'content_brief':
+    default:
+      return (
+        <EmailArtifactView
+          artifact={artifact}
+          availableVariants={availableVariants}
+          selectedVariant={selectedVariant}
+          onVariantChange={onVariantChange}
+          isStreaming={isStreaming}
+          streamingContent={streamingContent}
+          onCommentText={onCommentText}
+          onQuoteText={onQuoteText}
+        />
+      );
+  }
+}
+
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 text-center">
@@ -409,7 +812,7 @@ function EmptyState() {
         </svg>
       </div>
       <p className="text-sm text-gray-500 dark:text-gray-400">
-        No email selected
+        No artifact selected
       </p>
     </div>
   );
@@ -661,6 +1064,13 @@ function StreamingEmailView({ content }: { content: string }) {
 }
 
 export default ArtifactSidebar;
+
+
+
+
+
+
+
 
 
 

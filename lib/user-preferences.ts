@@ -209,9 +209,139 @@ export function getDefaultPreferences(userId: string): UserPreferences {
     default_filter: 'all',
     pinned_conversations: [],
     archived_conversations: [],
+    enabled_models: null, // null means all models enabled
+    default_model: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
+}
+
+/**
+ * Update enabled AI models
+ */
+export async function updateEnabledModels(
+  userId: string,
+  enabledModels: string[]
+): Promise<boolean> {
+  const result = await upsertUserPreferences(userId, { enabled_models: enabledModels });
+  return result !== null;
+}
+
+/**
+ * Update default AI model
+ */
+export async function updateDefaultModel(
+  userId: string,
+  modelId: string | null
+): Promise<boolean> {
+  const result = await upsertUserPreferences(userId, { default_model: modelId });
+  return result !== null;
+}
+
+// ============================================================================
+// ARTIFACT PREFERENCES
+// ============================================================================
+
+/**
+ * Artifact preferences structure
+ */
+export interface ArtifactPreferences {
+  /** List of artifact types the user has disabled */
+  disabledArtifactTypes: string[];
+  /** Whether AI should auto-create artifacts */
+  artifactAutoCreate: boolean;
+  /** Whether to show artifact suggestions */
+  artifactSuggestionsEnabled: boolean;
+}
+
+/**
+ * Get artifact-specific preferences for a user
+ */
+export async function getArtifactPreferences(userId: string): Promise<ArtifactPreferences> {
+  const prefs = await getUserPreferences(userId);
+
+  return {
+    disabledArtifactTypes: (prefs as unknown as Record<string, unknown>)?.disabled_artifact_types as string[] || [],
+    artifactAutoCreate: (prefs as unknown as Record<string, unknown>)?.artifact_auto_create !== false,
+    artifactSuggestionsEnabled: (prefs as unknown as Record<string, unknown>)?.artifact_suggestions_enabled !== false,
+  };
+}
+
+/**
+ * Update artifact preferences
+ */
+export async function updateArtifactPreferences(
+  userId: string,
+  preferences: Partial<ArtifactPreferences>
+): Promise<boolean> {
+  const updates: Record<string, unknown> = {};
+
+  if (preferences.disabledArtifactTypes !== undefined) {
+    updates.disabled_artifact_types = preferences.disabledArtifactTypes;
+  }
+  if (preferences.artifactAutoCreate !== undefined) {
+    updates.artifact_auto_create = preferences.artifactAutoCreate;
+  }
+  if (preferences.artifactSuggestionsEnabled !== undefined) {
+    updates.artifact_suggestions_enabled = preferences.artifactSuggestionsEnabled;
+  }
+
+  const result = await upsertUserPreferences(userId, updates);
+  return result !== null;
+}
+
+/**
+ * Check if a specific artifact type is enabled for a user
+ */
+export function isArtifactTypeEnabled(
+  kind: string,
+  preferences: ArtifactPreferences
+): boolean {
+  return !preferences.disabledArtifactTypes.includes(kind);
+}
+
+/**
+ * Toggle an artifact type (enable/disable)
+ */
+export async function toggleArtifactType(
+  userId: string,
+  kind: string,
+  enabled: boolean
+): Promise<boolean> {
+  const prefs = await getArtifactPreferences(userId);
+  let disabledTypes = [...prefs.disabledArtifactTypes];
+
+  if (enabled) {
+    // Remove from disabled list
+    disabledTypes = disabledTypes.filter(t => t !== kind);
+  } else {
+    // Add to disabled list
+    if (!disabledTypes.includes(kind)) {
+      disabledTypes.push(kind);
+    }
+  }
+
+  return updateArtifactPreferences(userId, { disabledArtifactTypes: disabledTypes });
+}
+
+/**
+ * Set artifact auto-create preference
+ */
+export async function setArtifactAutoCreate(
+  userId: string,
+  autoCreate: boolean
+): Promise<boolean> {
+  return updateArtifactPreferences(userId, { artifactAutoCreate: autoCreate });
+}
+
+/**
+ * Set artifact suggestions preference
+ */
+export async function setArtifactSuggestionsEnabled(
+  userId: string,
+  enabled: boolean
+): Promise<boolean> {
+  return updateArtifactPreferences(userId, { artifactSuggestionsEnabled: enabled });
 }
 
 

@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { AIReasoning } from './chat/AIReasoning';
 import InlineCommentBox from './InlineCommentBox';
 import { ChatMessageUser, ChatMessageActions, ProductLinksSection, EmailVersionRenderer, StructuredEmailRenderer, isStructuredEmailCopy, QuickActionChips } from './chat';
+import { ImageGenerationResult } from './chat/ImageGenerationResult';
 // Note: FlowUIRenderer temporarily removed - needs reconnection when flow feature is re-enabled
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
@@ -15,7 +16,11 @@ import { hasFlowMarkers, FlowPlan } from '@/lib/flow-ui-parser';
 import { hasEmailVersionMarkers } from '@/lib/email-version-parser';
 import { logger } from '@/lib/logger';
 import { visit } from 'unist-util-visit';
-import { useOptionalArtifactContext } from '@/contexts/ArtifactContext';
+import { useOptionalArtifactContext, ArtifactSuggestion } from '@/contexts/ArtifactContext';
+import { Sparkles, RefreshCwIcon } from 'lucide-react';
+import { AIActionsDisplay, PendingAction, SuggestedAction } from './chat/AIActionButtons';
+import { ConversationPlanCard, ConversationPlan } from './chat/ConversationPlanCard';
+import { InlineArtifactCard } from './chat/InlineArtifactCard';
 
 interface ChatMessageProps {
   message: Message;
@@ -46,6 +51,25 @@ interface ChatMessageProps {
   isGrouped?: boolean;
   // Quick action prompts - send a prompt to continue the conversation
   onSendPrompt?: (prompt: string) => void;
+  // AI Tool Actions
+  pendingActions?: PendingAction[];
+  suggestedActions?: SuggestedAction[];
+  conversationPlans?: ConversationPlan[];
+  agentInvocations?: Array<{
+    id: string;
+    agent_id: string;
+    agent_name: string;
+    agent_icon: string;
+    task: string;
+    status: 'invoking' | 'completed' | 'failed';
+    response?: string;
+    duration_ms?: number;
+  }>;
+  onApprovePendingAction?: (action: PendingAction) => Promise<void>;
+  onRejectPendingAction?: (action: PendingAction) => void;
+  onSuggestedActionClick?: (action: SuggestedAction) => void;
+  onApproveConversationPlan?: (plan: ConversationPlan) => Promise<void>;
+  onRejectConversationPlan?: (plan: ConversationPlan) => void;
 }
 
 // Memoized component to prevent unnecessary re-renders
@@ -159,6 +183,16 @@ const ChatMessage = memo(function ChatMessage({
   isGrouped = false,
   // Quick action prompts
   onSendPrompt,
+  // AI Tool Actions
+  pendingActions = [],
+  suggestedActions = [],
+  conversationPlans = [],
+  agentInvocations = [],
+  onApprovePendingAction,
+  onRejectPendingAction,
+  onSuggestedActionClick,
+  onApproveConversationPlan,
+  onRejectConversationPlan,
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState<'thumbs_up' | 'thumbs_down' | null>(null);
@@ -169,10 +203,39 @@ const ChatMessage = memo(function ChatMessage({
   const [showInlineCommentBox, setShowInlineCommentBox] = useState(false);
   const [forceRender, setForceRender] = useState(0); // Force re-render
   const [isMounted, setIsMounted] = useState(false);
+  const [isSavingArtifact, setIsSavingArtifact] = useState(false);
   const supabase = createClient();
   
   // Use artifact context to open comments panel in artifact sidebar
   const artifactContext = useOptionalArtifactContext();
+  
+  // Get pending artifact suggestion for this message
+  // Note: We access pendingSuggestions.size to ensure reactivity when the Map changes
+  const pendingSuggestionsSize = artifactContext?.pendingSuggestions?.size ?? 0;
+  const pendingSuggestion = useMemo(() => {
+    if (!artifactContext || message.role !== 'assistant') return null;
+    return artifactContext.pendingSuggestions.get(message.id) || null;
+  }, [artifactContext, message.id, message.role, pendingSuggestionsSize]);
+  
+  // Handler to save artifact from suggestion
+  const handleSaveArtifact = useCallback(async () => {
+    if (!artifactContext || !pendingSuggestion) return;
+    
+    setIsSavingArtifact(true);
+    try {
+      const artifact = await artifactContext.createArtifactFromSuggestion(pendingSuggestion);
+      if (artifact) {
+        toast.success('Email saved as artifact!');
+      } else {
+        toast.error('Failed to save artifact');
+      }
+    } catch (error) {
+      console.error('Error saving artifact:', error);
+      toast.error('Failed to save artifact');
+    } finally {
+      setIsSavingArtifact(false);
+    }
+  }, [artifactContext, pendingSuggestion]);
   
   // Handler for opening comments - uses artifact sidebar if available, falls back to onCommentClick
   const handleOpenComments = useCallback((highlightedText?: string) => {
@@ -183,6 +246,49 @@ const ChatMessage = memo(function ChatMessage({
     // Also call the prop handler if provided (for things like reloading comment counts)
     onCommentClick?.(highlightedText);
   }, [artifactContext, onCommentClick]);
+  
+  // Check if an artifact exists for this message
+  const artifactsArray = artifactContext?.artifacts;
+  const existingArtifact = useMemo(() => {
+    if (!artifactContext || message.role !== 'assistant') return null;
+    return artifactContext.findArtifactByMessageId(message.id);
+  }, [artifactContext, message.id, message.role, artifactsArray]);
+
+  // Check if content has artifact markers (email versions, structured email)
+  const hasArtifactContent = useMemo(() => {
+    if (!artifactContext || message.role !== 'assistant') return false;
+    return artifactContext.hasArtifactContent(message.content || '');
+  }, [artifactContext, message.content, message.role]);
+
+  // Standard artifact pattern: show card instead of inline content
+  const shouldShowArtifactCard = useMemo(() => {
+    // During streaming, show streaming card if content has artifact markers
+    if (isStreaming && hasArtifactContent) return true;
+    // After streaming, show artifact card if artifact exists
+    if (existingArtifact) return true;
+    // Show card for content that has artifact markers (will auto-create artifact)
+    if (hasArtifactContent) return true;
+    return false;
+  }, [isStreaming, hasArtifactContent, existingArtifact]);
+
+  // Handle clicking the artifact card
+  const handleArtifactCardClick = useCallback(async () => {
+    if (!artifactContext) return;
+    
+    if (existingArtifact) {
+      // If artifact exists, focus it and open sidebar
+      artifactContext.focusArtifact(existingArtifact.id);
+    } else if (pendingSuggestion) {
+      // Auto-create artifact from suggestion and open sidebar
+      const artifact = await artifactContext.createArtifactFromSuggestion(pendingSuggestion);
+      if (artifact) {
+        artifactContext.focusArtifact(artifact.id);
+      }
+    } else {
+      // Just open sidebar
+      artifactContext.openSidebar();
+    }
+  }, [artifactContext, existingArtifact, pendingSuggestion]);
   
   // Ensure component is mounted for portal
   useEffect(() => {
@@ -200,6 +306,9 @@ const ChatMessage = memo(function ChatMessage({
   const isFlowMode = mode === 'flow';
   const responseType = message.metadata?.responseType || (isEmailMode ? 'email_copy' : 'other');
   const productLinks = message.metadata?.productLinks || [];
+  const generatedImages = message.metadata?.generatedImages || [];
+  const imageModel = message.metadata?.imageModel;
+  const imagePrompt = message.metadata?.imagePrompt;
   const canStar = responseType === 'email_copy';
   const messageContent = message.content ?? '';
   const showEmailPreview = responseType === 'email_copy' && !!messageContent;
@@ -777,14 +886,44 @@ const ChatMessage = memo(function ChatMessage({
           {(
             <div onMouseUp={handleTextSelection}>
               {/* AI Reasoning - Show thinking/reasoning content with AI Elements */}
-              {(message.thinking || isStreaming) && (
+              {(message.thinking || isStreaming || agentInvocations.length > 0) && (
                 <div className="px-4 sm:px-6 mb-4">
-                  <AIReasoning 
-                    thinking={message.thinking} 
+                  <AIReasoning
+                    thinking={message.thinking}
                     isStreaming={isStreaming}
                     aiStatus={aiStatus}
                     defaultOpen={isStreaming}
+                    agentInvocations={agentInvocations}
                   />
+                </div>
+              )}
+
+              {/* Save as Artifact Banner - Show at TOP when email content is detected */}
+              {pendingSuggestion && !isStreaming && (
+                <div className="mx-4 sm:mx-6 mb-4 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/30 dark:to-purple-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg animate-in slide-in-from-top-2 duration-300">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm text-indigo-700 dark:text-indigo-300">
+                      <Sparkles className="w-4 h-4" />
+                      <span>Email content detected</span>
+                    </div>
+                    <button
+                      onClick={handleSaveArtifact}
+                      disabled={isSavingArtifact}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSavingArtifact ? (
+                        <>
+                          <RefreshCwIcon className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Save as Draft</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -796,6 +935,30 @@ const ChatMessage = memo(function ChatMessage({
                     <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded w-full"></div>
                     <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded w-5/6"></div>
                   </div>
+                </div>
+              ) : shouldShowArtifactCard ? (
+                /* Show compact artifact card instead of full content */
+                <div className="px-4 sm:px-6">
+                  {existingArtifact ? (
+                    <InlineArtifactCard
+                      artifact={existingArtifact}
+                      onClick={() => {
+                        if (artifactContext && existingArtifact?.id) {
+                          artifactContext.focusArtifact(existingArtifact.id);
+                        }
+                      }}
+                    />
+                  ) : isStreaming && hasArtifactContent ? (
+                    <InlineArtifactCard
+                      isStreaming={true}
+                      streamingTitle="Email Copy"
+                      onClick={() => {
+                        if (artifactContext) {
+                          artifactContext.openSidebar();
+                        }
+                      }}
+                    />
+                  ) : null}
                 </div>
               ) : (
                 <div className="px-4 sm:px-6">
@@ -909,6 +1072,48 @@ const ChatMessage = memo(function ChatMessage({
                   {/* Product Links Section - Using split component */}
                   <ProductLinksSection productLinks={productLinks} />
 
+                  {/* Generated Images Section */}
+                  {generatedImages.length > 0 && (
+                    <div className="px-4 sm:px-6 pt-4">
+                      <ImageGenerationResult
+                        images={generatedImages}
+                        prompt={imagePrompt || ''}
+                        model={imageModel || 'unknown'}
+                        onDownload={(index) => {
+                          logger.log('Download image:', index);
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* AI Tool Actions - Pending actions and suggested buttons */}
+                  {!isUser && !isStreaming && (pendingActions.length > 0 || suggestedActions.length > 0) && (
+                    <div className="px-4 sm:px-6 pt-3">
+                      <AIActionsDisplay
+                        pendingActions={pendingActions}
+                        suggestedActions={suggestedActions}
+                        messageId={message.id}
+                        onApprovePending={onApprovePendingAction || (async () => {})}
+                        onRejectPending={onRejectPendingAction || (() => {})}
+                        onSuggestedClick={onSuggestedActionClick || (() => {})}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Conversation Plans - AI proposed structure for creating multiple conversations */}
+                  {!isUser && !isStreaming && conversationPlans.length > 0 && (
+                    <div className="px-4 sm:px-6 pt-3">
+                      {conversationPlans.map((plan) => (
+                        <ConversationPlanCard
+                          key={plan.id}
+                          plan={plan}
+                          onApprove={onApproveConversationPlan || (async () => {})}
+                          onReject={onRejectConversationPlan || (() => {})}
+                        />
+                      ))}
+                    </div>
+                  )}
+
                   {/* Quick Action Chips - Show quick prompts for AI messages */}
                   {!isUser && onSendPrompt && !isStreaming && (
                     <div className="px-4 sm:px-6 pt-3 pb-1">
@@ -920,6 +1125,7 @@ const ChatMessage = memo(function ChatMessage({
                       />
                     </div>
                   )}
+                  
                   </div>
                   </div>
                 </div>

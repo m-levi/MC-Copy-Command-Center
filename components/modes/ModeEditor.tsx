@@ -2,19 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { 
-  CustomMode, ModeColor, ModeVersion, MODE_COLOR_META, MODE_ICONS,
-  ModeBaseType, ModeToolsConfig, ModeContextConfig, ModeOutputConfig, ModeModelConfig,
-  ModeCategory, ModeOutputType, ModeEmailFormat,
-  DEFAULT_MODE_TOOLS, DEFAULT_MODE_CONTEXT, DEFAULT_MODE_OUTPUT, DEFAULT_MODE_MODEL
+import { logger } from '@/lib/logger';
+import {
+  CustomMode, ModeColor, ModeVersion, MODE_COLOR_META, MODE_ICONS, ModeToolConfig, DEFAULT_MODE_TOOL_CONFIG, AgentType
 } from '@/types';
-import { AI_MODELS } from '@/lib/ai-models';
 import { 
-  Sparkles, Wand2, FileText, Settings, Cpu, Zap,
-  Globe, Brain, ShoppingBag, Image, Code, Database,
-  MessageSquare, FileCode, Mail, BarChart3, 
-  ChevronDown, Check, X, History, Copy, Eye, EyeOff,
-  Tag, Folder, Share2, Users
+  Sparkles, FileText, X, History, Check, Wrench, Search, Brain, Image, ShoppingBag, MessageSquare, Zap, Bot, Users, Network
 } from 'lucide-react';
 
 interface ModeEditorProps {
@@ -23,15 +16,43 @@ interface ModeEditorProps {
   onSave: () => void;
 }
 
-type EditorTab = 'basics' | 'prompt' | 'tools' | 'context' | 'output' | 'model';
+type EditorTab = 'basics' | 'prompt' | 'tools' | 'agents';
 
 const TABS: { id: EditorTab; label: string; icon: React.ElementType }[] = [
   { id: 'basics', label: 'Basics', icon: Sparkles },
   { id: 'prompt', label: 'Prompt', icon: FileText },
-  { id: 'tools', label: 'Tools', icon: Wand2 },
-  { id: 'context', label: 'Context', icon: Database },
-  { id: 'output', label: 'Output', icon: FileCode },
-  { id: 'model', label: 'Model', icon: Cpu },
+  { id: 'tools', label: 'Tools', icon: Wrench },
+  { id: 'agents', label: 'Agent Config', icon: Bot },
+];
+
+const AGENT_TYPES: { value: AgentType; label: string; description: string; icon: React.ElementType }[] = [
+  { 
+    value: 'specialist', 
+    label: 'Specialist', 
+    description: 'Focused on a specific task, like writing emails or planning calendars',
+    icon: Bot
+  },
+  { 
+    value: 'orchestrator', 
+    label: 'Orchestrator', 
+    description: 'Routes requests to other specialist agents',
+    icon: Network
+  },
+  { 
+    value: 'hybrid', 
+    label: 'Hybrid', 
+    description: 'Can both perform tasks and invoke other agents',
+    icon: Users
+  },
+];
+
+// Available specialists that can be invoked
+const AVAILABLE_SPECIALISTS = [
+  { id: 'email_writer', name: 'Email Writer', description: 'Creates email copy' },
+  { id: 'subject_line_expert', name: 'Subject Line Expert', description: 'Generates subject lines' },
+  { id: 'calendar_planner', name: 'Calendar Planner', description: 'Plans marketing calendars' },
+  { id: 'flow_architect', name: 'Flow Architect', description: 'Designs automation flows' },
+  { id: 'research_analyst', name: 'Research Analyst', description: 'Researches topics' },
 ];
 
 const PROMPT_VARIABLES = [
@@ -45,44 +66,18 @@ const PROMPT_VARIABLES = [
 
 const COLORS: ModeColor[] = ['blue', 'purple', 'pink', 'green', 'yellow', 'red', 'indigo', 'cyan', 'orange', 'gray'];
 
-const CATEGORIES: { id: ModeCategory; label: string; icon: React.ElementType }[] = [
-  { id: 'email', label: 'Email', icon: Mail },
-  { id: 'research', label: 'Research', icon: Globe },
-  { id: 'brand', label: 'Brand', icon: Tag },
-  { id: 'product', label: 'Product', icon: ShoppingBag },
-  { id: 'strategy', label: 'Strategy', icon: BarChart3 },
-  { id: 'custom', label: 'Custom', icon: Settings },
-];
-
-const BASE_MODES: { id: ModeBaseType; label: string; description: string }[] = [
-  { id: 'chat', label: 'Chat', description: 'Conversational, back-and-forth dialogue' },
-  { id: 'create', label: 'Create', description: 'Generate content, copy, or documents' },
-  { id: 'analyze', label: 'Analyze', description: 'Research, analyze, and synthesize information' },
-];
-
-const OUTPUT_TYPES: { id: ModeOutputType; label: string; description: string }[] = [
-  { id: 'freeform', label: 'Freeform', description: 'Natural conversational responses' },
-  { id: 'structured', label: 'Structured', description: 'Organized with sections/bullets' },
-  { id: 'email', label: 'Email', description: 'Formatted email content' },
-  { id: 'analysis', label: 'Analysis', description: 'Detailed research/analysis format' },
-  { id: 'code', label: 'Code', description: 'Code and technical output' },
-];
-
 interface FormState {
   name: string;
   description: string;
   icon: string;
   color: ModeColor;
   system_prompt: string;
-  base_mode: ModeBaseType;
-  tools: ModeToolsConfig;
-  context_sources: ModeContextConfig;
-  output_config: ModeOutputConfig;
-  model_config: ModeModelConfig;
-  category: ModeCategory;
-  tags: string[];
   is_active: boolean;
-  is_shared: boolean;
+  enabled_tools: ModeToolConfig;
+  // Agent-specific fields
+  is_agent_enabled: boolean;
+  agent_type: AgentType;
+  can_invoke_agents: string[];
 }
 
 export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
@@ -93,15 +88,11 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
     icon: '💬',
     color: 'blue',
     system_prompt: '',
-    base_mode: 'create',
-    tools: { ...DEFAULT_MODE_TOOLS },
-    context_sources: { ...DEFAULT_MODE_CONTEXT },
-    output_config: { ...DEFAULT_MODE_OUTPUT },
-    model_config: { ...DEFAULT_MODE_MODEL },
-    category: null,
-    tags: [],
     is_active: true,
-    is_shared: false,
+    enabled_tools: { ...DEFAULT_MODE_TOOL_CONFIG },
+    is_agent_enabled: true,
+    agent_type: 'specialist',
+    can_invoke_agents: [],
   });
   
   const [saving, setSaving] = useState(false);
@@ -110,7 +101,6 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
   const [versions, setVersions] = useState<ModeVersion[]>([]);
   const [showVersions, setShowVersions] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
-  const [newTag, setNewTag] = useState('');
   
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const isEditing = mode !== null;
@@ -123,15 +113,11 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
         icon: mode.icon,
         color: mode.color,
         system_prompt: mode.system_prompt,
-        base_mode: mode.base_mode || 'create',
-        tools: mode.tools || { ...DEFAULT_MODE_TOOLS },
-        context_sources: mode.context_sources || { ...DEFAULT_MODE_CONTEXT },
-        output_config: mode.output_config || { ...DEFAULT_MODE_OUTPUT },
-        model_config: mode.model_config || { ...DEFAULT_MODE_MODEL },
-        category: mode.category || null,
-        tags: mode.tags || [],
         is_active: mode.is_active,
-        is_shared: mode.is_shared || false,
+        enabled_tools: mode.enabled_tools || { ...DEFAULT_MODE_TOOL_CONFIG },
+        is_agent_enabled: mode.is_agent_enabled ?? true,
+        agent_type: mode.agent_type || 'specialist',
+        can_invoke_agents: mode.can_invoke_agents || [],
       });
     }
   }, [mode]);
@@ -146,7 +132,7 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
         setVersions(data);
       }
     } catch (error) {
-      console.error('Error loading versions:', error);
+      logger.error('Error loading versions:', error);
     } finally {
       setLoadingVersions(false);
     }
@@ -177,29 +163,13 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
       toast.success('Version restored');
       loadVersions();
     } catch (error) {
-      console.error('Error restoring version:', error);
+      logger.error('Error restoring version:', error);
       toast.error('Failed to restore version');
     }
   };
 
   const updateForm = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm(prev => ({ ...prev, [field]: value }));
-  };
-
-  const updateTools = (key: keyof ModeToolsConfig, value: boolean) => {
-    setForm(prev => ({ ...prev, tools: { ...prev.tools, [key]: value } }));
-  };
-
-  const updateContext = (key: keyof ModeContextConfig, value: boolean | string[]) => {
-    setForm(prev => ({ ...prev, context_sources: { ...prev.context_sources, [key]: value } }));
-  };
-
-  const updateOutput = <K extends keyof ModeOutputConfig>(key: K, value: ModeOutputConfig[K]) => {
-    setForm(prev => ({ ...prev, output_config: { ...prev.output_config, [key]: value } }));
-  };
-
-  const updateModel = <K extends keyof ModeModelConfig>(key: K, value: ModeModelConfig[K]) => {
-    setForm(prev => ({ ...prev, model_config: { ...prev.model_config, [key]: value } }));
   };
 
   const insertVariable = (variable: string) => {
@@ -219,18 +189,6 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
     } else {
       updateForm('system_prompt', form.system_prompt + variable);
     }
-  };
-
-  const addTag = () => {
-    const tag = newTag.trim().toLowerCase();
-    if (tag && !form.tags.includes(tag)) {
-      updateForm('tags', [...form.tags, tag]);
-      setNewTag('');
-    }
-  };
-
-  const removeTag = (tag: string) => {
-    updateForm('tags', form.tags.filter(t => t !== tag));
   };
 
   const handleSave = async () => {
@@ -258,14 +216,14 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || 'Failed to save mode');
+        throw new Error(data.error || 'Failed to save agent');
       }
 
-      toast.success(isEditing ? 'Mode updated' : 'Mode created');
+      toast.success(isEditing ? 'Agent updated' : 'Agent created');
       onSave();
     } catch (error: unknown) {
-      console.error('Error saving mode:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to save mode');
+      logger.error('Error saving agent:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to save agent');
     } finally {
       setSaving(false);
     }
@@ -283,14 +241,14 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
       <div className="grid grid-cols-1 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-            Mode Name <span className="text-red-500">*</span>
+            Agent Name <span className="text-red-500">*</span>
           </label>
           <input
             type="text"
             value={form.name}
             onChange={(e) => updateForm('name', e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
-            placeholder="e.g. Email Copywriter, Research Assistant"
+            placeholder="e.g. Email Writer, Calendar Planner, Research Assistant"
             maxLength={100}
           />
         </div>
@@ -367,103 +325,7 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
         </div>
       </div>
 
-      {/* Category */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Category
-        </label>
-        <div className="grid grid-cols-3 gap-2">
-          {CATEGORIES.map((cat) => {
-            const Icon = cat.icon;
-            const isSelected = form.category === cat.id;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => updateForm('category', isSelected ? null : cat.id)}
-                className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-all text-sm ${
-                  isSelected
-                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {cat.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Tags */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Tags
-        </label>
-        <div className="flex flex-wrap gap-2 mb-2">
-          {form.tags.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full text-xs"
-            >
-              {tag}
-              <button
-                onClick={() => removeTag(tag)}
-                className="hover:text-red-500 transition-colors"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={newTag}
-            onChange={(e) => setNewTag(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
-            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
-            placeholder="Add a tag..."
-          />
-          <button
-            onClick={addTag}
-            className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
-          >
-            Add
-          </button>
-        </div>
-      </div>
-
-      {/* Base Mode */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Base Behavior
-        </label>
-        <div className="grid grid-cols-3 gap-3">
-          {BASE_MODES.map((base) => {
-            const isSelected = form.base_mode === base.id;
-            return (
-              <button
-                key={base.id}
-                onClick={() => updateForm('base_mode', base.id)}
-                className={`p-3 rounded-lg border text-left transition-all ${
-                  isSelected
-                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                }`}
-              >
-                <div className={`font-medium text-sm ${isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-900 dark:text-gray-100'}`}>
-                  {base.label}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {base.description}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Status Toggles */}
+      {/* Status Toggle */}
       <div className="flex items-center gap-6 pt-2">
         <label className="flex items-center gap-3 cursor-pointer">
           <button
@@ -477,23 +339,6 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
             }`} />
           </button>
           <span className="text-sm text-gray-700 dark:text-gray-300">Active</span>
-        </label>
-
-        <label className="flex items-center gap-3 cursor-pointer">
-          <button
-            onClick={() => updateForm('is_shared', !form.is_shared)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              form.is_shared ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'
-            }`}
-          >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow ${
-              form.is_shared ? 'translate-x-6' : 'translate-x-1'
-            }`} />
-          </button>
-          <div className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-            <Share2 className="w-3.5 h-3.5" />
-            Shared
-          </div>
         </label>
       </div>
     </div>
@@ -579,304 +424,271 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
     </div>
   );
 
-  const renderToolsTab = () => {
-    const tools: { key: keyof ModeToolsConfig; label: string; description: string; icon: React.ElementType }[] = [
-      { key: 'web_search', label: 'Web Search', description: 'Search the web for current information', icon: Globe },
-      { key: 'memory', label: 'Memory', description: 'Save and recall information across conversations', icon: Brain },
-      { key: 'product_search', label: 'Product Search', description: 'Search the product catalog', icon: ShoppingBag },
-      { key: 'image_generation', label: 'Image Generation', description: 'Generate images (coming soon)', icon: Image },
-      { key: 'code_execution', label: 'Code Execution', description: 'Run code snippets (coming soon)', icon: Code },
-    ];
-
-    return (
-      <div className="space-y-4">
-        <div>
-          <h3 className="font-medium text-gray-900 dark:text-white">Available Tools</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Configure what capabilities this mode has</p>
-        </div>
-
-        <div className="space-y-2">
-          {tools.map((tool) => {
-            const Icon = tool.icon;
-            const isEnabled = form.tools[tool.key];
-            const isComingSoon = tool.key === 'image_generation' || tool.key === 'code_execution';
-
-            return (
-              <div
-                key={tool.key}
-                className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
-                  isEnabled && !isComingSoon
-                    ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
-                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50'
-                } ${isComingSoon ? 'opacity-50' : ''}`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    isEnabled && !isComingSoon
-                      ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
-                  }`}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white text-sm flex items-center gap-2">
-                      {tool.label}
-                      {isComingSoon && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 rounded">
-                          Coming Soon
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{tool.description}</div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => !isComingSoon && updateTools(tool.key, !isEnabled)}
-                  disabled={isComingSoon}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    isEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
-                  } ${isComingSoon ? 'cursor-not-allowed' : ''}`}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow ${
-                    isEnabled ? 'translate-x-6' : 'translate-x-1'
-                  }`} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
+  const updateToolConfig = (tool: keyof ModeToolConfig, enabled: boolean) => {
+    setForm(prev => ({
+      ...prev,
+      enabled_tools: {
+        ...prev.enabled_tools,
+        [tool]: {
+          ...prev.enabled_tools[tool],
+          enabled,
+        },
+      },
+    }));
   };
 
-  const renderContextTab = () => {
-    const sources: { key: keyof Omit<ModeContextConfig, 'custom_documents'>; label: string; description: string }[] = [
-      { key: 'brand_voice', label: 'Brand Voice', description: 'Include brand voice guidelines and tone' },
-      { key: 'brand_details', label: 'Brand Details', description: 'Include brand information and company details' },
-      { key: 'product_catalog', label: 'Product Catalog', description: 'Search and include relevant products' },
-      { key: 'past_emails', label: 'Past Emails', description: 'Reference previously created emails' },
-      { key: 'web_research', label: 'Web Research', description: 'Automatically research relevant topics' },
-    ];
+  const TOOL_CONFIG = [
+    {
+      key: 'create_artifact' as const,
+      label: 'Create Artifacts',
+      description: 'Allow AI to create and save emails, campaigns, and other content',
+      icon: FileText,
+    },
+    {
+      key: 'create_conversation' as const,
+      label: 'Create Conversations',
+      description: 'Allow AI to create new conversations for follow-up tasks',
+      icon: MessageSquare,
+    },
+    {
+      key: 'suggest_action' as const,
+      label: 'Suggest Actions',
+      description: 'Allow AI to suggest quick action buttons',
+      icon: Zap,
+    },
+    {
+      key: 'web_search' as const,
+      label: 'Web Search',
+      description: 'Allow AI to search the web for current information',
+      icon: Search,
+    },
+    {
+      key: 'save_memory' as const,
+      label: 'Save Memory',
+      description: 'Allow AI to save important information for future conversations',
+      icon: Brain,
+    },
+    {
+      key: 'generate_image' as const,
+      label: 'Generate Images',
+      description: 'Allow AI to generate images using DALL-E or Gemini',
+      icon: Image,
+    },
+    {
+      key: 'shopify_product_search' as const,
+      label: 'Shopify Product Search',
+      description: 'Allow AI to search brand\'s Shopify store directly via MCP',
+      icon: ShoppingBag,
+      badge: 'MCP',
+    },
+  ];
 
-    return (
-      <div className="space-y-4">
-        <div>
-          <h3 className="font-medium text-gray-900 dark:text-white">Context Sources</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400">What information should be included automatically</p>
-        </div>
+  const renderToolsTab = () => (
+    <div className="space-y-4">
+      {/* Header */}
+      <div>
+        <h3 className="font-medium text-gray-900 dark:text-white">Tool Configuration</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Choose which tools are available for this agent</p>
+      </div>
 
-        <div className="grid grid-cols-1 gap-2">
-          {sources.map((source) => {
-            const isEnabled = form.context_sources[source.key] as boolean;
-
-            return (
-              <label
-                key={source.key}
-                className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all ${
+      {/* Tools Grid */}
+      <div className="space-y-3">
+        {TOOL_CONFIG.map((tool) => {
+          const Icon = tool.icon;
+          const isEnabled = form.enabled_tools[tool.key]?.enabled ?? false;
+          
+          return (
+            <div
+              key={tool.key}
+              className={`flex items-center justify-between p-4 rounded-xl border transition-colors ${
+                isEnabled
+                  ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800'
+                  : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${
                   isEnabled
-                    ? 'border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                }`}
-              >
+                    ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                }`}>
+                  <Icon className="w-5 h-5" />
+                </div>
                 <div>
-                  <div className="font-medium text-gray-900 dark:text-white text-sm">{source.label}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{source.description}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-900 dark:text-white text-sm">
+                      {tool.label}
+                    </span>
+                    {'badge' in tool && tool.badge && (
+                      <span className="text-xs px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">
+                        {tool.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {tool.description}
+                  </p>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={isEnabled}
-                  onChange={(e) => updateContext(source.key, e.target.checked)}
-                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                />
-              </label>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  const renderOutputTab = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className="font-medium text-gray-900 dark:text-white">Output Configuration</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400">How responses should be formatted</p>
-      </div>
-
-      {/* Output Type */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Output Type
-        </label>
-        <div className="grid grid-cols-2 gap-2">
-          {OUTPUT_TYPES.map((type) => {
-            const isSelected = form.output_config.type === type.id;
-            return (
+              </div>
               <button
-                key={type.id}
-                onClick={() => updateOutput('type', type.id)}
-                className={`p-3 rounded-lg border text-left transition-all ${
-                  isSelected
-                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                onClick={() => updateToolConfig(tool.key, !isEnabled)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  isEnabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'
                 }`}
               >
-                <div className={`font-medium text-sm ${isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-900 dark:text-gray-100'}`}>
-                  {type.label}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">{type.description}</div>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow ${
+                  isEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`} />
               </button>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Email Format (if email type) */}
-      {form.output_config.type === 'email' && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Email Format
-          </label>
-          <div className="flex gap-2">
-            {(['design', 'letter', 'any'] as ModeEmailFormat[]).map((format) => {
-              if (!format) return null;
-              const isSelected = form.output_config.email_format === format;
-              return (
-                <button
-                  key={format}
-                  onClick={() => updateOutput('email_format', format)}
-                  className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all ${
-                    isSelected
-                      ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
-                      : 'border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-300'
-                  }`}
-                >
-                  {format.charAt(0).toUpperCase() + format.slice(1)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Version Count */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Version Count
-        </label>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-          How many versions/variations to generate
-        </p>
-        <div className="flex gap-2">
-          {[1, 2, 3, 5, 10].map((count) => {
-            const isSelected = form.output_config.version_count === count;
-            return (
-              <button
-                key={count}
-                onClick={() => updateOutput('version_count', count)}
-                className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all ${
-                  isSelected
-                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
-                    : 'border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-gray-300'
-                }`}
-              >
-                {count}
-              </button>
-            );
-          })}
-        </div>
+      {/* Info Note */}
+      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 text-xs text-blue-700 dark:text-blue-300">
+        <p className="font-medium mb-1">Note:</p>
+        <p>Shopify Product Search requires the brand to have a Shopify store configured in their brand settings. The AI will automatically use this when available.</p>
       </div>
-
-      {/* Show Thinking */}
-      <label className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer">
-        <div className="flex items-center gap-3">
-          {form.output_config.show_thinking ? (
-            <Eye className="w-5 h-5 text-gray-500" />
-          ) : (
-            <EyeOff className="w-5 h-5 text-gray-400" />
-          )}
-          <div>
-            <div className="font-medium text-gray-900 dark:text-white text-sm">Show Thinking</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">Display AI reasoning process</div>
-          </div>
-        </div>
-        <input
-          type="checkbox"
-          checked={form.output_config.show_thinking}
-          onChange={(e) => updateOutput('show_thinking', e.target.checked)}
-          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-        />
-      </label>
     </div>
   );
 
-  const renderModelTab = () => (
+  const toggleInvokableAgent = (agentId: string) => {
+    setForm(prev => ({
+      ...prev,
+      can_invoke_agents: prev.can_invoke_agents.includes(agentId)
+        ? prev.can_invoke_agents.filter(id => id !== agentId)
+        : [...prev.can_invoke_agents, agentId],
+    }));
+  };
+
+  const renderAgentsTab = () => (
     <div className="space-y-6">
-      <div>
-        <h3 className="font-medium text-gray-900 dark:text-white">Model Preferences</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400">Configure AI model settings for this mode</p>
-      </div>
-
-      {/* Preferred Model */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Preferred Model
-        </label>
-        <select
-          value={form.model_config.preferred || ''}
-          onChange={(e) => updateModel('preferred', e.target.value || null)}
-          className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+      {/* Agent Enabled Toggle */}
+      <div className="flex items-center justify-between p-4 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 rounded-xl border border-indigo-200 dark:border-indigo-800">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/40">
+            <Bot className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+          </div>
+          <div>
+            <span className="font-medium text-gray-900 dark:text-white text-sm">Agent Mode</span>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Enable advanced agent capabilities</p>
+          </div>
+        </div>
+        <button
+          onClick={() => updateForm('is_agent_enabled', !form.is_agent_enabled)}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            form.is_agent_enabled ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'
+          }`}
         >
-          <option value="">Use default / user selection</option>
-          {AI_MODELS.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.name} - {model.provider}
-            </option>
-          ))}
-        </select>
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow ${
+            form.is_agent_enabled ? 'translate-x-6' : 'translate-x-1'
+          }`} />
+        </button>
       </div>
 
-      {/* Temperature */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Temperature
-        </label>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-          Higher values make output more creative, lower values more focused
-        </p>
-        <div className="flex items-center gap-4">
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.1"
-            value={form.model_config.temperature ?? 0.7}
-            onChange={(e) => updateModel('temperature', parseFloat(e.target.value))}
-            className="flex-1"
-          />
-          <span className="w-12 text-center text-sm font-mono text-gray-700 dark:text-gray-300">
-            {(form.model_config.temperature ?? 0.7).toFixed(1)}
-          </span>
-        </div>
-        <div className="flex justify-between text-xs text-gray-400 mt-1">
-          <span>Focused</span>
-          <span>Creative</span>
-        </div>
-      </div>
+      {form.is_agent_enabled && (
+        <>
+          {/* Agent Type Selection */}
+          <div>
+            <h3 className="font-medium text-gray-900 dark:text-white mb-3">Agent Type</h3>
+            <div className="grid grid-cols-1 gap-3">
+              {AGENT_TYPES.map((type) => {
+                const Icon = type.icon;
+                const isSelected = form.agent_type === type.value;
+                return (
+                  <button
+                    key={type.value}
+                    onClick={() => updateForm('agent_type', type.value)}
+                    className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${
+                      isSelected
+                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-lg ${
+                      isSelected
+                        ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                    }`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-medium ${
+                          isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-900 dark:text-white'
+                        }`}>
+                          {type.label}
+                        </span>
+                        {isSelected && (
+                          <Check className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {type.description}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-      {/* Allow Override */}
-      <label className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer">
-        <div>
-          <div className="font-medium text-gray-900 dark:text-white text-sm">Allow Model Override</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">Let users choose a different model</div>
-        </div>
-        <input
-          type="checkbox"
-          checked={form.model_config.allow_override}
-          onChange={(e) => updateModel('allow_override', e.target.checked)}
-          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-        />
-      </label>
+          {/* Invokable Agents - Only show for orchestrator and hybrid */}
+          {(form.agent_type === 'orchestrator' || form.agent_type === 'hybrid') && (
+            <div>
+              <h3 className="font-medium text-gray-900 dark:text-white mb-1">Can Invoke Agents</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Select which specialist agents this agent can call upon
+              </p>
+              <div className="space-y-2">
+                {AVAILABLE_SPECIALISTS.map((specialist) => {
+                  const isSelected = form.can_invoke_agents.includes(specialist.id);
+                  return (
+                    <button
+                      key={specialist.id}
+                      onClick={() => toggleInvokableAgent(specialist.id)}
+                      className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all ${
+                        isSelected
+                          ? 'border-green-300 bg-green-50 dark:bg-green-900/20 dark:border-green-700'
+                          : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <div className="text-left">
+                        <span className={`font-medium text-sm ${
+                          isSelected ? 'text-green-700 dark:text-green-300' : 'text-gray-900 dark:text-white'
+                        }`}>
+                          {specialist.name}
+                        </span>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {specialist.description}
+                        </p>
+                      </div>
+                      <div className={`w-5 h-5 rounded flex items-center justify-center ${
+                        isSelected
+                          ? 'bg-green-500 text-white'
+                          : 'border-2 border-gray-300 dark:border-gray-600'
+                      }`}>
+                        {isSelected && <Check className="w-3 h-3" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Info Note */}
+          <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 text-xs text-amber-700 dark:text-amber-300">
+            <p className="font-medium mb-1">Agent Behavior:</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li><strong>Specialist:</strong> Performs specific tasks independently</li>
+              <li><strong>Orchestrator:</strong> Routes requests and coordinates other agents</li>
+              <li><strong>Hybrid:</strong> Can do both - perform tasks and delegate to others</li>
+            </ul>
+          </div>
+        </>
+      )}
     </div>
   );
 
@@ -885,16 +697,14 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
       case 'basics': return renderBasicsTab();
       case 'prompt': return renderPromptTab();
       case 'tools': return renderToolsTab();
-      case 'context': return renderContextTab();
-      case 'output': return renderOutputTab();
-      case 'model': return renderModelTab();
+      case 'agents': return renderAgentsTab();
       default: return null;
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-gray-200 dark:border-gray-700">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl h-[80vh] flex flex-col overflow-hidden border border-gray-200 dark:border-gray-700">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 dark:from-indigo-900/30 dark:to-purple-900/30">
           <div className="flex items-center gap-3">
@@ -903,10 +713,10 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
             </span>
             <div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                {isEditing ? 'Edit Mode' : 'Create New Mode'}
+                {isEditing ? 'Edit Agent' : 'Create New Agent'}
               </h2>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                {form.name || 'Configure your custom AI mode'}
+                {form.name || 'Configure your custom AI agent'}
               </p>
             </div>
           </div>
@@ -946,10 +756,7 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-          <div className="text-xs text-gray-500 dark:text-gray-400">
-            {isEditing && mode?.usage_count ? `Used ${mode.usage_count} times` : ''}
-          </div>
+        <div className="flex items-center justify-end px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
@@ -970,7 +777,7 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
               ) : (
                 <>
                   <Check className="w-4 h-4" />
-                  {isEditing ? 'Save Changes' : 'Create Mode'}
+                  {isEditing ? 'Save Changes' : 'Create Agent'}
                 </>
               )}
             </button>
@@ -980,4 +787,9 @@ export default function ModeEditor({ mode, onClose, onSave }: ModeEditorProps) {
     </div>
   );
 }
+
+
+
+
+
 

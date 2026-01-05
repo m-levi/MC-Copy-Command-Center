@@ -49,27 +49,72 @@ export async function updateSession(request: NextRequest) {
     '/forgot-password',
     '/reset-password',
     '/auth/confirm',
+    '/auth/callback',
     '/shared',  // Allow unauthenticated access to shared conversations
+  ];
+  
+  // Pages that require auth but not organization membership
+  const noOrgRequiredPaths = [
+    '/onboarding',
+    '/api',  // API routes handle their own auth
   ];
   
   const isPublicPath = publicPaths.some(path => 
     request.nextUrl.pathname.startsWith(path)
   );
+  
+  const isNoOrgRequiredPath = noOrgRequiredPaths.some(path =>
+    request.nextUrl.pathname.startsWith(path)
+  );
 
   if (!user && !isPublicPath) {
-    // no user, potentially respond by redirecting the user to the login page
+    // no user, redirect to login
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  // Redirect authenticated users away from auth pages (except confirmation and shared links)
+  // Redirect authenticated users away from auth pages (except confirmation, callback, and shared links)
   if (user && isPublicPath && 
       request.nextUrl.pathname !== '/auth/confirm' &&
-      !request.nextUrl.pathname.startsWith('/shared')) {
+      request.nextUrl.pathname !== '/auth/callback' &&
+      !request.nextUrl.pathname.startsWith('/shared') &&
+      !request.nextUrl.pathname.startsWith('/signup/')) {  // Allow invite signup
     const url = request.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);
+  }
+
+  // Check organization membership for authenticated users on protected pages
+  if (user && !isPublicPath && !isNoOrgRequiredPath) {
+    // Check if user has an organization
+    const { data: membership, error } = await supabase
+      .from('organization_members')
+      .select('id')
+      .eq('user_id', user.id)
+      .single();
+
+    if (!membership && !error?.message.includes('multiple')) {
+      // User has no organization, redirect to onboarding
+      const url = request.nextUrl.clone();
+      url.pathname = '/onboarding';
+      return NextResponse.redirect(url);
+    }
+  }
+
+  // If user is on onboarding but already has an organization, redirect to home
+  if (user && request.nextUrl.pathname === '/onboarding') {
+    const { data: membership } = await supabase
+      .from('organization_members')
+      .select('id')
+      .eq('user_id', user.id)
+      .single();
+
+    if (membership) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/';
+      return NextResponse.redirect(url);
+    }
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're
@@ -87,4 +132,3 @@ export async function updateSession(request: NextRequest) {
 
   return supabaseResponse;
 }
-

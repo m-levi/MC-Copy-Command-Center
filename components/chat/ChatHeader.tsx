@@ -1,9 +1,24 @@
 'use client';
 
-import { Suspense, lazy } from 'react';
-import { Conversation, FlowConversation } from '@/types';
+import { Suspense, lazy, useState } from 'react';
+import { Conversation, FlowConversation, ConversationVisibility } from '@/types';
 import PresenceIndicator from '@/components/PresenceIndicator';
 import { useOptionalArtifactContext } from '@/contexts/ArtifactContext';
+import { toggleConversationVisibility } from '@/lib/conversation-actions';
+import toast from 'react-hot-toast';
+import { 
+  MessageSquare, 
+  Share2, 
+  MessageCircle, 
+  MoreVertical, 
+  Menu, 
+  Sparkles,
+  Clock,
+  ChevronRight,
+  Lock,
+  Users,
+  Globe
+} from 'lucide-react';
 
 const ConversationOptionsMenu = lazy(() => import('@/components/ConversationOptionsMenu'));
 const FlowNavigation = lazy(() => import('@/components/FlowNavigation'));
@@ -13,10 +28,12 @@ interface ChatHeaderProps {
   parentFlow: FlowConversation | null;
   brandId: string;
   showConversationMenu: boolean;
+  currentUserId?: string;
   onToggleConversationMenu: () => void;
   onShowShareModal: () => void;
   onNavigateToParent: () => void;
-  onMobileMenuOpen: () => void;
+  onMobileMenuOpen?: () => void;
+  onVisibilityChange?: (visibility: ConversationVisibility) => void;
 }
 
 export default function ChatHeader({
@@ -24,14 +41,19 @@ export default function ChatHeader({
   parentFlow,
   brandId,
   showConversationMenu,
+  currentUserId,
   onToggleConversationMenu,
   onShowShareModal,
   onNavigateToParent,
   onMobileMenuOpen,
+  onVisibilityChange,
 }: ChatHeaderProps) {
-  // Use artifact context to control comments panel
+  const [isTogglingVisibility, setIsTogglingVisibility] = useState(false);
   const artifactContext = useOptionalArtifactContext();
   const isCommentsOpen = artifactContext?.isSidebarOpen && artifactContext?.activeTab === 'comments';
+  
+  const isOwner = currentConversation?.user_id === currentUserId;
+  const isTeamVisible = currentConversation?.visibility === 'team';
   
   const handleToggleComments = () => {
     if (!artifactContext) return;
@@ -42,81 +64,255 @@ export default function ChatHeader({
       artifactContext.openSidebarToTab('comments');
     }
   };
-  return (
-    <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-      {/* Mobile hamburger menu - only visible on mobile */}
-      <div className="lg:hidden px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
-        <button
-          onClick={onMobileMenuOpen}
-          className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
-          aria-label="Open sidebar"
-        >
-          <svg className="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
-      </div>
 
+  const handleToggleVisibility = async () => {
+    if (!currentConversation || !isOwner || isTogglingVisibility) return;
+    
+    setIsTogglingVisibility(true);
+    const newVisibility: ConversationVisibility = isTeamVisible ? 'private' : 'team';
+    
+    try {
+      const success = await toggleConversationVisibility(currentConversation.id, newVisibility);
+      if (success) {
+        toast.success(
+          newVisibility === 'team' 
+            ? '✨ Shared with team!' 
+            : '🔒 Now private'
+        );
+        onVisibilityChange?.(newVisibility);
+      }
+    } catch (error) {
+      toast.error('Failed to update visibility');
+    } finally {
+      setIsTogglingVisibility(false);
+    }
+  };
+
+  // Format relative time for conversation
+  const getRelativeTime = (date?: string) => {
+    if (!date) return null;
+    const now = new Date();
+    const then = new Date(date);
+    const diffMs = now.getTime() - then.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  return (
+    <div className="relative flex-shrink-0">
       {/* Flow Navigation for child conversations */}
       {currentConversation?.parent_conversation_id && parentFlow && (
-        <FlowNavigation
-          parentFlow={parentFlow}
-          currentConversation={currentConversation}
-          brandId={brandId}
-          onNavigateToParent={onNavigateToParent}
-        />
+        <div className="border-b border-gray-200 dark:border-gray-800">
+          <FlowNavigation
+            parentFlow={parentFlow}
+            currentConversation={currentConversation}
+            brandId={brandId}
+            onNavigateToParent={onNavigateToParent}
+          />
+        </div>
       )}
 
-      {/* Conversation Info Bar - Clean and Minimal */}
-      <div className="px-4 py-3">
-        <div className="flex items-center justify-between">
-          {/* Conversation Title */}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <svg className="w-5 h-5 text-gray-400 dark:text-gray-500 flex-shrink-0 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-            <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">
-              {currentConversation?.title || 'No Conversation Selected'}
-            </h2>
-          </div>
-          
-          {/* Action buttons */}
-          {currentConversation && (
-            <div className="flex items-center gap-2">
-              <div className="mr-2">
-                <PresenceIndicator conversationId={currentConversation.id} />
-              </div>
+      {/* Header Container */}
+      <div className="flex items-start gap-2 px-3 sm:px-4 lg:px-6 pt-4 pb-2">
+        {/* Mobile Menu Button - Only visible on mobile */}
+        {onMobileMenuOpen && (
+          <button
+            onClick={onMobileMenuOpen}
+            className="
+              lg:hidden
+              flex-shrink-0 
+              w-10 h-10 sm:w-11 sm:h-11
+              flex items-center justify-center 
+              rounded-full
+              transition-all duration-200 ease-out
+              shadow-sm hover:shadow-md
+              bg-white dark:bg-gray-800 
+              text-gray-600 dark:text-gray-300 
+              hover:bg-gray-100 dark:hover:bg-gray-700
+              border border-gray-200/60 dark:border-gray-700/60
+              active:scale-95
+            "
+            title="Open menu"
+            aria-label="Open menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
 
-              <button
-                onClick={onShowShareModal}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
-                title="Share Conversation"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>
-              </button>
-              <button
-                onClick={handleToggleComments}
-                className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors ${!isCommentsOpen ? 'text-gray-600 dark:text-gray-400' : 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'}`}
-                title={!isCommentsOpen ? 'Show comments' : 'Hide comments'}
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-              </button>
-              <button
-                data-conversation-menu-trigger
-                onClick={onToggleConversationMenu}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
-                title="Conversation Options"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
-                </svg>
-              </button>
+        {/* Main Conversation Bar */}
+        <div className="flex-1 min-w-0">
+          <div className="
+            flex items-center justify-between 
+            h-10 sm:h-11
+            px-2 sm:px-3 lg:px-4
+            bg-white/95 dark:bg-gray-800/95 
+            backdrop-blur-md 
+            rounded-xl sm:rounded-2xl
+            border border-gray-200/50 dark:border-gray-700/50 
+            shadow-sm hover:shadow-md
+            transition-shadow duration-200
+          ">
+            {/* Left: Conversation Title & Info */}
+            <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-3 min-w-0 flex-1">
+              {/* Conversation Icon - Hidden on very small screens */}
+              <div className="hidden xs:flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-gradient-to-br from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-800 flex-shrink-0">
+                {currentConversation?.mode === 'flow' ? (
+                  <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500" />
+                ) : (
+                  <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-500 dark:text-gray-400" />
+                )}
+              </div>
+              
+              {/* Title with breadcrumb for child conversations */}
+              <div className="flex items-center gap-1 min-w-0 flex-1">
+                {parentFlow && currentConversation?.parent_conversation_id && (
+                  <>
+                    <button
+                      onClick={onNavigateToParent}
+                      className="hidden md:block text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 truncate max-w-[80px] lg:max-w-[120px] transition-colors"
+                      aria-label={`Navigate to parent: ${parentFlow.title}`}
+                    >
+                      {parentFlow.title}
+                    </button>
+                    <ChevronRight className="hidden md:block w-3 h-3 text-gray-300 dark:text-gray-600 flex-shrink-0" />
+                  </>
+                )}
+                <h2 className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+                  {currentConversation?.title || 'New Conversation'}
+                </h2>
+                
+                {/* Visibility Toggle Badge - Only show for conversation owner */}
+                {currentConversation && isOwner && (
+                  <button
+                    onClick={handleToggleVisibility}
+                    disabled={isTogglingVisibility}
+                    className={`
+                      flex items-center gap-1
+                      px-2 py-0.5
+                      text-[10px] sm:text-xs font-medium
+                      rounded-full
+                      transition-all duration-200
+                      flex-shrink-0
+                      ${isTogglingVisibility ? 'opacity-50 cursor-wait' : 'cursor-pointer'}
+                      ${isTeamVisible
+                        ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }
+                    `}
+                    title={isTeamVisible ? 'Click to make private' : 'Click to share with team'}
+                    aria-label={isTeamVisible ? 'Make conversation private' : 'Share conversation with team'}
+                  >
+                    {isTeamVisible ? (
+                      <>
+                        <Users className="w-3 h-3" />
+                        <span className="hidden sm:inline">Team</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3 h-3" />
+                        <span className="hidden sm:inline">Private</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                
+                {/* Show "Shared with you" badge for non-owners viewing team conversations */}
+                {currentConversation && !isOwner && isTeamVisible && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] sm:text-xs font-medium rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 flex-shrink-0">
+                    <Globe className="w-3 h-3" />
+                    <span className="hidden sm:inline">Shared</span>
+                  </span>
+                )}
+              </div>
+              
+              {/* Last Updated - Hidden on small screens */}
+              {currentConversation?.updated_at && (
+                <div className="hidden lg:flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">
+                  <Clock className="w-3 h-3" />
+                  <span>{getRelativeTime(currentConversation.updated_at)}</span>
+                </div>
+              )}
             </div>
-          )}
+            
+            {/* Right: Action Buttons */}
+            <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
+              {/* Presence Indicator - Hidden on mobile */}
+              {currentConversation && (
+                <div className="hidden sm:block mr-1">
+                  <PresenceIndicator conversationId={currentConversation.id} />
+                </div>
+              )}
+
+              {/* Divider - Hidden on mobile */}
+              <div className="hidden sm:block w-px h-4 sm:h-5 bg-gray-200 dark:bg-gray-700 mx-0.5 sm:mx-1" />
+
+              {/* Share Button */}
+              {currentConversation && (
+                <button
+                  onClick={onShowShareModal}
+                  className="
+                    p-1.5 sm:p-2
+                    hover:bg-gray-100 dark:hover:bg-gray-700/70 
+                    rounded-lg 
+                    transition-colors 
+                    text-gray-500 dark:text-gray-400 
+                    hover:text-gray-700 dark:hover:text-gray-200
+                  "
+                  title="Share Conversation"
+                  aria-label="Share conversation"
+                >
+                  <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </button>
+              )}
+
+              {/* Comments Button */}
+              {currentConversation && (
+                <button
+                  onClick={handleToggleComments}
+                  className={`
+                    p-1.5 sm:p-2 
+                    rounded-lg 
+                    transition-all duration-200
+                    ${isCommentsOpen 
+                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 shadow-sm' 
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-700/70 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                    }
+                  `}
+                  title={isCommentsOpen ? 'Hide comments' : 'Show comments'}
+                  aria-label={isCommentsOpen ? 'Hide comments' : 'Show comments'}
+                >
+                  <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </button>
+              )}
+
+              {/* More Options Button */}
+              {currentConversation && (
+                <button
+                  data-conversation-menu-trigger
+                  onClick={onToggleConversationMenu}
+                  className="
+                    p-1.5 sm:p-2 
+                    hover:bg-gray-100 dark:hover:bg-gray-700/70 
+                    rounded-lg 
+                    transition-colors 
+                    text-gray-500 dark:text-gray-400 
+                    hover:text-gray-700 dark:hover:text-gray-200
+                  "
+                  title="Conversation Options"
+                  aria-label="More options"
+                >
+                  <MoreVertical className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
       
@@ -139,9 +335,3 @@ export default function ChatHeader({
     </div>
   );
 }
-
-
-
-
-
-

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
+import { getErrorMessage } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,9 +57,9 @@ export default function SessionsPage() {
 
       toast.success('Session revoked');
       await loadSessions();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error revoking session:', error);
-      toast.error('Failed to revoke session');
+      toast.error(getErrorMessage(error));
     }
   };
 
@@ -113,6 +114,28 @@ export default function SessionsPage() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,14 +1,24 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { CustomMode, ModeColor, MODE_COLOR_META, MODE_ICONS } from '@/types';
 import ModeEditor from '@/components/modes/ModeEditor';
 import TemplatesBrowser from '@/components/modes/TemplatesBrowser';
 import ImportExportModal from '@/components/modes/ImportExportModal';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 export const dynamic = 'force-dynamic';
+
+type SortOption = 'name' | 'created' | 'updated';
+type SortDirection = 'asc' | 'desc';
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'name', label: 'Name' },
+  { value: 'created', label: 'Date Created' },
+  { value: 'updated', label: 'Last Modified' },
+];
 
 export default function ModesPage() {
   const [modes, setModes] = useState<CustomMode[]>([]);
@@ -17,6 +27,10 @@ export default function ModesPage() {
   const [editingMode, setEditingMode] = useState<CustomMode | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showImportExport, setShowImportExport] = useState(false);
+  const [deletingMode, setDeletingMode] = useState<CustomMode | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   useEffect(() => {
     loadModes();
@@ -31,8 +45,8 @@ export default function ModesPage() {
         setModes(data);
       }
     } catch (error) {
-      console.error('Error loading modes:', error);
-      toast.error('Failed to load modes');
+      console.error('Error loading agents:', error);
+      toast.error('Failed to load agents');
     } finally {
       setLoading(false);
     }
@@ -56,29 +70,35 @@ export default function ModesPage() {
       
       if (!response.ok) throw new Error('Failed to duplicate mode');
       
-      toast.success('Mode duplicated');
+      toast.success('Agent duplicated');
       loadModes();
     } catch (error) {
-      console.error('Error duplicating mode:', error);
-      toast.error('Failed to duplicate mode');
+      console.error('Error duplicating agent:', error);
+      toast.error('Failed to duplicate agent');
     }
   };
 
-  const handleDelete = async (mode: CustomMode) => {
-    if (!confirm(`Delete "${mode.name}"? This cannot be undone.`)) return;
+  const handleDelete = (mode: CustomMode) => {
+    setDeletingMode(mode);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingMode) return;
 
     try {
-      const response = await fetch(`/api/modes/${mode.id}`, {
+      const response = await fetch(`/api/modes/${deletingMode.id}`, {
         method: 'DELETE',
       });
-      
+
       if (!response.ok) throw new Error('Failed to delete mode');
-      
-      toast.success('Mode deleted');
+
+      toast.success('Agent deleted');
       loadModes();
     } catch (error) {
-      console.error('Error deleting mode:', error);
-      toast.error('Failed to delete mode');
+      console.error('Error deleting agent:', error);
+      toast.error('Failed to delete agent');
+    } finally {
+      setDeletingMode(null);
     }
   };
 
@@ -92,11 +112,11 @@ export default function ModesPage() {
       
       if (!response.ok) throw new Error('Failed to update mode');
       
-      toast.success(mode.is_active ? 'Mode hidden from selector' : 'Mode shown in selector');
+      toast.success(mode.is_active ? 'Agent hidden from selector' : 'Agent shown in selector');
       loadModes();
     } catch (error) {
-      console.error('Error updating mode:', error);
-      toast.error('Failed to update mode');
+      console.error('Error updating agent:', error);
+      toast.error('Failed to update agent');
     }
   };
 
@@ -115,8 +135,47 @@ export default function ModesPage() {
     return `${meta.bg} ${meta.text} ${meta.border} ${meta.darkBg} ${meta.darkText} ${meta.darkBorder}`;
   };
 
-  const activeModes = modes.filter(m => m.is_active);
-  const inactiveModes = modes.filter(m => !m.is_active);
+  // Filter and sort modes
+  const filteredAndSortedModes = useMemo(() => {
+    let result = [...modes];
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      result = result.filter(
+        (mode) =>
+          mode.name.toLowerCase().includes(query) ||
+          (mode.description?.toLowerCase().includes(query) ?? false) ||
+          mode.system_prompt.toLowerCase().includes(query)
+      );
+    }
+
+    // Sort modes
+    result.sort((a, b) => {
+      let comparison = 0;
+      switch (sortBy) {
+        case 'name':
+          comparison = a.name.localeCompare(b.name);
+          break;
+        case 'created':
+          comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          break;
+        case 'updated':
+          comparison = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+          break;
+      }
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    return result;
+  }, [modes, searchQuery, sortBy, sortDirection]);
+
+  const activeModes = filteredAndSortedModes.filter(m => m.is_active);
+  const inactiveModes = filteredAndSortedModes.filter(m => !m.is_active);
+
+  const toggleSortDirection = () => {
+    setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+  };
 
   return (
     <div className="space-y-8">
@@ -124,15 +183,15 @@ export default function ModesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-            <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center shadow-lg">
+            <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l.8 1.6a2.25 2.25 0 01-2.012 3.1H5.412a2.25 2.25 0 01-2.012-3.1l.8-1.6" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
             </span>
-            Mode Lab
+            Agent Builder
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 ml-13">
-            Create and test custom AI conversation modes
+            Create and customize AI agents with specialized capabilities
           </p>
         </div>
         <button
@@ -142,7 +201,7 @@ export default function ModesPage() {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Create Mode
+          Create Agent
         </button>
       </div>
 
@@ -222,11 +281,117 @@ export default function ModesPage() {
         </button>
       </div>
 
+      {/* Search and Sort Controls */}
+      {modes.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-3">
+          {/* Search Input */}
+          <div className="relative flex-1">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search agents by name, description, or prompt..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Sort Controls */}
+          <div className="flex items-center gap-2">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent cursor-pointer"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={toggleSortDirection}
+              className="p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+              title={sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'}
+            >
+              {sortDirection === 'asc' ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Search Results Info */}
+      {searchQuery && modes.length > 0 && (
+        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+          <span>
+            {filteredAndSortedModes.length === 0
+              ? 'No agents found'
+              : `Showing ${filteredAndSortedModes.length} of ${modes.length} agent${modes.length !== 1 ? 's' : ''}`}
+          </span>
+          {filteredAndSortedModes.length > 0 && searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              Clear search
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Modes List */}
       {loading ? (
         <div className="text-center py-16">
           <div className="w-12 h-12 rounded-full border-4 border-indigo-100 border-t-indigo-600 animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-500 dark:text-gray-400">Loading modes...</p>
+          <p className="text-gray-500 dark:text-gray-400">Loading agents...</p>
+        </div>
+      ) : modes.length > 0 && filteredAndSortedModes.length === 0 ? (
+        <div className="text-center py-16 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-200 dark:border-gray-700">
+          <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No agents match your search</h3>
+          <p className="text-gray-500 dark:text-gray-400 mb-4">
+            Try adjusting your search terms or clear the filter
+          </p>
+          <button
+            onClick={() => setSearchQuery('')}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+          >
+            Clear Search
+          </button>
         </div>
       ) : modes.length === 0 ? (
         <div className="text-center py-20 bg-gradient-to-b from-gray-50 to-white dark:from-gray-800/50 dark:to-gray-900/50 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
@@ -235,16 +400,16 @@ export default function ModesPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l.8 1.6a2.25 2.25 0 01-2.012 3.1H5.412a2.25 2.25 0 01-2.012-3.1l.8-1.6" />
             </svg>
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No custom modes yet</h3>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No custom agents yet</h3>
           <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-md mx-auto">
-            Create your first mode to start experimenting with different AI behaviors and prompts.
+            Create your first agent to start building specialized AI capabilities for your workflow.
           </p>
           <div className="flex items-center justify-center gap-3">
             <button
               onClick={handleCreateNew}
               className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-medium rounded-xl transition-all"
             >
-              Create Your First Mode
+              Create Your First Agent
             </button>
             <button
               onClick={() => setShowTemplates(true)}
@@ -256,11 +421,11 @@ export default function ModesPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Active Modes */}
+          {/* Active Agents */}
           {activeModes.length > 0 && (
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Active Modes</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Active Agents</h2>
                 <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-xs font-medium rounded-full">
                   {activeModes.length}
                 </span>
@@ -281,11 +446,11 @@ export default function ModesPage() {
             </div>
           )}
 
-          {/* Inactive Modes */}
+          {/* Inactive Agents */}
           {inactiveModes.length > 0 && (
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <h2 className="text-lg font-semibold text-gray-500 dark:text-gray-400">Hidden Modes</h2>
+                <h2 className="text-lg font-semibold text-gray-500 dark:text-gray-400">Hidden Agents</h2>
                 <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs font-medium rounded-full">
                   {inactiveModes.length}
                 </span>
@@ -334,11 +499,23 @@ export default function ModesPage() {
           loadModes();
         }}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={!!deletingMode}
+        onClose={() => setDeletingMode(null)}
+        onConfirm={handleConfirmDelete}
+        title={`Delete "${deletingMode?.name}"?`}
+        description="This agent will be permanently deleted. Any conversations using this agent will keep their existing messages, but the agent won't be available for new conversations."
+        confirmText="Delete Agent"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 }
 
-// Mode Card Component
+// Agent Card Component
 function ModeCard({
   mode,
   onEdit,
@@ -354,6 +531,19 @@ function ModeCard({
   onToggleActive: (mode: CustomMode) => void;
   getColorClasses: (color: ModeColor) => string;
 }) {
+  // Get agent type badge
+  const getAgentTypeBadge = () => {
+    const type = mode.agent_type || 'specialist';
+    const badges: Record<string, { label: string; className: string }> = {
+      orchestrator: { label: 'Orchestrator', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' },
+      specialist: { label: 'Specialist', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
+      hybrid: { label: 'Hybrid', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
+    };
+    return badges[type] || badges.specialist;
+  };
+
+  const badge = getAgentTypeBadge();
+
   return (
     <div
       className={`group relative bg-white dark:bg-gray-800 rounded-xl border transition-all hover:shadow-lg ${
@@ -377,9 +567,16 @@ function ModeCard({
                   <span className="w-2 h-2 bg-green-500 rounded-full"></span>
                 )}
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-1">
-                {mode.description || 'No description'}
-              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${badge.className}`}>
+                  {badge.label}
+                </span>
+                {mode.can_invoke_agents && mode.can_invoke_agents.length > 0 && (
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    • Can invoke {mode.can_invoke_agents.length} agent{mode.can_invoke_agents.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -437,5 +634,26 @@ function ModeCard({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

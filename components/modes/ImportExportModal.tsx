@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 
 interface ImportExportModalProps {
@@ -17,6 +17,20 @@ export default function ImportExportModal({ isOpen, onClose, onImportComplete }:
   const [importText, setImportText] = useState('');
   const [importResult, setImportResult] = useState<{ success: boolean; imported?: number; error?: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle escape key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !exporting && !importing) {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, exporting, importing, onClose]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -274,5 +288,27 @@ export default function ImportExportModal({ isOpen, onClose, onImportComplete }:
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

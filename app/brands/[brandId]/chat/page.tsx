@@ -66,6 +66,9 @@ import ChatHeader from '@/components/chat/ChatHeader';
 import ChatEmptyState, { NoConversationState, PreparingResponseIndicator } from '@/components/chat/ChatEmptyState';
 import { ArtifactProvider, useArtifactContext, useOptionalArtifactContext } from '@/contexts/ArtifactContext';
 import { ArtifactSidebar, ArtifactCard, StreamingArtifactCard } from '@/components/artifacts';
+import { useBackgroundGenerationOptional } from '@/contexts/BackgroundGenerationContext';
+import ActiveGenerationsIndicator from '@/components/ActiveGenerationsIndicator';
+import { MobileBottomNav } from '@/components/MobileBottomNav';
 
 export const dynamic = 'force-dynamic';
 
@@ -144,7 +147,13 @@ function SidebarPanelWrapper({
 }
 
 // Artifact Sidebar Panel - Shows the resizable artifact sidebar
-function ArtifactSidebarPanel({ onQuoteText }: { onQuoteText?: (text: string) => void }) {
+function ArtifactSidebarPanel({ 
+  onQuoteText,
+  conversationId,
+}: { 
+  onQuoteText?: (text: string) => void;
+  conversationId?: string;
+}) {
   const artifactContext = useOptionalArtifactContext();
   
   // Don't render panel at all if sidebar is closed
@@ -165,72 +174,145 @@ function ArtifactSidebarPanel({ onQuoteText }: { onQuoteText?: (text: string) =>
         maxSize={50}
         className="min-w-0"
       >
-        <ArtifactSidebar onQuoteText={onQuoteText} />
+        <ArtifactSidebar 
+          onQuoteText={onQuoteText} 
+          conversationId={conversationId}
+        />
       </ResizablePanel>
     </>
   );
 }
 
 // Wrapper to provide artifact context to the entire chat area
-function ArtifactContextWrapper({ 
-  conversationId, 
+function ArtifactContextWrapper({
+  conversationId,
   messages,
   isStreaming,
-  children 
-}: { 
-  conversationId: string; 
+  children
+}: {
+  conversationId: string;
   messages: Message[];
   isStreaming: boolean;
   children: React.ReactNode;
 }) {
   return (
     <ArtifactProvider conversationId={conversationId}>
-      <ArtifactMessageProcessor messages={messages} isStreaming={isStreaming} />
+      <ArtifactMessageProcessor
+        messages={messages}
+        isStreaming={isStreaming}
+        conversationId={conversationId}
+      />
       {children}
     </ArtifactProvider>
   );
 }
 
-// Component that processes AI messages and creates/updates artifacts
-const globalProcessedMessageIds = new Set<string>();
-
-function ArtifactMessageProcessor({ 
-  messages, 
-  isStreaming 
-}: { 
-  messages: Message[]; 
+// Component that detects AI messages with artifact-worthy content and auto-creates artifacts
+// Standard artifact pattern: content streams to sidebar, chat shows only the artifact card
+function ArtifactMessageProcessor({
+  messages,
+  isStreaming,
+  conversationId
+}: {
+  messages: Message[];
   isStreaming: boolean;
+  conversationId: string;
 }) {
   const artifactContext = useOptionalArtifactContext();
-  const isProcessingRef = useRef(false);
 
+  // Use refs instead of globals to prevent memory leaks
+  // These refs are scoped to this component instance and cleaned up properly
+  const processedMessageIdsRef = useRef(new Set<string>());
+  const streamingDetectedRef = useRef(false);
+  const lastStreamedContentRef = useRef('');
+  const lastConversationIdRef = useRef(conversationId);
+
+  // Reset refs when conversation changes to prevent stale data
   useEffect(() => {
-    if (!artifactContext || isStreaming || isProcessingRef.current) return;
+    if (lastConversationIdRef.current !== conversationId) {
+      processedMessageIdsRef.current = new Set<string>();
+      streamingDetectedRef.current = false;
+      lastStreamedContentRef.current = '';
+      lastConversationIdRef.current = conversationId;
+    }
+  }, [conversationId]);
 
-    const latestAIMessage = [...messages].reverse().find(
-      m => m.role === 'assistant' && !globalProcessedMessageIds.has(m.id)
-    );
+  // Use refs to store stable references to context methods
+  const contextRef = useRef(artifactContext);
+  contextRef.current = artifactContext;
 
-    if (!latestAIMessage) return;
-
-    isProcessingRef.current = true;
-
-    const hasArtifactContent = artifactContext.hasArtifactContent(latestAIMessage.content);
-    if (!hasArtifactContent) {
-      globalProcessedMessageIds.add(latestAIMessage.id);
-      isProcessingRef.current = false;
+  // Handle streaming - open sidebar and stream content when email content detected
+  useEffect(() => {
+    const ctx = contextRef.current;
+    if (!ctx || !isStreaming) {
+      // Reset streaming detection when not streaming
+      if (!isStreaming && streamingDetectedRef.current) {
+        streamingDetectedRef.current = false;
+        lastStreamedContentRef.current = '';
+        ctx?.finishStreaming();
+      }
       return;
     }
 
-    const isEdit = artifactContext.activeArtifact !== null && artifactContext.isSidebarOpen;
+    // Find the currently streaming message (last assistant message)
+    const streamingMessage = messages
+      .filter(m => m.role === 'assistant')
+      .slice(-1)[0];
 
-    globalProcessedMessageIds.add(latestAIMessage.id);
-    
-    artifactContext.processAIResponse(latestAIMessage.id, latestAIMessage.content, isEdit)
-      .finally(() => {
-        isProcessingRef.current = false;
-      });
-  }, [messages, isStreaming, artifactContext]);
+    if (!streamingMessage) return;
+
+    // Check if streaming content has artifact markers
+    if (ctx.hasArtifactContent(streamingMessage.content)) {
+      // Open sidebar and stream content
+      if (!streamingDetectedRef.current) {
+        streamingDetectedRef.current = true;
+        // Start streaming mode - opens sidebar automatically
+        ctx.startStreaming('streaming', 'a');
+        logger.debug('[ArtifactProcessor] Started streaming to artifact sidebar');
+      }
+      // Only update if content actually changed (prevents infinite loops)
+      if (streamingMessage.content !== lastStreamedContentRef.current) {
+        lastStreamedContentRef.current = streamingMessage.content;
+        ctx.updateStreamingContent(streamingMessage.content);
+      }
+    }
+  }, [messages, isStreaming]); // Removed artifactContext from deps - using ref instead
+
+  // Handle completed messages - auto-create artifacts
+  useEffect(() => {
+    const ctx = contextRef.current;
+    if (!ctx || isStreaming) return;
+
+    // Process all unprocessed AI messages and AUTO-CREATE artifacts
+    const unprocessedAIMessages = messages.filter(
+      m => m.role === 'assistant' && !processedMessageIdsRef.current.has(m.id)
+    );
+
+    for (const message of unprocessedAIMessages) {
+      // Mark as processed immediately to avoid duplicate processing
+      processedMessageIdsRef.current.add(message.id);
+
+      // Check if content qualifies for artifact
+      if (ctx.hasArtifactContent(message.content)) {
+        // Check if artifact already exists for this message
+        const existingArtifact = ctx.findArtifactByMessageId(message.id);
+
+        if (!existingArtifact) {
+          // Auto-create artifact (standard artifact pattern - no manual "Save" needed)
+          const suggestion = ctx.suggestArtifact(message.id, message.content);
+          if (suggestion) {
+            ctx.createArtifactFromSuggestion(suggestion).then((artifact) => {
+              if (artifact) {
+                logger.debug('[ArtifactProcessor] Auto-created artifact:', artifact.id);
+                // Focus the artifact and open sidebar
+                ctx.focusArtifact(artifact.id);
+              }
+            });
+          }
+        }
+      }
+    }
+  }, [messages, isStreaming]); // Removed artifactContext from deps - using ref instead
 
   return null;
 }
@@ -316,6 +398,60 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   // Starred emails cache - loaded once per brand to avoid N queries per message
   const [starredEmailContents, setStarredEmailContents] = useState<Set<string>>(new Set());
   
+  // AI Tool Actions - for approval flow and dynamic UI
+  const [pendingActions, setPendingActions] = useState<Array<{
+    id: string;
+    messageId: string;
+    action_type: string;
+    title?: string;
+    initial_prompt?: string;
+    conversations?: Array<{ title: string; initial_prompt: string }>;
+    [key: string]: unknown;
+  }>>([]);
+  
+  const [suggestedActions, setSuggestedActions] = useState<Array<{
+    id: string;
+    messageId: string;
+    label: string;
+    action_type: string;
+    description: string;
+    action_data?: Record<string, unknown>;
+    style?: 'primary' | 'secondary' | 'success' | 'warning';
+    icon?: string;
+  }>>([]);
+  
+  // Conversation Plans - for showing AI's proposed conversation structure
+  const [conversationPlans, setConversationPlans] = useState<Array<{
+    id: string;
+    messageId: string;
+    plan_name: string;
+    plan_description: string;
+    conversations: Array<{
+      title: string;
+      purpose: string;
+      timing?: string;
+      email_type?: 'design' | 'letter';
+      estimated_complexity?: 'simple' | 'moderate' | 'complex';
+    }>;
+    total_count: number;
+    relationship_type: 'sequence' | 'parallel' | 'hierarchical';
+    can_be_sub_conversations: boolean;
+    parent_conversation_id?: string;
+  }>>([]);
+
+  // Agent Invocations - for showing when an agent invokes another agent
+  const [agentInvocations, setAgentInvocations] = useState<Array<{
+    id: string;
+    messageId: string;
+    agent_id: string;
+    agent_name: string;
+    agent_icon: string;
+    task: string;
+    status: 'invoking' | 'completed' | 'failed';
+    response?: string;
+    duration_ms?: number;
+  }>>([]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -337,6 +473,20 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     active: false, 
     targetConversationId: null 
   });
+  
+  // Track which conversation is currently generating (for background generation)
+  // This is separate from currentConversation to allow generation to continue when user navigates away
+  const activeGenerationRef = useRef<{
+    conversationId: string;
+    brandId: string;
+    startTime: Date;
+  } | null>(null);
+  
+  // Artifact context for tool-based artifact creation
+  const artifactContext = useOptionalArtifactContext();
+  
+  // Background generation context for async chat generation
+  const bgGeneration = useBackgroundGenerationOptional();
   
   // Enhanced sidebar state management (using ref to avoid initialization order issues)
   const sidebarState = useSidebarState({
@@ -484,29 +634,48 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
   }, [searchParams, conversations, currentConversation?.id, brandId, pathname, router]);
 
-  // Handle Quick Start params
+  // Handle Quick Start params (from home page compose box)
   useEffect(() => {
     const initialPrompt = searchParams.get('initialPrompt');
     const mode = searchParams.get('mode') as ConversationMode;
     const type = searchParams.get('emailType') as EmailType;
+    const modelFromUrl = searchParams.get('model') as AIModel;
+
+    // Update selected model from URL if provided
+    if (modelFromUrl && modelFromUrl !== selectedModel) {
+      setSelectedModel(modelFromUrl);
+    }
 
     if (initialPrompt && !loading && !currentConversation && !isCreatingEmail && !pendingPrompt) {
+      // Set mode before creating conversation if provided
+      if (mode) {
+        setConversationMode(mode);
+      }
+
       setPendingPrompt(initialPrompt);
       handleNewConversation(mode || 'email_copy', type || 'design');
-      
+
       // Clean URL to prevent re-triggering
       const newParams = new URLSearchParams(searchParams.toString());
       newParams.delete('initialPrompt');
       newParams.delete('mode');
       newParams.delete('emailType');
+      newParams.delete('model');
       const paramString = newParams.toString();
       router.replace(paramString ? `${pathname}?${paramString}` : pathname);
     }
-  }, [searchParams, loading, currentConversation, isCreatingEmail, pendingPrompt, pathname, router]);
+  }, [searchParams, loading, currentConversation, isCreatingEmail, pendingPrompt, pathname, router, selectedModel]);
 
   // Trigger pending prompt
   useEffect(() => {
     if (pendingPrompt && currentConversation && !sending && !loadingMessages) {
+      // CRITICAL: Wait for the real conversation ID (not temp ID)
+      // The optimistic conversation has a temp-* ID which will fail database operations
+      if (currentConversation.id.startsWith('temp-')) {
+        logger.log('[PendingPrompt] Waiting for real conversation ID. Current ID:', currentConversation.id);
+        return;
+      }
+      
       // IMPORTANT: If the pending prompt is for a flow, make sure we're on a flow conversation
       // This prevents sending flow prompts to non-flow conversations due to race conditions
       const isFlowPrompt = pendingPrompt.toLowerCase().includes('flow') || 
@@ -769,6 +938,45 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     if (draft) {
       logger.log('[MessagesEffect] Loaded draft for conversation:', conversationId);
       setDraftContent(draft);
+    }
+    
+    // Check for pending updates from background generation
+    if (bgGeneration) {
+      const pendingUpdate = bgGeneration.consumePendingUpdate(conversationId);
+      if (pendingUpdate) {
+        logger.log('[MessagesEffect] Found pending background update for:', conversationId);
+        
+        // Add the completed message to the UI
+        const completedMessage: Message = {
+          id: pendingUpdate.aiMessageId,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: pendingUpdate.content,
+          thinking: pendingUpdate.thinking || undefined,
+          metadata: pendingUpdate.metadata ?? undefined,
+          created_at: new Date().toISOString(),
+        };
+        
+        // Only add if not already in messages (might have been added via realtime)
+        setMessages((prev) => {
+          const exists = prev.some(m => m.id === completedMessage.id);
+          if (!exists) {
+            cacheMessages(conversationId, [...prev, completedMessage]);
+            return [...prev, completedMessage];
+          }
+          return prev;
+        });
+        
+        toast.success('Background generation complete!', { icon: '✨' });
+      }
+      
+      // Update UI if this conversation is currently generating in background
+      const genState = bgGeneration.getGenerationState(conversationId);
+      if (genState && !genState.completedAt) {
+        logger.log('[MessagesEffect] Conversation is generating in background:', conversationId);
+        setSending(true);
+        setAiStatus(genState.status);
+      }
     }
     
     // Subscribe to real-time message updates
@@ -1107,6 +1315,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     // Apply additional filters
     if (currentFilter === 'mine') {
       filtered = filtered.filter(c => c.user_id === currentUserId);
+    } else if (currentFilter === 'shared_with_me') {
+      // Conversations shared with me (team visibility, not my own)
+      filtered = filtered.filter(c => c.user_id !== currentUserId && c.visibility === 'team');
     } else if (currentFilter === 'person' && selectedPersonId) {
       filtered = filtered.filter(c => c.user_id === selectedPersonId);
     } else if (currentFilter === 'emails') {
@@ -1401,13 +1612,43 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       isSelectingConversationRef.current = true;
       navigationInProgressRef.current = { active: true, targetConversationId: null };
       
-      // Abort any ongoing AI generation before switching
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        setSending(false);
-        setAiStatus('idle');
-        toast('Previous generation stopped', { icon: '⏹️' });
+      // BACKGROUND GENERATION: Instead of aborting, let generation continue in background
+      if (abortControllerRef.current && sending && currentConversation) {
+        if (bgGeneration) {
+          // Register the generation with the background context
+          // Note: We don't pass current content - it's managed by handleSendMessage
+          // The context is mainly for tracking active generations and showing notifications
+          bgGeneration.registerExistingGeneration({
+            conversationId: currentConversation.id,
+            conversationTitle: currentConversation.title || 'Conversation',
+            brandId: currentConversation.brand_id || brandId,
+            abortController: abortControllerRef.current,
+            // initialContent and initialThinking are optional - streaming content
+            // continues to be managed by the handleSendMessage function
+          });
+          
+          // Let the user know generation will continue
+          toast.success(
+            <span className="flex items-center gap-2">
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span>Generation continues in background</span>
+            </span>,
+            { duration: 3000 }
+          );
+          logger.log('[NewConversation] Letting generation continue in background for:', currentConversation.id);
+        } else {
+          // Fallback: abort if no background context (shouldn't happen normally)
+          abortControllerRef.current.abort();
+          toast('Previous generation stopped', { icon: '⏹️' });
+        }
       }
+      
+      // Reset local sending state regardless (the background context handles the ongoing generation)
+      setSending(false);
+      setAiStatus('idle');
 
       // Auto-delete current conversation if it's empty
       if (currentConversation && messages.length === 0) {
@@ -1426,6 +1667,11 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       const isFlowConversation = initialEmailType === 'flow';
       const conversationTitle = isFlowConversation ? 'New Flow' : 'New Conversation';
 
+      // Check if this is a custom mode - custom modes are stored as 'email_copy' in DB
+      // but we track the full mode (custom_<uuid>) in local state
+      const isCustomModeValue = typeof initialMode === 'string' && initialMode.startsWith('custom_');
+      const dbMode: BaseConversationMode = isCustomModeValue ? 'email_copy' : initialMode as BaseConversationMode;
+
       // Optimistic UI: Create temporary conversation object immediately
       const tempId = `temp-${Date.now()}`;
       const optimisticConversation: Conversation = {
@@ -1436,7 +1682,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         title: conversationTitle,
         model: selectedModel,
         conversation_type: 'email',
-        mode: initialMode,
+        mode: dbMode,
         is_flow: isFlowConversation,
         flow_type: isFlowConversation ? 'welcome_series' : undefined,
         created_at: new Date().toISOString(),
@@ -1459,6 +1705,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       setSelectedFlowType(isFlowConversation ? 'welcome_series' : null);
 
       // Now create in database - include is_flow and flow_type for flow conversations
+      // Note: dbMode is used (not initialMode) because custom modes must be stored as 'email_copy'
       const insertData: Record<string, unknown> = {
           brand_id: brandId,
           user_id: user.id,
@@ -1466,7 +1713,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         title: conversationTitle,
           model: selectedModel,
           conversation_type: 'email',
-          mode: initialMode,
+          mode: dbMode,
       };
       
       if (isFlowConversation) {
@@ -1594,13 +1841,44 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
     logger.log('[SelectConversation] Switching to conversation:', conversationId);
 
-    // Abort any ongoing AI generation before switching
-    if (abortControllerRef.current && sending) {
-      abortControllerRef.current.abort();
-      setSending(false);
-      setAiStatus('idle');
-      toast('Generation stopped - switching conversations', { icon: '⏹️' });
+    // BACKGROUND GENERATION: Instead of aborting, let generation continue in background
+    // The background context will handle saving the message and notifying when complete
+    if (abortControllerRef.current && sending && currentConversation) {
+      // Check if background generation is available
+      if (bgGeneration) {
+        // Register the generation with the background context so it can track progress
+        // and show the pulsing indicator in the sidebar
+        bgGeneration.registerExistingGeneration({
+          conversationId: currentConversation.id,
+          conversationTitle: currentConversation.title || 'Conversation',
+          brandId: currentConversation.brand_id || brandId,
+          abortController: abortControllerRef.current,
+        });
+        
+        // Let the user know generation will continue
+        toast.success(
+          <span className="flex items-center gap-2">
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <span>Generation continues in background</span>
+          </span>,
+          { duration: 3000 }
+        );
+        logger.log('[SelectConversation] Letting generation continue in background for:', currentConversation.id);
+      } else {
+        // Fallback: abort if no background context (shouldn't happen normally)
+        abortControllerRef.current.abort();
+        setSending(false);
+        setAiStatus('idle');
+        toast('Generation stopped - switching conversations', { icon: '⏹️' });
+      }
     }
+    
+    // Reset local sending state regardless (the background context handles it now)
+    setSending(false);
+    setAiStatus('idle');
 
     // Auto-delete current conversation if it's empty (do this before UI update)
     if (currentConversation && 
@@ -2260,6 +2538,18 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Get all messages up to the user message
       const conversationHistory = messages.slice(0, userMessageIndex + 1);
 
+      // Sanitize messages for API - ensure content is always a string
+      const sanitizedHistory = conversationHistory
+        .filter((msg): msg is Message =>
+          msg != null &&
+          typeof msg.role === 'string' &&
+          ['user', 'assistant', 'system'].includes(msg.role)
+        )
+        .map(msg => ({
+          ...msg,
+          content: msg.content ?? '',
+        }));
+
       // Create abort controller
       abortControllerRef.current = new AbortController();
 
@@ -2270,7 +2560,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: conversationHistory,
+          messages: sanitizedHistory,
           modelId: selectedModel,
           brandContext: brand,
           conversationMode: conversationMode,
@@ -2444,13 +2734,25 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     try {
       abortControllerRef.current = new AbortController();
 
+      // Sanitize messages for API - ensure content is always a string
+      const sanitizedMessages = messages.slice(0, lastAIMessageIndex + 1)
+        .filter((msg): msg is Message =>
+          msg != null &&
+          typeof msg.role === 'string' &&
+          ['user', 'assistant', 'system'].includes(msg.role)
+        )
+        .map(msg => ({
+          ...msg,
+          content: msg.content ?? '',
+        }));
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: messages.slice(0, lastAIMessageIndex + 1),
+          messages: sanitizedMessages,
           modelId: selectedModel,
           brandContext: brand,
           conversationMode: conversationMode,
@@ -2684,6 +2986,261 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
     }
   };
 
+  // ===== AI TOOL ACTION HANDLERS =====
+  
+  // Handle approval of pending actions (create conversation, bulk create, etc.)
+  const handleApprovePendingAction = async (action: {
+    id: string;
+    action_type: string;
+    title?: string;
+    initial_prompt?: string;
+    conversations?: Array<{ title: string; initial_prompt: string; mode?: string }>;
+    parent_conversation_id?: string;
+    mode?: string;
+    metadata?: Record<string, unknown>;
+  }) => {
+    if (!brand || !currentUserId) {
+      toast.error('Unable to perform action');
+      return;
+    }
+    
+    try {
+      if (action.action_type === 'create_conversation') {
+        // Create a single conversation
+        const { data: newConversation, error } = await supabase
+          .from('conversations')
+          .insert({
+            brand_id: brand.id,
+            user_id: currentUserId,
+            title: action.title || 'New Conversation',
+            mode: action.mode || 'email_copy',
+            parent_conversation_id: action.parent_conversation_id,
+            created_by_name: currentUserName,
+          })
+          .select()
+          .single();
+        
+        if (error) throw error;
+        
+        // Add initial message if provided
+        if (action.initial_prompt && newConversation) {
+          await supabase
+            .from('messages')
+            .insert({
+              conversation_id: newConversation.id,
+              role: 'user',
+              content: action.initial_prompt,
+              user_id: currentUserId,
+            });
+        }
+        
+        // Remove from pending actions
+        setPendingActions(prev => prev.filter(a => a.id !== action.id));
+        
+        // Refresh conversations and navigate
+        if (loadConversationsRef.current) {
+          await loadConversationsRef.current();
+        }
+        
+        toast.success(`Created conversation: ${action.title || 'New Conversation'}`);
+        
+      } else if (action.action_type === 'create_bulk_conversations' && action.conversations) {
+        // Create multiple conversations
+        const createdConversations = [];
+        
+        for (let i = 0; i < action.conversations.length; i++) {
+          const conv = action.conversations[i];
+          
+          const { data: newConversation, error } = await supabase
+            .from('conversations')
+            .insert({
+              brand_id: brand.id,
+              user_id: currentUserId,
+              title: conv.title,
+              mode: conv.mode || 'email_copy',
+              parent_conversation_id: currentConversation?.id,
+              flow_sequence_order: i + 1,
+              created_by_name: currentUserName,
+            })
+            .select()
+            .single();
+          
+          if (error) {
+            logger.error('Error creating conversation:', error);
+            continue;
+          }
+          
+          // Add initial message
+          if (conv.initial_prompt && newConversation) {
+            await supabase
+              .from('messages')
+              .insert({
+                conversation_id: newConversation.id,
+                role: 'user',
+                content: conv.initial_prompt,
+                user_id: currentUserId,
+              });
+          }
+          
+          createdConversations.push(newConversation);
+        }
+        
+        // Remove from pending actions
+        setPendingActions(prev => prev.filter(a => a.id !== action.id));
+        
+        // Refresh conversations
+        if (loadConversationsRef.current) {
+          await loadConversationsRef.current();
+        }
+        
+        toast.success(`Created ${createdConversations.length} conversations`);
+      }
+    } catch (error) {
+      logger.error('Error approving action:', error);
+      toast.error('Failed to perform action');
+    }
+  };
+  
+  // Handle rejection of pending actions
+  const handleRejectPendingAction = (action: { id: string }) => {
+    setPendingActions(prev => prev.filter(a => a.id !== action.id));
+    toast('Action cancelled', { icon: '❌' });
+  };
+  
+  // Handle click on suggested action buttons
+  const handleSuggestedActionClick = async (action: {
+    id: string;
+    action_type: string;
+    action_data?: Record<string, unknown>;
+  }) => {
+    try {
+      switch (action.action_type) {
+        case 'create_emails_from_plan':
+          // Convert plan to pending bulk conversation action
+          const planData = action.action_data as { emails?: Array<{ title: string; brief: string }> } | undefined;
+          const emails = planData?.emails;
+          if (emails && emails.length > 0) {
+            setPendingActions(prev => [...prev, {
+              id: `action_${Date.now()}`,
+              messageId: '',
+              action_type: 'create_bulk_conversations',
+              conversations: emails.map(e => ({
+                title: e.title,
+                initial_prompt: e.brief,
+              })),
+            }]);
+          }
+          break;
+        
+        case 'save_as_template':
+          toast.success('Template saving coming soon!');
+          break;
+        
+        case 'export_content':
+          toast.success('Export coming soon!');
+          break;
+        
+        default:
+          logger.log('Unknown action type:', action.action_type);
+      }
+      
+      // Mark action as used
+      setSuggestedActions(prev => prev.filter(a => a.id !== action.id));
+      
+    } catch (error) {
+      logger.error('Error executing suggested action:', error);
+      toast.error('Failed to execute action');
+    }
+  };
+  
+  // Handle approval of conversation plans
+  const handleApproveConversationPlan = async (plan: {
+    id: string;
+    plan_name: string;
+    conversations: Array<{
+      title: string;
+      purpose: string;
+      timing?: string;
+      email_type?: 'design' | 'letter';
+    }>;
+    total_count: number;
+    can_be_sub_conversations: boolean;
+    parent_conversation_id?: string;
+  }) => {
+    if (!brand || !currentUserId) {
+      toast.error('Unable to create conversations');
+      return;
+    }
+    
+    try {
+      const createdConversations = [];
+      const parentId = plan.can_be_sub_conversations 
+        ? (plan.parent_conversation_id || currentConversation?.id)
+        : undefined;
+      
+      for (let i = 0; i < plan.conversations.length; i++) {
+        const conv = plan.conversations[i];
+        
+        // Build initial prompt from the plan's purpose and timing
+        const initialPrompt = `Create ${conv.title}\n\nPurpose: ${conv.purpose}${conv.timing ? `\nTiming: ${conv.timing}` : ''}${conv.email_type ? `\nEmail Type: ${conv.email_type}` : ''}`;
+        
+        const { data: newConversation, error } = await supabase
+          .from('conversations')
+          .insert({
+            brand_id: brand.id,
+            user_id: currentUserId,
+            title: conv.title,
+            mode: 'email_copy',
+            parent_conversation_id: parentId,
+            flow_sequence_order: i + 1,
+            flow_email_title: conv.title,
+            created_by_name: currentUserName,
+          })
+          .select()
+          .single();
+        
+        if (error) {
+          logger.error('Error creating conversation from plan:', error);
+          continue;
+        }
+        
+        // Add initial message with the brief
+        if (newConversation) {
+          await supabase
+            .from('messages')
+            .insert({
+              conversation_id: newConversation.id,
+              role: 'user',
+              content: initialPrompt,
+              user_id: currentUserId,
+            });
+          
+          createdConversations.push(newConversation);
+        }
+      }
+      
+      // Remove from plans
+      setConversationPlans(prev => prev.filter(p => p.id !== plan.id));
+      
+      // Refresh conversations
+      if (loadConversationsRef.current) {
+        await loadConversationsRef.current();
+      }
+      
+      toast.success(`Created ${createdConversations.length} conversations from "${plan.plan_name}"`);
+      
+    } catch (error) {
+      logger.error('Error approving conversation plan:', error);
+      toast.error('Failed to create conversations');
+    }
+  };
+  
+  // Handle rejection of conversation plans
+  const handleRejectConversationPlan = (plan: { id: string }) => {
+    setConversationPlans(prev => prev.filter(p => p.id !== plan.id));
+    toast('Plan cancelled', { icon: '❌' });
+  };
+
   // Wrapper to handle ChatInput's (message, files?) signature
   // This converts the files parameter to the internal skipUserMessage flag
   // Optional explicitMessages parameter allows passing pre-computed messages (e.g., for edit scenarios)
@@ -2699,6 +3256,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       return;
     }
 
+    // CRITICAL: Prevent sending messages to temp conversations (before database insert completes)
+    if (currentConversation.id.startsWith('temp-')) {
+      logger.warn('[SendMessage] Blocked send to temp conversation:', currentConversation.id);
+      toast.error('Please wait for conversation to be created...');
+      return;
+    }
+
     // Check if offline
     if (!isOnline) {
       const queuedMsg = addToQueue(currentConversation.id, content);
@@ -2708,10 +3272,37 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       return;
     }
 
+    // BACKGROUND GENERATION SUPPORT: Capture conversation context at the start
+    // This allows generation to continue even if user navigates to a different conversation
+    const generationConversationId = currentConversation.id;
+    const generationConversationTitle = currentConversation.title || 'New Conversation';
+    const generationBrandId = brandId;
+    
+    // Track this generation for background processing
+    activeGenerationRef.current = {
+      conversationId: generationConversationId,
+      brandId: generationBrandId,
+      startTime: new Date(),
+    };
+    
+    // Helper to check if we're still viewing the generation's conversation
+    // IMPORTANT: Check activeGenerationRef to avoid stale closure issues with currentConversation state
+    const isStillOnGeneratingConversation = () => {
+      // If active generation ref is null or doesn't match, we've definitely navigated away
+      if (!activeGenerationRef.current || activeGenerationRef.current.conversationId !== generationConversationId) {
+        return false;
+      }
+      // Double-check: if the background context is tracking this generation, we've navigated away
+      if (bgGeneration?.isGenerating(generationConversationId)) {
+        return false;
+      }
+      return true;
+    };
+
     // IMMEDIATE FEEDBACK: Show user message and loading state instantly
     const tempUserMessage: Message | null = !skipUserMessage ? {
       id: `temp-${Date.now()}`,
-      conversation_id: currentConversation.id,
+      conversation_id: generationConversationId,
       role: 'user',
       content,
       created_at: new Date().toISOString(),
@@ -2864,7 +3455,20 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Call AI API with streaming
       // When skipUserMessage=true (edit case), userMessage is already in messagesToUse, don't duplicate
       // When skipUserMessage=false (new message), userMessage was just created and needs to be appended
-      const messagesForApi = skipUserMessage ? messagesToUse : [...messagesToUse, userMessage];
+      const rawMessages = skipUserMessage ? messagesToUse : [...messagesToUse, userMessage];
+
+      // Sanitize messages for API - ensure content is always a string and filter invalid messages
+      // This prevents "Invalid request format" errors when DB returns null content
+      const messagesForApi = rawMessages
+        .filter((msg): msg is Message =>
+          msg != null &&
+          typeof msg.role === 'string' &&
+          ['user', 'assistant', 'system'].includes(msg.role)
+        )
+        .map(msg => ({
+          ...msg,
+          content: msg.content ?? '', // Ensure content is never null/undefined
+        }));
       
       // Create AI placeholder IMMEDIATELY before fetch for instant user feedback
       // This shows the thinking indicator right away instead of waiting for network response
@@ -2901,7 +3505,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           // Add flow parameters if in flow mode
           // Check both database flag AND UI state to handle race conditions
           isFlowMode: isFlowConversation && !flowOutline?.approved,
-          flowType: flowTypeToUse,
+          // Only include flowType if it has a value (undefined is omitted from JSON, null is not)
+          flowType: flowTypeToUse || undefined,
           // Include file attachments
           attachments: attachments.length > 0 ? attachments : undefined,
         }),
@@ -2939,6 +3544,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'other';
       let finalContent = ''; // Final response content (email or clarification)
       const CHECKPOINT_INTERVAL = 100; // Create checkpoint every 100 chunks
+      
+      // Track artifacts created during streaming (for tool-call-only responses)
+      let createdArtifacts: Array<{ id: string; kind: string; title: string }> = [];
       
       // Throttle UI updates to 60fps max for smoother performance
       let lastUpdateTime = 0;
@@ -3018,10 +3626,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   case 'tool_use':
                     if (message.status === 'start') {
                       logger.log(`[Tool] ${message.tool} started`);
-                      setAiStatus('searching_web');
                       
-                      // Add web search indicator to thinking content for UI display
                       if (message.tool === 'web_search') {
+                        setAiStatus('searching_web');
                         allThinkingContent += `\n\n[Using web search to find information...]\n\n`;
                         // Update message to show the indicator immediately
                         setMessages((prev) =>
@@ -3031,14 +3638,35 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                               : msg
                           )
                         );
+                      } else if (message.tool === 'generate_image') {
+                        setAiStatus('generating_image');
+                        allThinkingContent += `\n\n[Generating image...]\n\n`;
+                        setMessages((prev) =>
+                          prev.map((msg) =>
+                            msg.id === aiMessageId
+                              ? { ...msg, thinking: allThinkingContent, content: allStreamedContent }
+                              : msg
+                          )
+                        );
+                      } else {
+                        setAiStatus('searching_web');
                       }
                     } else if (message.status === 'end') {
                       logger.log(`[Tool] ${message.tool} completed`);
                       
-                      // Add web search complete indicator
+                      // Add tool complete indicator
                       if (message.tool === 'web_search') {
                         allThinkingContent += `[Web search complete]\n\n`;
                         // Update message to show completion
+                        setMessages((prev) =>
+                          prev.map((msg) =>
+                            msg.id === aiMessageId
+                              ? { ...msg, thinking: allThinkingContent, content: allStreamedContent }
+                              : msg
+                          )
+                        );
+                      } else if (message.tool === 'generate_image') {
+                        allThinkingContent += `[Image generation complete]\n\n`;
                         setMessages((prev) =>
                           prev.map((msg) =>
                             msg.id === aiMessageId
@@ -3089,7 +3717,139 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                     productLinks = message.products || [];
                     logger.log('[Stream] Received product links:', productLinks.length);
                     break;
+                  
+                  // ===== NEW TOOL EVENTS =====
+                  
+                  case 'images_generated':
+                    // AI generated images via generate_image tool
+                    logger.log('[Stream] Images generated:', message.images?.length || 0);
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === aiMessageId
+                          ? {
+                              ...msg,
+                              metadata: {
+                                ...msg.metadata,
+                                generatedImages: message.images || [],
+                                imageModel: message.model,
+                                imagePrompt: message.prompt,
+                              },
+                            }
+                          : msg
+                      )
+                    );
+                    setAiStatus('idle');
+                    break;
                     
+                  case 'artifact_created':
+                    // AI explicitly created an artifact via tool call
+                    logger.log('[Stream] Artifact created via tool:', message.artifactId);
+                    // Track the artifact for message content generation
+                    createdArtifacts.push({
+                      id: message.artifactId,
+                      kind: message.kind || 'unknown',
+                      title: message.title || 'Untitled',
+                    });
+                    // The artifact is already in the database, just need to refresh and show
+                    if (artifactContext) {
+                      // Refresh artifacts list
+                      artifactContext.refetch?.();
+                      // Open the artifact sidebar with the new artifact
+                      if (message.artifactId) {
+                        artifactContext.focusArtifact?.(message.artifactId);
+                      }
+                    }
+                    break;
+                    
+                  case 'artifact_suggestion':
+                    // Fallback: AI didn't explicitly create artifact but content looks like one
+                    // Note: This is now heavily filtered by worthiness check in the API
+                    logger.log('[Stream] Artifact suggestion:', message.kind, message.confidence);
+                    // Only create suggestions for high confidence artifacts
+                    if (artifactContext && message.confidence === 'high') {
+                      artifactContext.suggestArtifact?.(aiMessageId, allStreamedContent);
+                    }
+                    break;
+                    
+                  case 'pending_action':
+                    // AI wants to perform an action that requires user approval
+                    logger.log('[Stream] Pending action:', message.action_type);
+                    // Store the pending action for the approval UI
+                    setPendingActions((prev) => [...prev, {
+                      id: `action_${Date.now()}`,
+                      messageId: aiMessageId,
+                      action_type: message.action_type,
+                      ...message,
+                    }]);
+                    break;
+                    
+                  case 'suggested_action':
+                    // AI is suggesting a quick action button
+                    logger.log('[Stream] Suggested action:', message.label);
+                    // Store for rendering action buttons
+                    setSuggestedActions((prev) => [...prev, {
+                      id: `action_${Date.now()}`,
+                      messageId: aiMessageId,
+                      ...message,
+                    }]);
+                    break;
+                  
+                  case 'conversation_plan':
+                    // AI is suggesting a plan for creating multiple conversations
+                    logger.log('[Stream] Conversation plan:', message.plan_name, 'with', message.total_count, 'conversations');
+                    // Store for rendering the plan preview card
+                    // aiMessageId is guaranteed to be set at this point since we create it before fetching
+                    if (aiMessageId) {
+                      const messageIdForPlan = aiMessageId; // Capture for closure
+                      setConversationPlans((prev) => [...prev, {
+                        id: `plan_${Date.now()}`,
+                        messageId: messageIdForPlan,
+                        plan_name: message.plan_name as string,
+                        plan_description: message.plan_description as string,
+                        conversations: message.conversations as Array<{
+                          title: string;
+                          purpose: string;
+                          timing?: string;
+                          email_type?: 'design' | 'letter';
+                          estimated_complexity?: 'simple' | 'moderate' | 'complex';
+                        }>,
+                        total_count: message.total_count as number,
+                        relationship_type: message.relationship_type as 'sequence' | 'parallel' | 'hierarchical',
+                        can_be_sub_conversations: message.can_be_sub_conversations as boolean,
+                        parent_conversation_id: message.parent_conversation_id as string | undefined,
+                      }]);
+                    }
+                    break;
+
+                  case 'agent_invocation':
+                    // An agent is invoking another agent - show this in the UI
+                    logger.log('[Stream] Agent invocation:', message.agent_name, 'for task:', message.task);
+                    setAgentInvocations((prev) => [...prev, {
+                      id: `agent_${Date.now()}`,
+                      messageId: aiMessageId || 'pending',
+                      agent_id: message.agent_id as string,
+                      agent_name: message.agent_name as string,
+                      agent_icon: message.agent_icon as string,
+                      task: message.task as string,
+                      status: 'invoking' as const,
+                    }]);
+                    break;
+
+                  case 'agent_response':
+                    // Agent has completed - update the invocation status
+                    logger.log('[Stream] Agent response:', message.agent_name, 'status:', message.status);
+                    setAgentInvocations((prev) => prev.map((inv) =>
+                      inv.agent_id === message.agent_id && inv.status === 'invoking'
+                        ? {
+                            ...inv,
+                            status: message.status as 'completed' | 'failed',
+                            response: message.response as string,
+                            duration_ms: message.duration_ms as number,
+                          }
+                        : inv
+                    ));
+                    break;
+
                   default:
                     logger.warn('[Stream] Unknown message type:', message.type);
                 }
@@ -3157,6 +3917,22 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
           const existingMessage = messages.find((msg) => msg.id === aiMessageId);
           const baseMetadata = existingMessage?.metadata || {};
+          
+          // For artifact-only responses, generate UI content now (before final UI update)
+          let displayContent = finalContent;
+          if (!displayContent && createdArtifacts.length > 0) {
+            const kindLabels: Record<string, string> = {
+              'calendar': 'calendar',
+              'email_copy': 'email copy',
+              'email_brief': 'email brief',
+              'code': 'code snippet',
+              'document': 'document',
+            };
+            const artifactDescriptions = createdArtifacts.map(a => 
+              `${kindLabels[a.kind] || a.kind} "${a.title}"`
+            );
+            displayContent = `I've created ${artifactDescriptions.join(' and ')} for you. You can view and edit it in the sidebar.`;
+          }
 
           // Final update with cleanly separated content and metadata
           setMessages((prev) =>
@@ -3164,13 +3940,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               msg.id === aiMessageId
                 ? {
                     ...msg,
-                    content: finalContent,
+                    content: displayContent,
                     thinking: finalThinking,
                     metadata: {
                       ...baseMetadata,
                       productLinks,
                       responseType: finalResponseType,
                       clarification: finalClarification || undefined,
+                      createdArtifacts: createdArtifacts.length > 0 ? createdArtifacts : undefined,
                     },
                   }
                 : msg
@@ -3274,7 +4051,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // Validate that we have usable parsed content before proceeding
       // Check the parsed outputs (finalContent or finalThinking), not raw stream data
       // This allows legitimate partial responses (thinking without copy, or clarification requests)
-      if (!finalContent && !finalThinking) {
+      // ALSO allow responses that only created artifacts (tool-call-only responses)
+      if (!finalContent && !finalThinking && createdArtifacts.length === 0) {
         // Check if this was due to an intentional abort/cancellation
         // If the abort controller was triggered, throw an AbortError instead
         if (currentController?.signal?.aborted) {
@@ -3288,25 +4066,49 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         logger.error('[Stream] First 200 chars of raw stream:', allStreamedContent.substring(0, 200));
         throw new Error('No usable content could be extracted from the response. The AI may have returned an empty or malformed response.');
       }
+      
+      // For artifact-only responses, generate a descriptive message
+      if (!finalContent && createdArtifacts.length > 0) {
+        logger.log('[Stream] Artifact-only response detected, generating message content');
+        const artifactDescriptions = createdArtifacts.map(a => {
+          const kindLabels: Record<string, string> = {
+            'calendar': 'calendar',
+            'email_copy': 'email copy',
+            'email_brief': 'email brief',
+            'code': 'code snippet',
+            'document': 'document',
+          };
+          return `${kindLabels[a.kind] || a.kind} "${a.title}"`;
+        });
+        finalContent = `I've created ${artifactDescriptions.join(' and ')} for you. You can view and edit it in the sidebar.`;
+        finalResponseType = 'other';
+      }
 
       const fullContent = finalContent;
 
       // IMPORTANT: Reset AI status to idle IMMEDIATELY after stream completes
-      logger.log('[Stream] Completed successfully, resetting status to idle');
-      setAiStatus('idle');
-      setSending(false);
+      // BACKGROUND GENERATION: Only update UI if still on the generating conversation
+      if (isStillOnGeneratingConversation()) {
+        logger.log('[Stream] Completed successfully, resetting status to idle');
+        setAiStatus('idle');
+        setSending(false);
+      } else {
+        logger.log('[Stream] Completed in background, not resetting UI state');
+      }
       
-      // Update sidebar status - completion
-      sidebarState.updateConversationStatus(currentConversation.id, 'idle');
+      // Update sidebar status - completion (always use captured ID)
+      sidebarState.updateConversationStatus(generationConversationId, 'idle');
 
       // CRITICAL: Validate content before saving
       const trimmedContent = finalContent?.trim() || '';
       const hasThinking = finalThinking && finalThinking.trim().length > 0;
       const hasValidContent = trimmedContent.length > 0 && trimmedContent !== ']';
+      const hasArtifacts = createdArtifacts.length > 0;
       
       // Allow messages with only thinking content (for debugging/analysis purposes)
+      // Also allow messages that created artifacts (tool-call-only responses)
       // But reject completely empty messages
-      if (!hasValidContent && !hasThinking) {
+      if (!hasValidContent && !hasThinking && !hasArtifacts) {
         logger.error('[Validation] Invalid final content detected:', {
           finalContentType: typeof finalContent,
           finalContentLength: finalContent?.length || 0,
@@ -3319,7 +4121,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           rawStreamLength: rawStreamContent?.length || 0,
           rawStreamPreview: rawStreamContent?.substring(0, 1000) || 'empty',
           hasThinking,
-          thinkingLength: finalThinking?.length || 0
+          thinkingLength: finalThinking?.length || 0,
+          hasArtifacts,
+          createdArtifacts
         });
         throw new Error('No valid content generated - refusing to save empty message. The AI response may have been malformed or contained only control markers.');
       }
@@ -3345,6 +4149,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       if (finalResponseType === 'clarification' && finalClarification) {
         metadataPayload.clarification = finalClarification;
       }
+      // Track artifacts created by this message
+      if (createdArtifacts.length > 0) {
+        metadataPayload.createdArtifacts = createdArtifacts;
+      }
       const metadataToSave = Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
 
       // Save complete AI message to database with product links and thinking
@@ -3361,13 +4169,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
       
       logger.log('[Database] User authenticated:', user.id);
-      logger.log('[Database] Conversation ID:', currentConversation.id);
-      logger.log('[Database] Brand ID:', brand.id);
+      // BACKGROUND GENERATION: Use captured conversation ID, not current state
+      // This ensures message is saved to correct conversation even if user navigated away
+      logger.log('[Database] Conversation ID (captured):', generationConversationId);
+      logger.log('[Database] Brand ID:', generationBrandId);
       
       const { data: savedAiMessage, error: aiError } = await supabase
         .from('messages')
         .insert({
-          conversation_id: currentConversation.id,
+          conversation_id: generationConversationId, // Use captured ID
           role: 'assistant',
           content: sanitizedContent,
           thinking: sanitizedThinking,
@@ -3388,23 +4198,92 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       }
 
       // Replace placeholder with saved message and remove any duplicates
-      setMessages((prev) => {
-        logger.log('[Messages] Replacing AI placeholder. Prev count:', prev.length);
-        logger.log('[Messages] Placeholder ID:', aiMessageId, 'Saved ID:', savedAiMessage.id);
+      // BACKGROUND GENERATION: Only update UI state if still on the generating conversation
+      if (isStillOnGeneratingConversation()) {
+        setMessages((prev) => {
+          logger.log('[Messages] Replacing AI placeholder. Prev count:', prev.length);
+          logger.log('[Messages] Placeholder ID:', aiMessageId, 'Saved ID:', savedAiMessage.id);
+
+          // First, filter out any existing instances of the saved message ID
+          const withoutDuplicates = prev.filter(msg => msg.id !== savedAiMessage.id);
+          // Then replace the placeholder with the saved message
+          const updated = withoutDuplicates.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg));
+
+          logger.log('[Messages] Final count:', updated.length);
+          return updated;
+        });
+
+        // Update all tool-related state to reference the saved message ID instead of placeholder ID
+        // This ensures plans, actions, and agent invocations show up after the message is saved
+        if (aiMessageId && savedAiMessage.id !== aiMessageId) {
+          // Update conversation plans
+          setConversationPlans((prev) =>
+            prev.map((plan) =>
+              plan.messageId === aiMessageId
+                ? { ...plan, messageId: savedAiMessage.id }
+                : plan
+            )
+          );
+
+          // Update suggested actions
+          setSuggestedActions((prev) =>
+            prev.map((action) =>
+              action.messageId === aiMessageId
+                ? { ...action, messageId: savedAiMessage.id }
+                : action
+            )
+          );
+
+          // Update pending actions
+          setPendingActions((prev) =>
+            prev.map((action) =>
+              action.messageId === aiMessageId
+                ? { ...action, messageId: savedAiMessage.id }
+                : action
+            )
+          );
+
+          // Update agent invocations
+          setAgentInvocations((prev) =>
+            prev.map((invocation) =>
+              invocation.messageId === aiMessageId
+                ? { ...invocation, messageId: savedAiMessage.id }
+                : invocation
+            )
+          );
+
+          logger.log('[ToolState] Updated messageId from', aiMessageId, 'to', savedAiMessage.id);
+        }
+      } else {
+        logger.log('[Messages] User navigated away - message saved to DB, notifying background context');
         
-        // First, filter out any existing instances of the saved message ID
-        const withoutDuplicates = prev.filter(msg => msg.id !== savedAiMessage.id);
-        // Then replace the placeholder with the saved message
-        const updated = withoutDuplicates.map((msg) => (msg.id === aiMessageId ? savedAiMessage : msg));
-        
-        logger.log('[Messages] Final count:', updated.length);
-        return updated;
-      });
+        // Notify background generation context that generation completed
+        if (bgGeneration) {
+          bgGeneration.completeExistingGeneration({
+            conversationId: generationConversationId,
+            success: true,
+            aiMessageId: savedAiMessage.id,
+            content: sanitizedContent,
+            thinking: sanitizedThinking ?? undefined,
+            productLinks: productLinks,
+            metadata: metadataToSave,
+          });
+        } else {
+          // Fallback toast if no context
+          toast.success(
+            <span className="flex items-center gap-2">
+              <span className="font-medium">{generationConversationTitle}</span>
+              <span>finished generating</span>
+            </span>,
+            { icon: '✨', duration: 4000 }
+          );
+        }
+      }
       
-      // Update cache with new messages
+      // Update cache with new messages (always, regardless of current conversation)
       if (userMessage && savedAiMessage) {
-        addCachedMessage(currentConversation.id, userMessage);
-        addCachedMessage(currentConversation.id, savedAiMessage);
+        addCachedMessage(generationConversationId, userMessage);
+        addCachedMessage(generationConversationId, savedAiMessage);
       }
       
       // Detect campaign ideas in planning mode
@@ -3431,29 +4310,36 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       
       // Cache the response for potential regenerations
       cacheResponse(
-        generateCacheKey([...messages, userMessage!], selectedModel, brandId),
+        generateCacheKey([...messages, userMessage!], selectedModel, generationBrandId),
         fullContent,
         selectedModel,
         productLinks
       );
       
+      // Update sidebar status to idle (use captured ID)
+      sidebarState.updateConversationStatus(generationConversationId, 'idle');
+      
       trackEvent('message_sent', {
-        conversationId: currentConversation.id,
+        conversationId: generationConversationId,
         model: selectedModel,
         mode: conversationMode,
         messageLength: content.length,
         responseLength: fullContent.length
       });
     } catch (error: any) {
-      // Remove the placeholder AI message on error (if it was created)
-      if (aiMessageId) {
+      // Remove the placeholder AI message on error (only if still on same conversation)
+      if (aiMessageId && isStillOnGeneratingConversation()) {
         setMessages((prev) => prev.filter((msg) => msg.id !== aiMessageId));
         logger.log('[Error] Removed placeholder AI message:', aiMessageId);
       }
       
       if (error.name === 'AbortError') {
-        toast.error('Generation stopped');
-        sidebarState.updateConversationStatus(currentConversation.id, 'idle');
+        // AbortError should only happen if user explicitly stopped (not navigated away)
+        // Background generations don't abort when navigating
+        if (isStillOnGeneratingConversation()) {
+          toast.error('Generation stopped');
+          sidebarState.updateConversationStatus(generationConversationId, 'idle');
+        }
       } else {
         // Enhanced error logging for better debugging
         logger.error('Error sending message:', {
@@ -3463,20 +4349,42 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           error: error
         });
         
-        // Show more specific error message to user
-        const errorMessage = error?.message || 'Failed to send message';
-        toast.error(errorMessage);
-        sidebarState.updateConversationStatus(currentConversation.id, 'error');
+        // Only show error to user if still on the same conversation
+        if (isStillOnGeneratingConversation()) {
+          const errorMessage = error?.message || 'Failed to send message';
+          toast.error(errorMessage);
+          sidebarState.updateConversationStatus(generationConversationId, 'error');
+        } else if (bgGeneration) {
+          // Notify background context of error
+          bgGeneration.completeExistingGeneration({
+            conversationId: generationConversationId,
+            success: false,
+            error: error?.message || 'Generation failed',
+          });
+        }
       }
-      // CRITICAL: Always reset status to idle
-      logger.log('[Stream] Error occurred, resetting status to idle');
-      setAiStatus('idle');
+      // CRITICAL: Only reset status if still on same conversation
+      if (isStillOnGeneratingConversation()) {
+        logger.log('[Stream] Error occurred, resetting status to idle');
+        setAiStatus('idle');
+      }
     } finally {
-      // CRITICAL: Always reset sending to false
-      logger.log('[Stream] Finally block, ensuring sending=false and status=idle');
-      setSending(false);
-      setAiStatus('idle');
-      // Only clear if this is still the current controller
+      // BACKGROUND GENERATION: Only reset UI state if still on the generating conversation
+      // This prevents interfering with a new generation in a different conversation
+      if (isStillOnGeneratingConversation()) {
+        logger.log('[Stream] Finally block, resetting state for current conversation');
+        setSending(false);
+        setAiStatus('idle');
+      } else {
+        logger.log('[Stream] Finally block, skipping state reset (user navigated away)');
+      }
+      
+      // Clear the active generation ref
+      if (activeGenerationRef.current?.conversationId === generationConversationId) {
+        activeGenerationRef.current = null;
+      }
+      
+      // Only clear abort controller if this is still the current controller
       if (abortControllerRef.current === currentController) {
         abortControllerRef.current = null;
       }
@@ -3543,9 +4451,20 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
   }
 
   const baseContent = (
-    <div className="relative h-screen bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
+    <div className="relative h-full bg-[#fcfcfc] dark:bg-gray-950 overflow-hidden">
       <Toaster position="top-right" />
       <RealtimeStatusIndicator />
+      
+      {/* Floating background generations indicator */}
+      <ActiveGenerationsIndicator 
+        onNavigateToConversation={(convId, brandIdNav) => {
+          if (brandIdNav === brandId) {
+            handleSelectConversation(convId);
+          } else {
+            router.push(`/brands/${brandIdNav}/chat?conversation=${convId}`);
+          }
+        }}
+      />
       
       {/* Subtle loading progress bar at top */}
       {loadingMessages && (
@@ -3557,7 +4476,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       {/* Enhanced Sidebar and Main Content with Resizable Panels */}
       <ResizablePanelGroup 
         direction="horizontal" 
-        className="h-screen"
+        className="h-full"
         autoSaveId="chat-layout-panels"
       >
         {/* Sidebar Panel - Desktop only, mobile uses overlay */}
@@ -3574,6 +4493,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               brandId={brandId}
               conversations={filteredConversationsWithStatus}
               currentConversationId={currentConversation?.id || null}
+              currentUserId={currentUserId}
               teamMembers={teamMembers}
               currentFilter={currentFilter}
               selectedPersonId={selectedPersonId}
@@ -3607,6 +4527,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
               onNewFlow={undefined}
               isCreatingEmail={isCreatingEmail}
               isCreatingFlow={isCreatingFlow}
+              hideBrandSwitcher={true}
             />
           </SectionErrorBoundary>
         </SidebarPanelWrapper>
@@ -3619,6 +4540,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             brandId={brandId}
             conversations={filteredConversationsWithStatus}
             currentConversationId={currentConversation?.id || null}
+            currentUserId={currentUserId}
             teamMembers={teamMembers}
             currentFilter={currentFilter}
             selectedPersonId={selectedPersonId}
@@ -3652,6 +4574,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             onNewFlow={undefined}
             isCreatingEmail={isCreatingEmail}
             isCreatingFlow={isCreatingFlow}
+            hideBrandSwitcher={true}
           />
         </SectionErrorBoundary>
         </div>
@@ -3666,13 +4589,14 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           minSize={50} 
           className="min-w-0"
         >
-          <div className="flex flex-col h-screen w-full min-w-0">
+          <div className="flex flex-col h-full w-full min-w-0">
         {/* Enhanced Navigation Header */}
         <ChatHeader
           currentConversation={currentConversation}
           parentFlow={parentFlow}
           brandId={brandId}
           showConversationMenu={showConversationMenu}
+          currentUserId={currentUserId}
           onToggleConversationMenu={() => setShowConversationMenu(!showConversationMenu)}
           onShowShareModal={() => setShowShareModal(true)}
           onNavigateToParent={() => {
@@ -3682,6 +4606,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             }
           }}
           onMobileMenuOpen={() => setIsMobileSidebarOpen(true)}
+          onVisibilityChange={(newVisibility) => {
+            // Update local state immediately for responsive UI
+            if (currentConversation) {
+              setCurrentConversation({ ...currentConversation, visibility: newVisibility });
+              // Also update in conversations list
+              setConversations(prev => prev.map(c => 
+                c.id === currentConversation.id ? { ...c, visibility: newVisibility } : c
+              ));
+            }
+          }}
         />
 
         {/* Messages */}
@@ -3854,6 +4788,15 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                     // Send the quick action prompt as a user message
                     handleSendMessage(prompt);
                   } : undefined}
+                  // AI Tool Actions
+                  pendingActions={pendingActions.filter(a => a.messageId === message.id)}
+                  suggestedActions={suggestedActions.filter(a => a.messageId === message.id)}
+                  conversationPlans={conversationPlans.filter(p => p.messageId === message.id)}
+                  onApprovePendingAction={handleApprovePendingAction}
+                  onRejectPendingAction={handleRejectPendingAction}
+                  onSuggestedActionClick={handleSuggestedActionClick}
+                  onApproveConversationPlan={handleApproveConversationPlan}
+                  onRejectConversationPlan={handleRejectConversationPlan}
                 />
                   ));
                 })()}
@@ -4034,20 +4977,31 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
 
         {/* Artifact Sidebar - Shows email artifacts for editing/reviewing, including comments */}
         {currentConversation && (
-          <ArtifactSidebarPanel onQuoteText={setQuotedText} />
+          <ArtifactSidebarPanel 
+            onQuoteText={setQuotedText} 
+            conversationId={currentConversation.id}
+          />
         )}
       </ResizablePanelGroup>
+
+      {/* Mobile Bottom Navigation */}
+      <MobileBottomNav
+        brandId={brandId}
+        onNewConversation={() => handleNewConversation()}
+        onOpenSidebar={() => setIsMobileSidebarOpen(true)}
+      />
     </div>
   );
 
   // Wrap with ArtifactProvider when we have a conversation
   if (currentConversation) {
-    // #region agent log
-    console.log('[DEBUG-E] Rendering ArtifactProvider wrapper', { conversationId: currentConversation.id, isTempId: currentConversation.id?.startsWith('temp-') });
-    // #endregion
     return (
       <ArtifactProvider conversationId={currentConversation.id}>
-        <ArtifactMessageProcessor messages={messages} isStreaming={sending} />
+        <ArtifactMessageProcessor
+          messages={messages}
+          isStreaming={sending}
+          conversationId={currentConversation.id}
+        />
         {baseContent}
       </ArtifactProvider>
     );

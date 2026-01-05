@@ -4,6 +4,7 @@
 // =====================================================
 
 import { EmailType } from './index';
+import type { GenerativeUIBlock } from './generative-ui';
 
 // =====================================================
 // CORE TYPES - Extensible foundation for all artifacts
@@ -13,13 +14,20 @@ import { EmailType } from './index';
  * Artifact kinds - Add new types here as the system grows
  * Each kind has its own viewer component registered in the artifact registry
  */
-export type ArtifactKind = 
+export type ArtifactKind =
   | 'email'           // Email copy with A/B/C variants
-  | 'flow'            // Email flow/automation sequences  
+  | 'flow'            // Email flow/automation sequences
   | 'campaign'        // Full campaign plans
   | 'template'        // Reusable templates
   | 'subject_lines'   // Subject line variants
-  | 'content_brief';  // Content briefs/outlines
+  | 'content_brief'   // Content briefs/outlines
+  | 'email_brief'     // Email brief for calendar planning
+  | 'calendar'        // Visual email calendar with scheduled items
+  // Baseline artifact types
+  | 'markdown'        // Rich text documents
+  | 'spreadsheet'     // Structured data tables
+  | 'code'            // Code snippets with syntax highlighting
+  | 'checklist';      // Interactive todo/checklist
 
 // Legacy type alias for backwards compatibility
 export type ArtifactType = ArtifactKind;
@@ -56,12 +64,15 @@ export interface SharedMetadata {
   share_token?: string;
   is_shared?: boolean;
   shared_at?: string;
-  
+
   // Source tracking
   source_message_id?: string;
-  
+
   // Status
   status?: ArtifactStatus;
+
+  // Generative UI - interactive elements within artifacts
+  generative_ui?: GenerativeUIBlock[];
 }
 
 // =====================================================
@@ -94,12 +105,12 @@ export interface EmailArtifactWithContent extends Omit<EmailArtifact, 'metadata'
   is_shared: boolean;
   share_token?: string;
   shared_at?: string;
-  
+
   // Email specific
   email_type?: EmailType;
   selected_variant?: ArtifactVariant;
   source_message_id?: string;
-  
+
   // Variant content (flattened from metadata)
   version_a_content?: string;
   version_a_approach?: string;
@@ -107,11 +118,49 @@ export interface EmailArtifactWithContent extends Omit<EmailArtifact, 'metadata'
   version_b_approach?: string;
   version_c_content?: string;
   version_c_approach?: string;
-  
+
   // Version info
   version_count?: number;
   current_version_number?: number;
   latest_change_summary?: string;
+
+  // Generative UI (from SharedMetadata)
+  generative_ui?: GenerativeUIBlock[];
+
+  // Extended fields for other artifact kinds (optional, flattened from metadata)
+  // Code artifact fields
+  language?: string;
+  filename?: string;
+  description?: string;
+
+  // Spreadsheet artifact fields
+  columns?: SpreadsheetColumn[];
+  rows?: SpreadsheetRow[];
+  has_header?: boolean;
+
+  // Checklist artifact fields
+  items?: ChecklistItem[];
+  allow_add?: boolean;
+  show_progress?: boolean;
+
+  // Email brief artifact fields (for calendar planning)
+  campaign_type?: EmailBriefCampaignType;
+  send_date?: string;
+  target_segment?: string;
+  objective?: string;
+  key_message?: string;
+  value_proposition?: string;
+  product_ids?: string[];
+  call_to_action?: string;
+  subject_line_direction?: string;
+  tone_notes?: string;
+  content_guidelines?: string;
+  approval_status?: EmailBriefApprovalStatus;
+  approved_by?: string;
+  approved_at?: string;
+  rejection_notes?: string;
+  calendar_artifact_id?: string;
+  email_conversation_id?: string;
 }
 
 // =====================================================
@@ -186,15 +235,185 @@ export interface SubjectLineArtifactMetadata extends SharedMetadata {
 export interface SubjectLineArtifact extends BaseArtifact<'subject_lines', SubjectLineArtifactMetadata> {}
 
 // =====================================================
+// EMAIL BRIEF ARTIFACT - For calendar planning
+// =====================================================
+
+/**
+ * Campaign type for email briefs
+ */
+export type EmailBriefCampaignType =
+  | 'promotional'
+  | 'content'
+  | 'announcement'
+  | 'transactional'
+  | 'nurture';
+
+/**
+ * Approval status for email briefs
+ */
+export type EmailBriefApprovalStatus =
+  | 'draft'
+  | 'pending_review'
+  | 'approved'
+  | 'rejected';
+
+export interface EmailBriefArtifactMetadata extends SharedMetadata {
+  // Campaign classification
+  campaign_type: EmailBriefCampaignType;
+  send_date?: string;
+  target_segment?: string;
+
+  // Brief content
+  objective: string;
+  key_message: string;
+  value_proposition?: string;
+  product_ids?: string[];  // Reference to Shopify products
+  call_to_action: string;
+
+  // Direction for copywriter
+  subject_line_direction?: string;
+  tone_notes?: string;
+  content_guidelines?: string;
+
+  // Approval workflow
+  approval_status: EmailBriefApprovalStatus;
+  approved_by?: string;
+  approved_at?: string;
+  rejection_notes?: string;
+
+  // Calendar linkage
+  calendar_artifact_id?: string;
+  calendar_slot_index?: number;
+
+  // Child conversation (when email is written)
+  email_conversation_id?: string;
+}
+
+export interface EmailBriefArtifact extends BaseArtifact<'email_brief', EmailBriefArtifactMetadata> {}
+
+// =====================================================
+// MARKDOWN ARTIFACT - Rich text documents
+// =====================================================
+
+export interface MarkdownArtifactMetadata extends SharedMetadata {
+  format?: 'article' | 'notes' | 'documentation';
+}
+
+export interface MarkdownArtifact extends BaseArtifact<'markdown', MarkdownArtifactMetadata> {}
+
+// =====================================================
+// SPREADSHEET ARTIFACT - Structured data tables
+// =====================================================
+
+export interface SpreadsheetColumn {
+  id: string;
+  name: string;
+  type?: 'text' | 'number' | 'date' | 'boolean';
+  width?: number;
+}
+
+export interface SpreadsheetRow {
+  id: string;
+  cells: Record<string, string | number | boolean | null>;
+}
+
+export interface SpreadsheetArtifactMetadata extends SharedMetadata {
+  columns: SpreadsheetColumn[];
+  rows: SpreadsheetRow[];
+  has_header?: boolean;
+}
+
+export interface SpreadsheetArtifact extends BaseArtifact<'spreadsheet', SpreadsheetArtifactMetadata> {}
+
+// =====================================================
+// CODE ARTIFACT - Code snippets with syntax highlighting
+// =====================================================
+
+export interface CodeArtifactMetadata extends SharedMetadata {
+  language: string;
+  filename?: string;
+  description?: string;
+}
+
+export interface CodeArtifact extends BaseArtifact<'code', CodeArtifactMetadata> {}
+
+// =====================================================
+// CHECKLIST ARTIFACT - Interactive todo/checklist
+// =====================================================
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  checked: boolean;
+  indent?: number;
+}
+
+export interface ChecklistArtifactMetadata extends SharedMetadata {
+  items: ChecklistItem[];
+  allow_add?: boolean;
+  show_progress?: boolean;
+}
+
+export interface ChecklistArtifact extends BaseArtifact<'checklist', ChecklistArtifactMetadata> {}
+
+// =====================================================
+// CALENDAR ARTIFACT - Visual email calendar
+// =====================================================
+
+/**
+ * A slot/item on the calendar representing a planned email
+ */
+export interface CalendarSlot {
+  id: string;
+  date: string; // ISO date string (YYYY-MM-DD)
+  title: string;
+  description?: string;
+  email_type?: 'promotional' | 'content' | 'announcement' | 'transactional' | 'nurture';
+  status?: 'draft' | 'scheduled' | 'sent' | 'approved' | 'pending';
+  email_brief_id?: string; // Link to email brief artifact
+  email_artifact_id?: string; // Link to generated email artifact
+  conversation_id?: string; // Link to conversation where email was created
+  color?: string; // Optional color coding
+  timing?: string; // Human readable timing like "Morning" or "10:00 AM"
+}
+
+export interface CalendarArtifactMetadata extends SharedMetadata {
+  // Calendar period
+  month: string; // YYYY-MM format
+  year?: number;
+
+  // Calendar slots/items
+  slots: CalendarSlot[];
+
+  // Calendar settings
+  view_mode?: 'month' | 'week' | 'list';
+  show_weekends?: boolean;
+  first_day_of_week?: 0 | 1; // 0 = Sunday, 1 = Monday
+
+  // Campaign context
+  campaign_name?: string;
+  campaign_type?: string;
+  brand_id?: string;
+}
+
+export interface CalendarArtifact extends BaseArtifact<'calendar', CalendarArtifactMetadata> {}
+
+// =====================================================
 // UNION TYPE - All possible artifact types
 // =====================================================
 
-export type Artifact = 
-  | EmailArtifact 
-  | FlowArtifact 
-  | CampaignArtifact 
+export type Artifact =
+  | EmailArtifact
+  | FlowArtifact
+  | CampaignArtifact
   | TemplateArtifact
-  | SubjectLineArtifact;
+  | SubjectLineArtifact
+  | EmailBriefArtifact
+  | CalendarArtifact
+  | MarkdownArtifact
+  | SpreadsheetArtifact
+  | CodeArtifact
+  | ChecklistArtifact;
 
 // =====================================================
 // ARTIFACT VERSION - For version history
@@ -346,6 +565,61 @@ export const ARTIFACT_KIND_REGISTRY: Record<ArtifactKind, ArtifactKindConfig> = 
     supportsSharing: true,
     supportsComments: true,
   },
+  email_brief: {
+    kind: 'email_brief',
+    label: 'Email Brief',
+    icon: 'ClipboardList',
+    description: 'Email brief for campaign calendar planning',
+    supportsVariants: false,
+    supportsSharing: true,
+    supportsComments: true,
+  },
+  calendar: {
+    kind: 'calendar',
+    label: 'Email Calendar',
+    icon: 'Calendar',
+    description: 'Visual email marketing calendar with scheduled items',
+    supportsVariants: false,
+    supportsSharing: true,
+    supportsComments: true,
+  },
+  // Baseline artifact types
+  markdown: {
+    kind: 'markdown',
+    label: 'Document',
+    icon: 'FileText',
+    description: 'Rich text document with formatting',
+    supportsVariants: false,
+    supportsSharing: true,
+    supportsComments: true,
+  },
+  spreadsheet: {
+    kind: 'spreadsheet',
+    label: 'Spreadsheet',
+    icon: 'Table',
+    description: 'Structured data in rows and columns',
+    supportsVariants: false,
+    supportsSharing: true,
+    supportsComments: true,
+  },
+  code: {
+    kind: 'code',
+    label: 'Code',
+    icon: 'Code',
+    description: 'Code snippet with syntax highlighting',
+    supportsVariants: false,
+    supportsSharing: true,
+    supportsComments: true,
+  },
+  checklist: {
+    kind: 'checklist',
+    label: 'Checklist',
+    icon: 'CheckSquare',
+    description: 'Interactive todo list',
+    supportsVariants: false,
+    supportsSharing: true,
+    supportsComments: true,
+  },
 };
 
 // =====================================================
@@ -367,6 +641,48 @@ export function isFlowArtifact(artifact: { kind: ArtifactKind }): artifact is Fl
 }
 
 /**
+ * Type guard to check if an artifact is a markdown artifact
+ */
+export function isMarkdownArtifact(artifact: { kind: ArtifactKind }): artifact is MarkdownArtifact {
+  return artifact.kind === 'markdown';
+}
+
+/**
+ * Type guard to check if an artifact is a spreadsheet artifact
+ */
+export function isSpreadsheetArtifact(artifact: { kind: ArtifactKind }): artifact is SpreadsheetArtifact {
+  return artifact.kind === 'spreadsheet';
+}
+
+/**
+ * Type guard to check if an artifact is a code artifact
+ */
+export function isCodeArtifact(artifact: { kind: ArtifactKind }): artifact is CodeArtifact {
+  return artifact.kind === 'code';
+}
+
+/**
+ * Type guard to check if an artifact is a checklist artifact
+ */
+export function isChecklistArtifact(artifact: { kind: ArtifactKind }): artifact is ChecklistArtifact {
+  return artifact.kind === 'checklist';
+}
+
+/**
+ * Type guard to check if an artifact is an email brief artifact
+ */
+export function isEmailBriefArtifact(artifact: { kind: ArtifactKind }): artifact is EmailBriefArtifact {
+  return artifact.kind === 'email_brief';
+}
+
+/**
+ * Type guard to check if an artifact is a calendar artifact
+ */
+export function isCalendarArtifact(artifact: { kind: ArtifactKind }): artifact is CalendarArtifact {
+  return artifact.kind === 'calendar';
+}
+
+/**
  * Get the configuration for an artifact kind
  */
 export function getArtifactKindConfig(kind: ArtifactKind): ArtifactKindConfig {
@@ -379,6 +695,28 @@ export function getArtifactKindConfig(kind: ArtifactKind): ArtifactKindConfig {
 export function artifactSupportsVariants(kind: ArtifactKind): boolean {
   return ARTIFACT_KIND_REGISTRY[kind]?.supportsVariants ?? false;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

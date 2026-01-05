@@ -1,12 +1,13 @@
 'use client';
 
 import { ConversationWithStatus, ConversationQuickAction } from '@/types';
-import { useEffect, useRef, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import ConversationListItem from './ConversationListItem';
 
 interface VirtualizedConversationListProps {
   conversations: ConversationWithStatus[];
   currentConversationId: string | null;
+  currentUserId?: string;
   pinnedConversationIds: string[];
   editingId: string | null;
   editingTitle: string;
@@ -34,9 +35,13 @@ interface GroupedConversations {
   older: ConversationWithStatus[];
 }
 
-export default function VirtualizedConversationList({
+// Empty set for default value - created once to avoid new Set() on every render
+const EMPTY_SET = new Set<string>();
+
+function VirtualizedConversationList({
   conversations,
   currentConversationId,
+  currentUserId,
   pinnedConversationIds,
   editingId,
   editingTitle,
@@ -51,7 +56,7 @@ export default function VirtualizedConversationList({
   setEditingTitle,
   height,
   bulkSelectMode = false,
-  selectedConversationIds = new Set(),
+  selectedConversationIds = EMPTY_SET,
   onToggleSelect
 }: VirtualizedConversationListProps) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -133,6 +138,7 @@ export default function VirtualizedConversationList({
         isActive={conversation.id === currentConversationId}
         isPinned={pinnedSet.has(conversation.id)}
         currentConversationId={currentConversationId}
+        currentUserId={currentUserId}
         onSelect={() => onSelect(conversation.id)}
         onSelectChild={onSelectChild}
         onAction={(action) => handleQuickAction(conversation.id, action)}
@@ -203,3 +209,5 @@ export default function VirtualizedConversationList({
     </div>
   );
 }
+
+export default memo(VirtualizedConversationList);

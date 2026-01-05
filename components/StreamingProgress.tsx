@@ -20,6 +20,7 @@ const STATUS_LABELS: Record<AIStatus, string> = {
   creating_cta: 'Writing call-to-action...',
   finalizing: 'Finalizing email...',
   saving_memory: 'Saving to memory...',
+  generating_image: 'Generating image...',
 };
 
 const STATUS_PROGRESS: Record<AIStatus, number> = {
@@ -33,6 +34,7 @@ const STATUS_PROGRESS: Record<AIStatus, number> = {
   creating_cta: 85,
   finalizing: 95,
   saving_memory: 98,
+  generating_image: 50,
 };
 
 export default function StreamingProgress({

@@ -1,7 +1,7 @@
 'use client';
 
 import { ConversationWithStatus, OrganizationMember, SidebarViewMode, ConversationQuickAction, BulkActionType, Brand } from '@/types';
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import ConversationFilterDropdown, { FilterType } from './ConversationFilterDropdown';
@@ -21,6 +21,7 @@ interface ChatSidebarEnhancedProps {
   brandId?: string;
   conversations: ConversationWithStatus[];
   currentConversationId: string | null;
+  currentUserId?: string; // For visibility ownership checks
   teamMembers: OrganizationMember[];
   currentFilter: FilterType;
   selectedPersonId: string | null;
@@ -47,6 +48,7 @@ interface ChatSidebarEnhancedProps {
   isLoading?: boolean; // Show loading skeleton when true
   isCreatingEmail?: boolean;
   isCreatingFlow?: boolean;
+  hideBrandSwitcher?: boolean; // Hide when parent layout has header tabs
 }
 
 interface TooltipState {
@@ -55,11 +57,14 @@ interface TooltipState {
   y: number;
 }
 
-export default function ChatSidebarEnhanced({
+type SortOption = 'newest' | 'oldest' | 'name_asc' | 'name_desc';
+
+function ChatSidebarEnhanced({
   brandName,
   brandId,
   conversations,
   currentConversationId,
+  currentUserId,
   teamMembers,
   currentFilter,
   selectedPersonId,
@@ -84,11 +89,13 @@ export default function ChatSidebarEnhanced({
   onNewFlow,
   isLoading = false,
   isCreatingEmail = false,
-  isCreatingFlow = false
+  isCreatingFlow = false,
+  hideBrandSwitcher = false,
 }: ChatSidebarEnhancedProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [listHeight, setListHeight] = useState(600);
@@ -144,25 +151,63 @@ export default function ChatSidebarEnhanced({
     setEditingTitle('');
   }, []);
 
-  // Memoize filtered conversations to avoid unnecessary re-filters
-  const filteredConversations = useMemo(() => {
-    return conversations.filter(conv => {
-      if (!searchQuery) return true;
-      const query = searchQuery.toLowerCase();
-      return (
+  // Create a Set for O(1) pinned lookup
+  const pinnedSet = useMemo(() => new Set(pinnedConversationIds), [pinnedConversationIds]);
+
+  // Sort function for conversations
+  const sortConversations = useCallback((convs: ConversationWithStatus[]) => {
+    return [...convs].sort((a, b) => {
+      switch (sortBy) {
+        case 'newest':
+          return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
+        case 'oldest':
+          return new Date(a.updated_at || a.created_at).getTime() - new Date(b.updated_at || b.created_at).getTime();
+        case 'name_asc':
+          return (a.title || 'Untitled').localeCompare(b.title || 'Untitled');
+        case 'name_desc':
+          return (b.title || 'Untitled').localeCompare(a.title || 'Untitled');
+        default:
+          return 0;
+      }
+    });
+  }, [sortBy]);
+
+  // Single-pass filter and partition (fixes double iteration)
+  const orderedConversations = useMemo(() => {
+    const pinned: ConversationWithStatus[] = [];
+    const unpinned: ConversationWithStatus[] = [];
+    const query = searchQuery?.toLowerCase();
+
+    for (const conv of conversations) {
+      // Filter check
+      if (query && !(
         conv.title?.toLowerCase().includes(query) ||
         conv.last_message_preview?.toLowerCase().includes(query) ||
         conv.created_by_name?.toLowerCase().includes(query)
-      );
-    });
-  }, [conversations, searchQuery]);
+      )) {
+        continue; // Skip non-matching
+      }
 
-  // Memoize ordered conversations
-  const orderedConversations = useMemo(() => {
-    const pinnedConversations = filteredConversations.filter(c => pinnedConversationIds.includes(c.id));
-    const unpinnedConversations = filteredConversations.filter(c => !pinnedConversationIds.includes(c.id));
-    return [...pinnedConversations, ...unpinnedConversations];
-  }, [filteredConversations, pinnedConversationIds]);
+      // Partition into pinned/unpinned
+      if (pinnedSet.has(conv.id)) {
+        pinned.push(conv);
+      } else {
+        unpinned.push(conv);
+      }
+    }
+
+    // Sort each group separately, then combine (pinned first)
+    const sortedPinned = sortConversations(pinned);
+    const sortedUnpinned = sortConversations(unpinned);
+
+    return [...sortedPinned, ...sortedUnpinned];
+  }, [conversations, searchQuery, pinnedSet, sortConversations]);
+
+  // Index map for O(1) lookups in selection (fixes findIndex O(n) per click)
+  const conversationIndexMap = useMemo(
+    () => new Map(orderedConversations.map((c, i) => [c.id, i])),
+    [orderedConversations]
+  );
 
   // Bulk selection handlers
   const handleToggleBulkSelect = useCallback(() => {
@@ -174,8 +219,8 @@ export default function ChatSidebarEnhanced({
   }, [bulkSelectMode]);
 
   const handleToggleConversationSelect = useCallback((conversationId: string, event?: React.MouseEvent) => {
-    const currentIndex = orderedConversations.findIndex(c => c.id === conversationId);
-    
+    const currentIndex = conversationIndexMap.get(conversationId) ?? -1;
+
     // Shift+Click: Range selection
     if (event?.shiftKey && lastSelectedIndex !== null && currentIndex !== -1) {
       const start = Math.min(lastSelectedIndex, currentIndex);
@@ -214,7 +259,7 @@ export default function ChatSidebarEnhanced({
       });
       setLastSelectedIndex(currentIndex);
     }
-  }, [orderedConversations, lastSelectedIndex]);
+  }, [orderedConversations, conversationIndexMap, lastSelectedIndex]);
 
   const handleCancelBulkSelect = useCallback(() => {
     setBulkSelectMode(false);
@@ -258,6 +303,10 @@ export default function ChatSidebarEnhanced({
   const handleSelectAll = useCallback(() => {
     setSelectedConversationIds(new Set(orderedConversations.map(c => c.id)));
   }, [orderedConversations]);
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedConversationIds(new Set());
+  }, []);
 
   const handleBulkAction = useCallback((action: BulkActionType) => {
     if (onBulkAction && selectedConversationIds.size > 0) {
@@ -387,6 +436,7 @@ export default function ChatSidebarEnhanced({
           onMobileToggle={onMobileToggle}
           onOpenExplorer={() => setIsExplorerOpen(true)}
           isMobile={isMobileView}
+          hideBrandSwitcher={hideBrandSwitcher}
         />
 
         {/* Bulk action bar */}
@@ -397,6 +447,7 @@ export default function ChatSidebarEnhanced({
             onAction={handleBulkAction}
             onCancel={handleCancelBulkSelect}
             onSelectAll={handleSelectAll}
+            onDeselectAll={handleDeselectAll}
           />
         )}
 
@@ -440,8 +491,32 @@ export default function ChatSidebarEnhanced({
                      selectedPersonId={selectedPersonId}
                      teamMembers={teamMembers}
                      onFilterChange={onFilterChange}
-                     compact={true} 
+                     compact={true}
                   />
+                </div>
+
+                {/* Sort Dropdown */}
+                <div className="flex-shrink-0 relative">
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as SortOption)}
+                    className="appearance-none h-full px-2.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 text-xs font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 pr-7"
+                    title="Sort conversations"
+                  >
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="name_asc">A-Z</option>
+                    <option value="name_desc">Z-A</option>
+                  </select>
+                  <svg
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </div>
 
                 <button
@@ -515,6 +590,7 @@ export default function ChatSidebarEnhanced({
               <VirtualizedConversationList
                 conversations={orderedConversations}
                 currentConversationId={currentConversationId}
+                currentUserId={currentUserId}
                 pinnedConversationIds={pinnedConversationIds}
                 editingId={editingId}
                 editingTitle={editingTitle}
@@ -685,3 +761,5 @@ export default function ChatSidebarEnhanced({
     </>
   );
 }
+
+export default memo(ChatSidebarEnhanced);

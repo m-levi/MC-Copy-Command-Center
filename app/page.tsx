@@ -2,75 +2,103 @@
 
 import { useEffect, useState, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Brand, Organization, OrganizationRole } from '@/types';
-import BrandCard from '@/components/BrandCard';
-import BrandListItem from '@/components/BrandListItem';
-import { BrandGridSkeleton } from '@/components/SkeletonLoader';
-import RecentActivityList from '@/components/dashboard/RecentActivityList';
-import RecentBrandsList from '@/components/dashboard/RecentBrandsList';
-import QuickStartAction from '@/components/dashboard/QuickStartAction';
-import DashboardHeader from '@/components/dashboard/DashboardHeader';
+import { Brand, Organization, OrganizationRole, ConversationMode } from '@/types';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 import { logger } from '@/lib/logger';
 import { MoonCommerceLogo } from '@/components/MoonCommerceLogo';
-import NotificationCenter from '@/components/NotificationCenter';
 import { RequestCoalescer } from '@/lib/performance-utils';
 import { PERSONAL_AI_INFO } from '@/lib/personal-ai';
+import { AI_MODELS } from '@/lib/ai-models';
+import { useEnabledModels } from '@/hooks/useEnabledModels';
+import { Menu, Settings, Users, LogOut } from 'lucide-react';
+import NotificationCenter from '@/components/NotificationCenter';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+
+// Home components
+import {
+  HomeSidebar,
+  HomeGreeting,
+  HomeComposeBox,
+  ClientPickerChips,
+  QuickActionPresets,
+} from '@/components/home';
 
 // Lazy load the modal since it's not needed on initial render
 const BrandModal = lazy(() => import('@/components/BrandModal'));
 
 export const dynamic = 'force-dynamic';
 
-type SortOption = 'newest' | 'oldest' | 'a-z' | 'z-a' | 'updated';
-type ViewMode = 'grid' | 'list';
+interface Conversation {
+  id: string;
+  title: string;
+  brand_id: string;
+  updated_at: string;
+  last_message_preview?: string;
+}
 
-export default function HomePage({ params, searchParams }: { params?: any; searchParams?: any }) {
+export default function HomePage() {
+  // Data state
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandActivityMap, setBrandActivityMap] = useState<Map<string, string>>(new Map());
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [userRole, setUserRole] = useState<OrganizationRole | null>(null);
   const [canManageBrands, setCanManageBrands] = useState(false);
   const [currentUserId, setCurrentUserId] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<SortOption>('updated');
-  const [viewMode, setViewMode] = useState<ViewMode>('grid');
-  const [showSortDropdown, setShowSortDropdown] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  
+
+  // UI state
+  const [selectedBrandId, setSelectedBrandId] = useState<string>(PERSONAL_AI_INFO.id);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [mode, setMode] = useState<ConversationMode>('planning');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+
+  const { models: enabledModels, defaultModel } = useEnabledModels();
   const supabase = createClient();
   const router = useRouter();
   const requestCoalescerRef = useRef(new RequestCoalescer<void>());
 
-  // Load preferences from localStorage
+  // Recent brand IDs from activity map
+  const recentBrandIds = useMemo(() => {
+    if (!brandActivityMap || brandActivityMap.size === 0) return [];
+    return [...brandActivityMap.entries()]
+      .sort((a, b) => new Date(b[1]).getTime() - new Date(a[1]).getTime())
+      .slice(0, 3)
+      .map(([brandId]) => brandId);
+  }, [brandActivityMap]);
+
+  // Load sidebar collapsed state from localStorage
   useEffect(() => {
-    const savedSort = localStorage.getItem('brandsSortBy') as SortOption;
-    const savedView = localStorage.getItem('brandsViewMode') as ViewMode;
-    if (savedSort) setSortBy(savedSort);
-    if (savedView) setViewMode(savedView);
-    loadBrands();
+    const saved = localStorage.getItem('homeSidebarCollapsed');
+    if (saved) setIsSidebarCollapsed(saved === 'true');
   }, []);
 
-  // Save preferences to localStorage
+  // Save sidebar state
   useEffect(() => {
-    if (sortBy) localStorage.setItem('brandsSortBy', sortBy);
-  }, [sortBy]);
+    localStorage.setItem('homeSidebarCollapsed', String(isSidebarCollapsed));
+  }, [isSidebarCollapsed]);
 
+  // Set default model when loaded
   useEffect(() => {
-    if (viewMode) localStorage.setItem('brandsViewMode', viewMode);
-  }, [viewMode]);
+    if (defaultModel && enabledModels.some(m => m.id === defaultModel)) {
+      setSelectedModel(defaultModel);
+    } else if (enabledModels.length > 0) {
+      setSelectedModel(enabledModels[0].id);
+    }
+  }, [defaultModel, enabledModels]);
 
-  const loadBrands = useCallback(async (silent = false) => {
+  // Load data
+  const loadData = useCallback(async (silent = false) => {
     return requestCoalescerRef.current.execute(async () => {
       try {
         if (!silent) setLoading(true);
-        
+
         const { data: { user } } = await supabase.auth.getUser();
-        
+
         if (!user) {
           router.push('/login');
           return;
@@ -92,81 +120,94 @@ export default function HomePage({ params, searchParams }: { params?: any; searc
           return;
         }
 
-        // Get organization details separately
-        const { data: orgData, error: orgError } = await supabase
-          .from('organizations')
-          .select('id, name, slug')
-          .eq('id', memberData.organization_id)
-          .single();
+        const role = memberData.role as OrganizationRole;
+        const orgId = memberData.organization_id;
 
-        if (orgError || !orgData) {
+        // Parallelize: org details, brands, and conversations all have their dependencies
+        const [orgResult, brandsResult, conversationsResult] = await Promise.all([
+          // Get organization details
+          supabase
+            .from('organizations')
+            .select('id, name, slug')
+            .eq('id', orgId)
+            .single(),
+
+          // Load brands (uses org id from membership)
+          supabase
+            .from('brands')
+            .select('*')
+            .eq('organization_id', orgId)
+            .order('created_at', { ascending: false }),
+
+          // Load conversations (uses user id)
+          supabase
+            .from('conversations')
+            .select('id, title, updated_at, brand_id, last_message_preview')
+            .eq('user_id', user.id)
+            .order('updated_at', { ascending: false })
+            .limit(100),
+        ]);
+
+        // Process organization result
+        if (orgResult.error || !orgResult.data) {
           toast.error('Failed to load organization details.');
           await supabase.auth.signOut();
           router.push('/login');
           return;
         }
 
-        const org = orgData as Organization;
-        const role = memberData.role as OrganizationRole;
-        
+        const org = orgResult.data as Organization;
         setOrganization(org);
         setUserRole(role);
         setCanManageBrands(role === 'admin' || role === 'brand_manager');
 
-        // Load all brands for the organization
-        const { data, error } = await supabase
-          .from('brands')
-          .select('*')
-          .eq('organization_id', org.id)
-          .order('created_at', { ascending: false });
+        // Process brands result
+        if (brandsResult.error) throw brandsResult.error;
+        setBrands(brandsResult.data || []);
 
-        if (error) {
-          throw error;
-        }
-
-        setBrands(data || []);
-
-        // Fetch recent activity
-        const { data: recentActivity } = await supabase
-          .from('conversations')
-          .select('brand_id, updated_at')
-          .eq('user_id', user.id)
-          .order('updated_at', { ascending: false })
-          .limit(100);
-          
-        if (recentActivity) {
+        // Process conversations result
+        if (conversationsResult.data) {
           const activityMap = new Map<string, string>();
-          recentActivity.forEach(item => {
+          conversationsResult.data.forEach(item => {
             if (!activityMap.has(item.brand_id)) {
               activityMap.set(item.brand_id, item.updated_at);
             }
           });
           setBrandActivityMap(activityMap);
+          setConversations(conversationsResult.data);
         }
 
       } catch (error: any) {
-        logger.error('Error loading brands:', error);
-        toast.error(error.message || 'Failed to load brands');
+        logger.error('Error loading data:', error);
+        toast.error(error.message || 'Failed to load data');
       } finally {
         if (!silent) setLoading(false);
-        setIsRefreshing(false);
       }
     });
   }, [supabase, router]);
 
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    loadBrands(true);
-  };
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Handlers
+  const handleLogout = useCallback(async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  }, [supabase, router]);
+
+  const handleNewChat = useCallback(() => {
+    router.push(`/brands/${selectedBrandId}/chat`);
+  }, [router, selectedBrandId]);
+
+  const handleBrandSelect = useCallback((brandId: string) => {
+    setSelectedBrandId(brandId);
+  }, []);
 
   const handleCreateBrand = useCallback(() => {
     setEditingBrand(null);
     setIsModalOpen(true);
   }, []);
-
-  const handleEditBrand = useCallback((brand: Brand) => {
-    router.push(`/brands/${brand.id}`);
-  }, [router]);
 
   const handleSaveBrand = useCallback(async (brandData: Partial<Brand>) => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -198,335 +239,277 @@ export default function HomePage({ params, searchParams }: { params?: any; searc
         toast.success('Brand created successfully');
       }
 
-      // Only close modal when editing - for new brands, the modal handles its own
-      // onboarding flow and will call onClose() when complete or skipped
       if (editingBrand) {
         setIsModalOpen(false);
       }
-      await loadBrands(true);
+      await loadData(true);
     } catch (error: any) {
       logger.error('Error saving brand:', error);
       toast.error(error.message || 'Failed to save brand');
     }
-  }, [editingBrand, organization, supabase, loadBrands]);
+  }, [editingBrand, organization, supabase, loadData]);
 
-  const handleDeleteBrand = useCallback(async (brandId: string) => {
-    try {
-      const { error } = await supabase
-        .from('brands')
-        .delete()
-        .eq('id', brandId);
-
-      if (error) throw error;
-
-      toast.success('Brand deleted successfully');
-      await loadBrands(true);
-    } catch (error) {
-      logger.error('Error deleting brand:', error);
-      toast.error('Failed to delete brand');
-    }
-  }, [supabase, loadBrands]);
-
-  const handleLogout = useCallback(async () => {
-    await supabase.auth.signOut();
-    router.push('/login');
-  }, [supabase, router]);
-
-  const filteredAndSortedBrands = useMemo(() => {
-    let filtered = brands;
-
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = brands.filter((brand) => {
-        return (
-          brand.name.toLowerCase().includes(query) ||
-          brand.brand_details?.toLowerCase().includes(query) ||
-          brand.brand_guidelines?.toLowerCase().includes(query) ||
-          brand.copywriting_style_guide?.toLowerCase().includes(query)
-        );
-      });
-    }
-
-    const sorted = [...filtered].sort((a, b) => {
-      switch (sortBy) {
-        case 'newest':
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        case 'oldest':
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-        case 'a-z':
-          return a.name.localeCompare(b.name);
-        case 'z-a':
-          return b.name.localeCompare(a.name);
-        case 'updated':
-          const timeA = brandActivityMap.get(a.id) 
-            ? new Date(brandActivityMap.get(a.id)!).getTime() 
-            : new Date(a.updated_at || a.created_at).getTime();
-            
-          const timeB = brandActivityMap.get(b.id) 
-            ? new Date(brandActivityMap.get(b.id)!).getTime() 
-            : new Date(b.updated_at || b.created_at).getTime();
-            
-          return timeB - timeA;
-        default:
-          return 0;
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
       }
-    });
 
-    return sorted;
-  }, [brands, searchQuery, sortBy, brandActivityMap]);
+      // Cmd/Ctrl + N to create brand
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        if (canManageBrands) handleCreateBrand();
+      }
 
-  const getSortLabel = () => {
-    switch (sortBy) {
-      case 'newest': return 'Newest';
-      case 'oldest': return 'Oldest';
-      case 'a-z': return 'A-Z';
-      case 'z-a': return 'Z-A';
-      case 'updated': return 'Active';
-      default: return 'Sort';
-    }
-  };
+      // Cmd/Ctrl + K to focus composer
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        const textarea = document.querySelector('textarea');
+        if (textarea) textarea.focus();
+      }
+    };
 
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canManageBrands, handleCreateBrand]);
+
+  // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 animate-in fade-in duration-300">
+      <div className="min-h-screen bg-[#fafafa] dark:bg-gray-950 flex animate-in fade-in duration-300">
         <Toaster position="top-right" />
-        <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-700 h-16" />
-        <main className="max-w-7xl mx-auto px-6 py-8">
-          <div className="h-20 w-1/3 bg-gray-200 dark:bg-gray-800 rounded-lg animate-pulse mb-8"></div>
-          <div className="h-64 w-full bg-gray-200 dark:bg-gray-800 rounded-xl animate-pulse mb-8"></div>
-          <BrandGridSkeleton count={6} />
-        </main>
+
+        {/* Sidebar Skeleton */}
+        <div className="hidden lg:flex flex-col w-[260px] h-screen bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800">
+          <div className="h-14 flex items-center px-4 border-b border-gray-200 dark:border-gray-800">
+            <div className="h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded animate-pulse" />
+          </div>
+          <div className="flex border-b border-gray-200 dark:border-gray-800">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex-1 p-3">
+                <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded animate-pulse" />
+              </div>
+            ))}
+          </div>
+          <div className="flex-1 p-3 space-y-2">
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="h-12 bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        </div>
+
+        {/* Main Content Skeleton */}
+        <div className="flex-1 flex flex-col items-center justify-center px-6">
+          <div className="w-full max-w-2xl">
+            <div className="h-10 w-64 mx-auto mb-8 bg-gray-200 dark:bg-gray-800 rounded-lg animate-pulse" />
+            <div className="flex gap-2 justify-center mb-4">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="h-8 w-24 bg-gray-100 dark:bg-gray-800 rounded-full animate-pulse" />
+              ))}
+            </div>
+            <div className="h-32 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl animate-pulse" />
+            <div className="grid grid-cols-4 gap-3 mt-6">
+              {[1, 2, 3, 4].map(i => (
+                <div key={i} className="h-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl animate-pulse" />
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950 animate-in fade-in duration-300">
+    <div className="h-screen bg-[#fafafa] dark:bg-gray-950 animate-in fade-in duration-300">
       <Toaster position="top-right" />
-      
-      {/* Top Navigation Bar */}
-      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 transition-all duration-300">
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between h-16">
-          <div className="flex items-center gap-4">
-            <MoonCommerceLogo className="h-[1.2rem] w-auto text-gray-900 dark:text-white" />
-            {organization && (
-              <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
-            )}
-            {organization && (
-              <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                {organization.name}
-              </span>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-2">
-            {userRole === 'admin' && (
-              <button
-                onClick={() => router.push('/admin')}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
-                title="Team Management"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              </button>
-            )}
-            <div className="relative">
-              <NotificationCenter />
-            </div>
-            <button
-              onClick={() => router.push('/settings')}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
-              title="Settings"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-            <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
-            <button
-              onClick={handleLogout}
-              className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-              title="Logout"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </header>
 
-      {/* Main Dashboard Content */}
-      <main className="max-w-7xl mx-auto px-6 py-10">
-        
-        <DashboardHeader />
+      {/* Mobile Sidebar Overlay */}
+      {isMobileSidebarOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden"
+            onClick={() => setIsMobileSidebarOpen(false)}
+          />
+          <aside className="fixed left-0 top-0 bottom-0 w-[300px] sm:w-[340px] z-50 lg:hidden bg-white dark:bg-gray-900 flex flex-col animate-in slide-in-from-left duration-200">
+            <HomeSidebar
+              brands={brands}
+              conversations={conversations}
+              recentBrandIds={recentBrandIds}
+              onBrandSelect={handleBrandSelect}
+              onNewChat={handleNewChat}
+              onCreateBrand={handleCreateBrand}
+              onEditBrand={(brand) => {
+                setEditingBrand(brand);
+                setIsModalOpen(true);
+              }}
+              canManageBrands={canManageBrands}
+              isMobile
+              onMobileClose={() => setIsMobileSidebarOpen(false)}
+            />
+          </aside>
+        </>
+      )}
 
-        {/* Top Section: Grid Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-12 items-start">
-          
-          {/* Left Column: Quick Start Action (Chat Box) & Jump Back In */}
-          <div className="lg:col-span-8 flex flex-col gap-6">
-            <QuickStartAction brands={brands} />
-            <RecentActivityList />
-          </div>
+      {/* Desktop Layout with Resizable Panels */}
+      <ResizablePanelGroup
+        direction="horizontal"
+        className="h-full hidden lg:flex"
+        autoSaveId="home-layout-panels"
+      >
+        {/* Sidebar Panel */}
+        <ResizablePanel
+          id="home-sidebar-panel"
+          defaultSize={20}
+          minSize={15}
+          maxSize={35}
+          collapsible
+          collapsedSize={4}
+          onCollapse={() => setIsSidebarCollapsed(true)}
+          onExpand={() => setIsSidebarCollapsed(false)}
+        >
+          <HomeSidebar
+            brands={brands}
+            conversations={conversations}
+            recentBrandIds={recentBrandIds}
+            onBrandSelect={handleBrandSelect}
+            onNewChat={handleNewChat}
+            onCreateBrand={handleCreateBrand}
+            onEditBrand={(brand) => {
+              setEditingBrand(brand);
+              setIsModalOpen(true);
+            }}
+            canManageBrands={canManageBrands}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          />
+        </ResizablePanel>
 
-          {/* Right Column: Recent Brands & Personal AI */}
-          <div className="lg:col-span-4 h-full flex flex-col gap-4">
-            {/* Personal AI Assistant Card */}
-            <button
-              onClick={() => router.push(`/brands/${PERSONAL_AI_INFO.id}/chat`)}
-              className="group relative bg-gradient-to-br from-violet-500/10 via-purple-500/10 to-fuchsia-500/10 dark:from-violet-500/20 dark:via-purple-500/20 dark:to-fuchsia-500/20 border border-violet-200/50 dark:border-violet-700/50 rounded-2xl p-5 text-left hover:shadow-lg hover:shadow-violet-500/10 hover:border-violet-300 dark:hover:border-violet-600 transition-all duration-300"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-violet-500/0 via-purple-500/0 to-fuchsia-500/0 group-hover:from-violet-500/5 group-hover:via-purple-500/5 group-hover:to-fuchsia-500/5 rounded-2xl transition-all duration-300" />
-              <div className="relative">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-2xl shadow-lg shadow-violet-500/20 group-hover:scale-105 transition-transform">
-                    {PERSONAL_AI_INFO.icon}
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                      {PERSONAL_AI_INFO.name}
-                      <span className="text-[10px] px-2 py-0.5 bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-400 rounded-full font-medium">
-                        Private
-                      </span>
-                    </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                      {PERSONAL_AI_INFO.description}
-                    </p>
-                  </div>
-                  <svg className="w-5 h-5 text-violet-400 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              </div>
-            </button>
-            
-            {/* Quick Brand View (Most Recent Brands) */}
-            <RecentBrandsList brands={brands} activityMap={brandActivityMap} />
-          </div>
-        </div>
+        {/* Resize Handle */}
+        <ResizableHandle withHandle />
 
-        {/* Brands Workspace Section */}
-        <section className="space-y-6 pt-4 border-t border-gray-200 dark:border-gray-800">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pt-4">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Your Brands</h2>
-              <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">Manage brand profiles and view all history</p>
-            </div>
-            
-            <div className="flex items-center gap-3">
-              {/* Search */}
-              <div className="relative w-full sm:w-64">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </div>
-                <input
-                  type="text"
-                  placeholder="Search brands..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-white dark:bg-gray-800 border-none ring-1 ring-gray-200 dark:ring-gray-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-gray-800 transition-all"
-                />
-              </div>
-
-              <div className="h-8 w-px bg-gray-200 dark:bg-gray-800 mx-1 hidden sm:block"></div>
-
-              {/* View Controls - Simplified */}
-              <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-1">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-1.5 rounded transition-all ${
-                    viewMode === 'grid' ? 'bg-gray-100 dark:bg-gray-700 text-blue-600 dark:text-blue-400' : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h7v7H3V3zm11 0h7v7h-7V3zM3 14h7v7H3v-7zm11 0h7v7h-7v-7z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-1.5 rounded transition-all ${
-                    viewMode === 'list' ? 'bg-gray-100 dark:bg-gray-700 text-blue-600 dark:text-blue-400' : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                </button>
-              </div>
-
-              {canManageBrands && (
-                <button
-                  onClick={handleCreateBrand}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm hover:shadow transition-all text-sm font-medium"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  <span>New Brand</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Brands Grid/List */}
-          {brands.length === 0 ? (
-             <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No brands yet</h3>
-                <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-sm mx-auto">Get started by creating your first brand profile to generate tailored AI content.</p>
-                {canManageBrands && (
+        {/* Main Content Panel */}
+        <ResizablePanel id="home-main-panel" defaultSize={80} minSize={50}>
+          <div className="flex-1 flex flex-col h-full overflow-hidden">
+            {/* Header */}
+            <header className="h-14 flex items-center justify-end px-4 border-b border-gray-100 dark:border-gray-800/50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl">
+              {/* Right-side icons */}
+              <div className="flex items-center gap-1">
+                {userRole === 'admin' && (
                   <button
-                    onClick={handleCreateBrand}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+                    onClick={() => router.push('/admin')}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors cursor-pointer"
+                    title="Team"
                   >
-                    Create Brand
+                    <Users className="w-4 h-4" />
                   </button>
                 )}
-             </div>
-          ) : filteredAndSortedBrands.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-gray-500 dark:text-gray-400">No brands match your search.</p>
-            </div>
-          ) : (
-            <div className={viewMode === 'grid' 
-              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
-              : 'flex flex-col gap-3'
-            }>
-              {filteredAndSortedBrands.map((brand) => (
-                viewMode === 'grid' ? (
-                  <BrandCard
-                    key={brand.id}
-                    brand={brand}
-                    currentUserId={currentUserId}
-                    canManage={canManageBrands}
-                    onEdit={handleEditBrand}
-                    onDelete={handleDeleteBrand}
-                  />
-                ) : (
-                  <BrandListItem
-                    key={brand.id}
-                    brand={brand}
-                    currentUserId={currentUserId}
-                    canManage={canManageBrands}
-                    onEdit={handleEditBrand}
-                    onDelete={handleDeleteBrand}
-                  />
-                )
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
+                <NotificationCenter />
+                <button
+                  onClick={() => router.push('/settings')}
+                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors cursor-pointer"
+                  title="Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer"
+                  title="Sign out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            </header>
 
+            {/* Main Content Area */}
+            <main className="flex-1 flex flex-col items-center justify-center px-4 lg:px-6 py-8 lg:py-12 overflow-auto">
+              <div className="w-full max-w-2xl">
+                {/* Greeting */}
+                <HomeGreeting />
+
+                {/* Client Picker Chips */}
+                <ClientPickerChips
+                  brands={brands}
+                  selectedBrandId={selectedBrandId}
+                  onBrandSelect={handleBrandSelect}
+                />
+
+                {/* Compose Box */}
+                <HomeComposeBox
+                  selectedBrandId={selectedBrandId}
+                  selectedModel={selectedModel}
+                  onModelChange={setSelectedModel}
+                  mode={mode}
+                  onModeChange={setMode}
+                />
+
+                {/* Quick Action Presets */}
+                <QuickActionPresets
+                  brands={brands}
+                  selectedBrandId={selectedBrandId}
+                />
+              </div>
+            </main>
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
+      {/* Mobile Layout */}
+      <div className="flex flex-col h-full lg:hidden">
+        {/* Mobile Header */}
+        <header className="h-14 flex items-center justify-between px-4 border-b border-gray-100 dark:border-gray-800/50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl">
+          <button
+            onClick={() => setIsMobileSidebarOpen(true)}
+            className="p-2 -ml-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 cursor-pointer"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <MoonCommerceLogo className="h-4 w-auto text-gray-900 dark:text-white" />
+          <div className="flex items-center gap-1">
+            <NotificationCenter />
+            <button
+              onClick={() => router.push('/settings')}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
+        {/* Mobile Main Content */}
+        <main className="flex-1 flex flex-col items-center justify-center px-4 py-8 overflow-auto">
+          <div className="w-full max-w-2xl">
+            <HomeGreeting />
+            <ClientPickerChips
+              brands={brands}
+              selectedBrandId={selectedBrandId}
+              onBrandSelect={handleBrandSelect}
+            />
+            <HomeComposeBox
+              selectedBrandId={selectedBrandId}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+              mode={mode}
+              onModeChange={setMode}
+            />
+            <QuickActionPresets
+              brands={brands}
+              selectedBrandId={selectedBrandId}
+            />
+          </div>
+        </main>
+      </div>
+
+      {/* Brand Modal */}
       <Suspense fallback={null}>
         {isModalOpen && (
           <BrandModal
             isOpen={isModalOpen}
-            onClose={() => setIsModalOpen(false)}
+            onClose={() => {
+              setIsModalOpen(false);
+              setEditingBrand(null);
+            }}
             onSave={handleSaveBrand}
             brand={editingBrand}
           />

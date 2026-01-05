@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { CustomMode, Brand, ModeColor, MODE_COLOR_META } from '@/types';
+import { getErrorMessage } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -365,9 +366,9 @@ export default function SandboxPage() {
             : prev.avgResponseTime,
           totalTokens: prev.totalTokens + (result.tokens || 0),
         }));
-      } catch (error: any) {
-        setBatchResults(prev => prev.map((r, idx) => 
-          idx === i ? { ...r, status: 'error', error: error.message } : r
+      } catch (error) {
+        setBatchResults(prev => prev.map((r, idx) =>
+          idx === i ? { ...r, status: 'error', error: getErrorMessage(error) } : r
         ));
       }
     }
@@ -847,5 +848,27 @@ export default function SandboxPage() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
-import { Conversation, Message, BulkActionType } from '@/types';
+import { Conversation, Message, BulkActionType, ConversationVisibility } from '@/types';
 import toast from 'react-hot-toast';
 import { logger } from '@/lib/logger';
 
@@ -27,22 +27,58 @@ export async function togglePinConversation(conversationId: string, isPinned: bo
 
 /**
  * Archive or unarchive a conversation
+ * When archiving, sets archived_at timestamp for 90-day auto-cleanup
+ * When unarchiving, clears the archived_at timestamp
  */
 export async function toggleArchiveConversation(conversationId: string, isArchived: boolean): Promise<boolean> {
   try {
     const supabase = createClient();
     const { error } = await supabase
       .from('conversations')
-      .update({ is_archived: isArchived })
+      .update({
+        is_archived: isArchived,
+        archived_at: isArchived ? new Date().toISOString() : null
+      })
       .eq('id', conversationId);
 
     if (error) throw error;
-    
-    toast.success(isArchived ? 'Conversation archived' : 'Conversation unarchived');
+
+    toast.success(
+      isArchived
+        ? 'Conversation archived (will be deleted after 90 days)'
+        : 'Conversation restored from archive'
+    );
     return true;
   } catch (error) {
     logger.error('Error toggling archive:', error);
     toast.error('Failed to update conversation');
+    return false;
+  }
+}
+
+/**
+ * Toggle conversation visibility between private and team
+ */
+export async function toggleConversationVisibility(
+  conversationId: string, 
+  visibility: ConversationVisibility
+): Promise<boolean> {
+  try {
+    const response = await fetch(`/api/conversations/${conversationId}/visibility`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visibility })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to update visibility');
+    }
+
+    return true;
+  } catch (error) {
+    logger.error('Error toggling visibility:', error);
+    toast.error('Failed to update conversation visibility');
     return false;
   }
 }

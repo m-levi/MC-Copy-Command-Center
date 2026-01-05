@@ -14,6 +14,9 @@ const MAX_VERSIONS = 5;
 const DRAFT_KEY_PREFIX = 'draft_';
 const VERSIONS_KEY_PREFIX = 'draft_versions_';
 
+// Custom event for draft version updates (avoids polling)
+const DRAFT_VERSION_EVENT = 'draft-version-updated';
+
 /**
  * Auto-save draft to localStorage with debouncing and versioning
  */
@@ -80,22 +83,29 @@ function saveDraftVersion(conversationId: string, content: string): void {
   try {
     const versionsKey = `${VERSIONS_KEY_PREFIX}${conversationId}`;
     const versionsData = localStorage.getItem(versionsKey);
-    
+
     let versions: DraftVersion[] = versionsData ? JSON.parse(versionsData) : [];
-    
+
     // Add new version
     versions.push({
       content,
       timestamp: Date.now(),
       characterCount: content.length,
     });
-    
+
     // Keep only last N versions
     if (versions.length > MAX_VERSIONS) {
       versions = versions.slice(-MAX_VERSIONS);
     }
-    
+
     localStorage.setItem(versionsKey, JSON.stringify(versions));
+
+    // Dispatch event to notify listeners (avoids polling)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(DRAFT_VERSION_EVENT, {
+        detail: { conversationId }
+      }));
+    }
   } catch (error) {
     logger.error('Failed to save draft version:', error);
   }
@@ -186,12 +196,22 @@ export function useDraftVersions(conversationId: string | null) {
       setVersions(loaded);
     };
 
+    // Initial load
     loadVersions();
 
-    // Reload versions periodically to catch updates
-    const interval = setInterval(loadVersions, 5000);
+    // Listen for draft version updates (event-based, no polling)
+    const handleVersionUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent<{ conversationId: string }>;
+      if (customEvent.detail?.conversationId === conversationId) {
+        loadVersions();
+      }
+    };
 
-    return () => clearInterval(interval);
+    window.addEventListener(DRAFT_VERSION_EVENT, handleVersionUpdate);
+
+    return () => {
+      window.removeEventListener(DRAFT_VERSION_EVENT, handleVersionUpdate);
+    };
   }, [conversationId]);
 
   const restore = useCallback(

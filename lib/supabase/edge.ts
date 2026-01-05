@@ -1,8 +1,43 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 /**
- * Create a Supabase client for Edge runtime
+ * Create a Supabase client for Edge runtime with user session from cookies
+ * This uses @supabase/ssr which works in Edge runtime and properly handles auth
+ */
+export async function createEdgeClientWithSession() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) {
+    throw new Error('Missing Supabase environment variables for Edge runtime');
+  }
+
+  const cookieStore = await cookies();
+
+  return createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          );
+        } catch {
+          // Can be ignored if middleware refreshes sessions
+        }
+      },
+    },
+  });
+}
+
+/**
+ * Create a Supabase client for Edge runtime (service role, no user context)
  * This version doesn't rely on Next.js cookies and is suitable for Edge functions
+ * @deprecated Use createEdgeClientWithSession() for user context
  */
 export function createEdgeClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

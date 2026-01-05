@@ -149,6 +149,31 @@ export default function GlobalKeyboardShortcuts() {
         description: 'Show keyboard shortcuts',
         action: () => setShowKeyboardShortcuts(true),
       },
+      {
+        key: 'n',
+        meta: true,
+        ctrl: true,
+        description: 'New conversation',
+        action: () => handleNewConversation(),
+      },
+      {
+        key: 'N',
+        meta: true,
+        ctrl: true,
+        shift: true,
+        description: 'New email flow',
+        action: () => handleNewFlow(),
+      },
+      {
+        key: 'b',
+        meta: true,
+        ctrl: true,
+        description: 'Toggle sidebar',
+        action: () => {
+          // Dispatch event for sidebar toggle
+          window.dispatchEvent(new CustomEvent('toggleSidebar'));
+        },
+      },
     ],
     enabled: true,
   });

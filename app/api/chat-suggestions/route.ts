@@ -3,12 +3,49 @@ import { generateText } from 'ai';
 import { gateway, MODELS } from '@/lib/ai-providers';
 import { createClient } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
-import { listMemories, isSupermemoryConfigured } from '@/lib/supermemory';
+import { searchMemories, isSupermemoryConfigured } from '@/lib/supermemory';
+import { formatBrandForPrompt } from '@/lib/services/brand.service';
 
 export const runtime = 'edge';
 
-// Low-cost model for suggestions
+// Use a fast model for quick suggestions
 const SUGGESTION_MODEL = MODELS.GEMINI_FLASH;
+
+// In-memory cache with 5-minute TTL
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const suggestionsCache = new Map<string, { data: ChatSuggestion[]; timestamp: number }>();
+
+function getCacheKey(brandId: string, mode: string): string {
+  return `${brandId}:${mode}`;
+}
+
+function getCachedSuggestions(brandId: string, mode: string): ChatSuggestion[] | null {
+  const key = getCacheKey(brandId, mode);
+  const cached = suggestionsCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+  // Clean up expired entry
+  if (cached) {
+    suggestionsCache.delete(key);
+  }
+  return null;
+}
+
+function setCachedSuggestions(brandId: string, mode: string, suggestions: ChatSuggestion[]): void {
+  const key = getCacheKey(brandId, mode);
+  suggestionsCache.set(key, { data: suggestions, timestamp: Date.now() });
+
+  // Clean up old entries if cache gets too large
+  if (suggestionsCache.size > 100) {
+    const now = Date.now();
+    for (const [k, v] of suggestionsCache.entries()) {
+      if (now - v.timestamp >= CACHE_TTL_MS) {
+        suggestionsCache.delete(k);
+      }
+    }
+  }
+}
 
 interface ChatSuggestion {
   id: string;
@@ -34,6 +71,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<Suggestion
       return NextResponse.json({ error: 'Brand ID is required' }, { status: 400 });
     }
 
+    // Check cache first
+    const cachedSuggestions = getCachedSuggestions(brandId, mode);
+    if (cachedSuggestions) {
+      return NextResponse.json({ suggestions: cachedSuggestions, cached: true });
+    }
+
     const supabase = await createClient();
 
     // Get current user
@@ -42,10 +85,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<Suggestion
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Fetch brand details
+    // Fetch full brand details including voice
     const { data: brand, error: brandError } = await supabase
       .from('brands')
-      .select('id, name, brand_details, brand_voice, website_url')
+      .select('*')
       .eq('id', brandId)
       .single();
 
@@ -53,119 +96,85 @@ export async function GET(request: NextRequest): Promise<NextResponse<Suggestion
       return NextResponse.json({ error: 'Brand not found' }, { status: 404 });
     }
 
-    // Fetch recent conversations (last 5) for context
+    // Fetch recent conversations to avoid duplicates
     const { data: recentConversations } = await supabase
       .from('conversations')
       .select('id, title, mode, last_message_preview, created_at')
       .eq('brand_id', brandId)
       .order('updated_at', { ascending: false })
-      .limit(5);
+      .limit(10);
 
-    // Fetch recent email artifacts/content
-    const { data: recentEmails } = await supabase
-      .from('messages')
-      .select(`
-        id,
-        content,
-        created_at,
-        conversation:conversations!inner(
-          id,
-          brand_id,
-          title,
-          mode
-        )
-      `)
-      .eq('role', 'assistant')
-      .eq('conversation.brand_id', brandId)
-      .eq('conversation.mode', 'email_copy')
-      .order('created_at', { ascending: false })
-      .limit(3);
+    // Build comprehensive brand context using the existing formatter
+    const brandContext = formatBrandForPrompt(brand);
 
-    // Fetch memories (gracefully handle if not configured)
-    let memories: Array<{ title: string; content: string; category: string }> = [];
+    // Build recent work context
+    const recentWork = (recentConversations || [])
+      .map(c => `• "${c.title}" (${c.mode || 'chat'})`)
+      .join('\n');
+
+    // Get current date info
+    const now = new Date();
+    const upcomingEvents = getUpcomingEvents(now);
+    const dateContext = {
+      date: now.toISOString().split('T')[0],
+      dayOfWeek: now.toLocaleDateString('en-US', { weekday: 'long' }),
+      month: now.toLocaleDateString('en-US', { month: 'long' }),
+      upcomingEvents,
+    };
+
+    // Pre-fetch RAG context if available
+    let ragContext = '';
     if (isSupermemoryConfigured()) {
       try {
-        const rawMemories = await listMemories(brandId, user.id, 10);
-        memories = rawMemories.map(m => ({
-          title: (m.metadata?.title as string) || 'Untitled',
-          content: m.content,
-          category: (m.metadata?.category as string) || 'general',
-        }));
-      } catch (e) {
-        logger.warn('[Chat Suggestions] Failed to fetch memories:', e);
+        const memories = await searchMemories(brandId, user.id, 'products campaigns promotions key features', 5);
+        if (memories.length > 0) {
+          ragContext = '\n\n## Brand Knowledge Base\n' + memories
+            .map(m => `• ${m.content.substring(0, 200)}`)
+            .join('\n');
+        }
+      } catch {
+        // Continue without RAG context
       }
     }
 
-    // Build context for AI
-    const brandContext = {
-      name: brand.name,
-      details: brand.brand_details?.substring(0, 500) || '',
-      voiceSummary: brand.brand_voice?.brand_summary || '',
-      audience: brand.brand_voice?.audience || '',
-    };
+    // System prompt with pre-fetched context
+    const systemPrompt = `You are a strategic email marketing advisor for "${brand.name}". Generate 4 highly relevant, actionable conversation starters.
 
-    const recentWork = (recentConversations || [])
-      .slice(0, 3)
-      .map(c => `- ${c.title}${c.last_message_preview ? `: ${c.last_message_preview.substring(0, 100)}` : ''}`)
-      .join('\n');
+## Requirements
+- SPECIFIC to this brand (reference actual products, services, audience)
+- TIMELY (consider: ${dateContext.dayOfWeek}, ${dateContext.month}. Upcoming: ${dateContext.upcomingEvents.join(', ') || 'none'})
+- DIVERSE (different campaign types)
+- ACTIONABLE (ready to execute now)
+- DO NOT suggest similar topics to recent work
 
-    const recentEmailTitles = (recentEmails || [])
-      .map((e: any) => e.conversation?.title)
-      .filter(Boolean)
-      .slice(0, 3)
-      .join(', ');
+## Brand Context
+${brandContext}
+${ragContext}
 
-    const memoryContext = memories
-      .slice(0, 5)
-      .map(m => `- ${m.title}: ${m.content.substring(0, 100)}`)
-      .join('\n');
+## Recent Work (AVOID similar topics)
+${recentWork || 'No recent work'}
 
-    // Generate suggestions using low-cost model
-    const systemPrompt = `You are a marketing strategist helping users get started with email creation. Generate 4 actionable, specific suggestions based on the brand context and mode.
+## Mode
+${mode === 'planning' ? 'Strategy & Planning: Focus on campaign planning, brainstorming, strategic advice' : 'Email Writing: Focus on creating actual email copy'}
 
-Each suggestion should be:
-- Specific to the brand (use their name, products, audience)
-- Actionable and ready to execute
-- Different from each other (variety of campaign types)
-- Written as if starting a conversation with an AI copywriter
-
-${mode === 'planning' ? 'Focus on strategy, brainstorming, and campaign planning ideas.' : 'Focus on specific email types and campaigns to create.'}
-
-IMPORTANT: Output ONLY valid JSON, no markdown or explanation.`;
-
-    const userPrompt = `Brand: ${brandContext.name}
-${brandContext.details ? `About: ${brandContext.details}` : ''}
-${brandContext.audience ? `Target Audience: ${brandContext.audience}` : ''}
-${brandContext.voiceSummary ? `Brand Voice: ${brandContext.voiceSummary}` : ''}
-
-${recentWork ? `Recent work:\n${recentWork}` : 'No recent work.'}
-
-${recentEmailTitles ? `Recent email topics: ${recentEmailTitles}` : ''}
-
-${memoryContext ? `Key brand info:\n${memoryContext}` : ''}
-
-Mode: ${mode === 'planning' ? 'Strategy & Planning (brainstorming, advice, campaign planning)' : 'Email Writing (create actual email copy)'}
-
-Generate 4 suggestions in this JSON format:
+Output ONLY valid JSON:
 {
   "suggestions": [
     {
       "id": "1",
-      "title": "Short catchy title (5-7 words)",
-      "description": "Brief description of what this will create (10-15 words)",
-      "prompt": "The full prompt to send to the AI (be specific, include brand details)",
-      "icon": "emoji that fits",
+      "title": "5-7 word title",
+      "description": "10-15 word description",
+      "prompt": "2-3 sentence detailed prompt referencing brand specifics",
+      "icon": "emoji",
       "category": "campaign|content|strategy|optimization"
     }
   ]
-}
-
-Make prompts specific to ${brandContext.name}. Don't suggest things they've recently done. Be creative but practical.`;
+}`;
 
     const { text } = await generateText({
       model: gateway.languageModel(SUGGESTION_MODEL),
       system: systemPrompt,
-      prompt: userPrompt,
+      prompt: 'Generate 4 strategic, brand-specific suggestions now.',
       maxRetries: 2,
     });
 
@@ -186,14 +195,15 @@ Make prompts specific to ${brandContext.name}. Don't suggest things they've rece
       }
     } catch (parseError) {
       logger.error('[Chat Suggestions] Failed to parse AI response:', text);
-      // Return fallback suggestions
-      suggestions = getFallbackSuggestions(brandContext.name, mode);
+      suggestions = getFallbackSuggestions(brand.name, mode, brand);
     }
 
-    // Ensure we always have suggestions
     if (suggestions.length === 0) {
-      suggestions = getFallbackSuggestions(brandContext.name, mode);
+      suggestions = getFallbackSuggestions(brand.name, mode, brand);
     }
+
+    // Cache successful suggestions
+    setCachedSuggestions(brandId, mode, suggestions);
 
     return NextResponse.json({ suggestions });
   } catch (error) {
@@ -205,14 +215,55 @@ Make prompts specific to ${brandContext.name}. Don't suggest things they've rece
   }
 }
 
-function getFallbackSuggestions(brandName: string, mode: string): ChatSuggestion[] {
+// Helper to get upcoming events/holidays
+function getUpcomingEvents(now: Date): string[] {
+  const events: string[] = [];
+  const month = now.getMonth();
+  const day = now.getDate();
+
+  // Check for nearby holidays/events
+  const upcoming: Array<{ month: number; day: number; name: string }> = [
+    { month: 0, day: 1, name: "New Year's Day" },
+    { month: 1, day: 14, name: "Valentine's Day" },
+    { month: 2, day: 17, name: "St. Patrick's Day" },
+    { month: 4, day: 12, name: "Mother's Day" },
+    { month: 5, day: 16, name: "Father's Day" },
+    { month: 6, day: 4, name: "Independence Day (US)" },
+    { month: 9, day: 31, name: "Halloween" },
+    { month: 10, day: 28, name: "Thanksgiving (US)" },
+    { month: 10, day: 29, name: "Black Friday" },
+    { month: 11, day: 25, name: "Christmas" },
+    { month: 11, day: 31, name: "New Year's Eve" },
+  ];
+
+  for (const event of upcoming) {
+    const eventDate = new Date(now.getFullYear(), event.month, event.day);
+    const daysUntil = Math.ceil((eventDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysUntil >= 0 && daysUntil <= 30) {
+      events.push(`${event.name} (${daysUntil === 0 ? 'today' : `in ${daysUntil} days`})`);
+    }
+  }
+
+  // Add seasonal context
+  if (month >= 2 && month <= 4) events.push('Spring season');
+  else if (month >= 5 && month <= 7) events.push('Summer season');
+  else if (month >= 8 && month <= 10) events.push('Fall season');
+  else events.push('Winter/Holiday season');
+
+  return events;
+}
+
+function getFallbackSuggestions(brandName: string, mode: string, brand?: any): ChatSuggestion[] {
+  const audience = brand?.brand_voice?.audience || 'customers';
+  const voiceHint = brand?.brand_voice?.brand_summary ? ` in our ${brand.brand_voice.voice_description || 'unique'} voice` : '';
+  
   if (mode === 'planning') {
     return [
       {
         id: '1',
-        title: 'Q1 Email Strategy Review',
-        description: 'Analyze and plan your email marketing strategy',
-        prompt: `Help me develop a comprehensive Q1 email marketing strategy for ${brandName}. What campaigns should we prioritize?`,
+        title: `${brandName} Email Strategy`,
+        description: 'Develop a comprehensive email marketing plan',
+        prompt: `Help me develop a strategic email marketing plan for ${brandName}. Consider our target audience (${audience}) and what campaigns would resonate most with them.`,
         icon: '📊',
         category: 'strategy',
       },
@@ -220,25 +271,25 @@ function getFallbackSuggestions(brandName: string, mode: string): ChatSuggestion
         id: '2',
         title: 'Customer Retention Ideas',
         description: 'Brainstorm ways to keep customers engaged',
-        prompt: `I want to improve customer retention for ${brandName}. What email sequences and campaigns would you recommend?`,
+        prompt: `I want to improve customer retention for ${brandName}. What email sequences would work best for ${audience}?`,
         icon: '🎯',
         category: 'strategy',
       },
       {
         id: '3',
-        title: 'Competitive Analysis',
-        description: 'Research competitor email strategies',
-        prompt: `Can you help me analyze what competitors in our space are doing with email marketing? I want to find opportunities for ${brandName}.`,
-        icon: '🔍',
+        title: 'Campaign Calendar Planning',
+        description: 'Map out upcoming email campaigns',
+        prompt: `Help me plan the next month of email campaigns for ${brandName}. What mix of promotional, educational, and engagement emails should we send?`,
+        icon: '📅',
         category: 'strategy',
       },
       {
         id: '4',
-        title: 'Seasonal Campaign Planning',
-        description: 'Plan upcoming seasonal promotions',
-        prompt: `Let's plan seasonal email campaigns for ${brandName}. What upcoming holidays or events should we capitalize on?`,
-        icon: '📅',
-        category: 'campaign',
+        title: 'Segmentation Strategy',
+        description: 'Better target different customer groups',
+        prompt: `Help me develop customer segmentation strategies for ${brandName}'s email marketing. How can we better personalize for different ${audience} segments?`,
+        icon: '🎯',
+        category: 'optimization',
       },
     ];
   }
@@ -246,37 +297,44 @@ function getFallbackSuggestions(brandName: string, mode: string): ChatSuggestion
   return [
     {
       id: '1',
-      title: 'Welcome Email Sequence',
-      description: 'Create emails to greet new subscribers',
-      prompt: `Create a welcome email for new ${brandName} subscribers. It should introduce our brand, highlight what makes us unique, and encourage them to make their first purchase.`,
+      title: `Welcome to ${brandName}`,
+      description: 'Greet new subscribers warmly',
+      prompt: `Create a welcome email for new ${brandName} subscribers${voiceHint}. It should introduce what we offer to ${audience}, build trust, and encourage a first action.`,
       icon: '👋',
       category: 'campaign',
     },
     {
       id: '2',
-      title: 'Flash Sale Announcement',
-      description: 'Urgent promotional email with strong CTA',
-      prompt: `Write a flash sale email for ${brandName}. Create urgency, highlight the discount, and include a compelling call-to-action.`,
+      title: 'Limited Time Offer',
+      description: 'Create urgency with a promotional email',
+      prompt: `Write a promotional email for ${brandName}${voiceHint}. Create urgency, clearly communicate the value, and include a compelling call-to-action for ${audience}.`,
       icon: '⚡',
       category: 'campaign',
     },
     {
       id: '3',
-      title: 'Product Launch Email',
-      description: 'Announce a new product or collection',
-      prompt: `Create a product launch email for ${brandName}. Build excitement, showcase the key features, and drive pre-orders or early interest.`,
-      icon: '🚀',
+      title: 'Product Highlight',
+      description: 'Showcase what makes us special',
+      prompt: `Create an email highlighting ${brandName}'s key offering${voiceHint}. Focus on the benefits that matter most to ${audience} and drive interest.`,
+      icon: '✨',
       category: 'content',
     },
     {
       id: '4',
-      title: 'Win-Back Campaign',
-      description: 'Re-engage inactive customers',
-      prompt: `Write a win-back email for ${brandName} to re-engage customers who haven't purchased in a while. Include a special offer and remind them why they loved us.`,
+      title: 'Re-engagement Email',
+      description: 'Win back inactive subscribers',
+      prompt: `Write a re-engagement email for ${brandName}${voiceHint}. Reconnect with ${audience} who haven't engaged recently, remind them of our value, and include an incentive to return.`,
       icon: '💝',
       category: 'optimization',
     },
   ];
 }
+
+
+
+
+
+
+
 
 

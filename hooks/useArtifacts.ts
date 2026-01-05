@@ -245,7 +245,11 @@ export function useArtifacts<K extends ArtifactKind, T extends BaseArtifact<K>>(
       const artifact = artifacts.find(a => a.id === id);
       if (!artifact) return null;
 
-      const shareToken = `share_${id}_${Date.now().toString(36)}`;
+      // Generate a cryptographically secure share token
+      const randomBytes = new Uint8Array(16);
+      crypto.getRandomValues(randomBytes);
+      const randomPart = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      const shareToken = `share_${id.slice(0, 8)}_${randomPart}`;
 
       const { error: updateError } = await supabase
         .from('artifacts')
@@ -264,9 +268,15 @@ export function useArtifacts<K extends ArtifactKind, T extends BaseArtifact<K>>(
       await fetchArtifacts();
       
       const shareUrl = `${window.location.origin}/share/${kind}/${shareToken}`;
-      await navigator.clipboard.writeText(shareUrl);
-      toast.success('Share link copied to clipboard!');
-      
+
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        toast.success('Share link copied to clipboard!');
+      } catch (clipboardErr) {
+        console.warn('Clipboard write failed:', clipboardErr);
+        toast.success('Share link created!');
+      }
+
       return shareUrl;
     } catch (err) {
       console.error('Error sharing artifact:', err);
@@ -409,6 +419,28 @@ export function useArtifacts<K extends ArtifactKind, T extends BaseArtifact<K>>(
 }
 
 export default useArtifacts;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

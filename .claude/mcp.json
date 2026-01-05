@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "shopify_composio": {
+      "url": "https://mcp.composio.dev/shopify/flabby-breezy-accountant-UQ0WL6"
+    },
+    "Figma": {
+      "url": "http://127.0.0.1:3845/sse"
+    },
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--access-token",
+        "sbp_885fd0c7e7b7d333baedc5545ae6d42477570c58"
+      ]
+    }
+  }
+}

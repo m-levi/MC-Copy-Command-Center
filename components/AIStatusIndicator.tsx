@@ -18,6 +18,7 @@ const statusLabels: Record<AIStatus, string> = {
   creating_cta: 'writing call-to-action',
   finalizing: 'finalizing email',
   saving_memory: 'saving to memory',
+  generating_image: 'generating image',
 };
 
 // Memoized to prevent re-renders

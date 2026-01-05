@@ -43,22 +43,23 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
     throw membersError;
   }
 
-  // Fetch profiles separately for each member using service client
-  // This ensures we can see profiles even if public visibility is restricted
-  const membersWithProfiles = await Promise.all(
-    (membersData || []).map(async (member) => {
-      const { data: profile } = await serviceClient
-        .from('profiles')
-        .select('user_id, email, full_name, avatar_url, created_at')
-        .eq('user_id', member.user_id)
-        .single();
-      
-      return {
-        ...member,
-        profile: profile || null
-      };
-    })
+  // Batch fetch all profiles in a single query (fixes N+1)
+  const userIds = (membersData || []).map(m => m.user_id);
+  const { data: profiles } = await serviceClient
+    .from('profiles')
+    .select('user_id, email, full_name, avatar_url, created_at')
+    .in('user_id', userIds);
+
+  // Create a lookup map for O(1) profile access
+  const profileMap = new Map(
+    (profiles || []).map(p => [p.user_id, p])
   );
+
+  // Map profiles to members
+  const membersWithProfiles = (membersData || []).map(member => ({
+    ...member,
+    profile: profileMap.get(member.user_id) || null
+  }));
 
   return NextResponse.json({ members: membersWithProfiles });
 });

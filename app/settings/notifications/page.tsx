@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
+import { getErrorMessage } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,9 +98,9 @@ export default function NotificationsPage() {
       if (data.email_notifications) {
         setSettings({ ...defaultSettings, ...data.email_notifications });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error loading notification settings:', error);
-      toast.error('Failed to load notification settings');
+      toast.error(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -119,9 +120,9 @@ export default function NotificationsPage() {
       if (!response.ok) throw new Error('Failed to save preferences');
       
       toast.success('Notification settings saved');
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving notification settings:', error);
-      toast.error('Failed to save notification settings');
+      toast.error(getErrorMessage(error));
       // Revert on error
       loadSettings();
     } finally {
@@ -154,9 +155,9 @@ export default function NotificationsPage() {
         setTestResult('error');
         setTestMessage(data.error || data.details?.error || 'Failed to send test email');
       }
-    } catch (error: any) {
+    } catch (error) {
       setTestResult('error');
-      setTestMessage(error.message || 'Network error');
+      setTestMessage(getErrorMessage(error));
     } finally {
       setSendingTest(false);
       // Reset the result after 5 seconds

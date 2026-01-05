@@ -73,6 +73,7 @@ function getStatusInfo(status: AIStatus, isLoading: boolean) {
     creating_cta: { label: 'Creating CTA...', color: 'text-green-500' },
     finalizing: { label: 'Finalizing...', color: 'text-emerald-500' },
     saving_memory: { label: 'Saving to memory...', color: 'text-violet-500' },
+    generating_image: { label: 'Generating image...', color: 'text-pink-500' },
   };
   
   return statusMap[status] || { label: 'Processing...', color: 'text-gray-500' };

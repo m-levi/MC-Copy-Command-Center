@@ -1,6 +1,6 @@
 'use client';
 
-import { ConversationQuickAction } from '@/types';
+import { ConversationQuickAction, ConversationVisibility } from '@/types';
 import { useEffect, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -8,6 +8,8 @@ interface ConversationContextMenuProps {
   conversationId: string;
   isPinned: boolean;
   isArchived?: boolean;
+  visibility?: ConversationVisibility;
+  isOwner?: boolean; // Only owner can change visibility
   position: { x: number; y: number } | null;
   onAction: (action: ConversationQuickAction) => void;
   onClose: () => void;
@@ -18,6 +20,8 @@ function ConversationContextMenu({
   conversationId,
   isPinned,
   isArchived = false,
+  visibility = 'private',
+  isOwner = true,
   position,
   onAction,
   onClose,
@@ -62,7 +66,28 @@ function ConversationContextMenu({
     y: Math.min(position.y, window.innerHeight - 300)
   };
 
+  const isTeamVisible = visibility === 'team';
+  
   const menuItems = [
+    // Visibility toggle - only show if user is owner
+    ...(isOwner ? [{
+      action: (isTeamVisible ? 'make_private' : 'share_with_team') as ConversationQuickAction,
+      icon: isTeamVisible ? (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      ),
+      label: isTeamVisible ? 'Make Private' : 'Share with Team',
+      color: isTeamVisible 
+        ? 'text-gray-700 dark:text-gray-300' 
+        : 'text-blue-600 dark:text-blue-400',
+      highlight: !isTeamVisible
+    }] : []),
+    { type: 'divider' as const },
     {
       action: isPinned ? 'unpin' : 'pin' as ConversationQuickAction,
       icon: isPinned ? (
@@ -176,6 +201,8 @@ export default memo(ConversationContextMenu, (prevProps, nextProps) => {
     prevProps.conversationId === nextProps.conversationId &&
     prevProps.isPinned === nextProps.isPinned &&
     prevProps.isArchived === nextProps.isArchived &&
+    prevProps.visibility === nextProps.visibility &&
+    prevProps.isOwner === nextProps.isOwner &&
     prevProps.position?.x === nextProps.position?.x &&
     prevProps.position?.y === nextProps.position?.y &&
     prevProps.bulkSelectMode === nextProps.bulkSelectMode

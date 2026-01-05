@@ -1,8 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { SidebarViewMode, UserPreferences, ConversationWithStatus, ConversationQuickAction } from '@/types';
 import { getUserPreferences, upsertUserPreferences, getDefaultPreferences } from '@/lib/user-preferences';
-import { togglePinConversation, toggleArchiveConversation, duplicateConversation, exportConversation, exportConversationAsMarkdown, deleteConversation } from '@/lib/conversation-actions';
+import { togglePinConversation, toggleArchiveConversation, duplicateConversation, exportConversation, exportConversationAsMarkdown, deleteConversation, toggleConversationVisibility } from '@/lib/conversation-actions';
 import { Conversation } from '@/types';
+import toast from 'react-hot-toast';
+
+// Debounce delay for saving sidebar width (ms)
+const SIDEBAR_WIDTH_SAVE_DELAY = 500;
 
 interface UseSidebarStateProps {
   userId: string;
@@ -35,6 +39,22 @@ export function useSidebarState({
   const [sidebarWidth, setSidebarWidthState] = useState(398);
   const [activeConversationIds, setActiveConversationIds] = useState<Set<string>>(new Set());
   const [conversationStatuses, setConversationStatuses] = useState<Map<string, { status: 'idle' | 'loading' | 'ai_responding' | 'error', progress?: number }>>(new Map());
+
+  // Ref for debouncing sidebar width saves
+  const sidebarWidthSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Refs for status timeout cleanup
+  const statusTimeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (sidebarWidthSaveTimerRef.current) {
+        clearTimeout(sidebarWidthSaveTimerRef.current);
+      }
+      statusTimeoutRefs.current.forEach(timer => clearTimeout(timer));
+      statusTimeoutRefs.current.clear();
+    };
+  }, []);
 
   // Load user preferences on mount
   useEffect(() => {
@@ -75,11 +95,18 @@ export function useSidebarState({
     }
   }, [userId]);
 
-  const setSidebarWidth = useCallback(async (width: number) => {
+  const setSidebarWidth = useCallback((width: number) => {
+    // Immediately update local state for responsive UI
     setSidebarWidthState(width);
+
+    // Debounce the database save to prevent 50+ API calls per drag
     if (userId) {
-      // Debounce the save
-      await upsertUserPreferences(userId, { sidebar_width: width });
+      if (sidebarWidthSaveTimerRef.current) {
+        clearTimeout(sidebarWidthSaveTimerRef.current);
+      }
+      sidebarWidthSaveTimerRef.current = setTimeout(() => {
+        upsertUserPreferences(userId, { sidebar_width: width });
+      }, SIDEBAR_WIDTH_SAVE_DELAY);
     }
   }, [userId]);
 
@@ -126,6 +153,18 @@ export function useSidebarState({
       case 'rename':
         // Rename is handled separately in the UI
         break;
+      case 'share_with_team':
+        const sharedResult = await toggleConversationVisibility(conversationId, 'team');
+        if (sharedResult) {
+          toast.success('Conversation shared with team');
+        }
+        break;
+      case 'make_private':
+        const privateResult = await toggleConversationVisibility(conversationId, 'private');
+        if (privateResult) {
+          toast.success('Conversation is now private');
+        }
+        break;
     }
 
     // Reload preferences and conversations
@@ -156,15 +195,24 @@ export function useSidebarState({
       return newMap;
     });
 
+    // Clear any existing timeout for this conversation
+    const existingTimeout = statusTimeoutRefs.current.get(conversationId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      statusTimeoutRefs.current.delete(conversationId);
+    }
+
     // Auto-clear status after some time for non-active states
     if (status === 'idle' || status === 'error') {
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         setConversationStatuses(prev => {
           const newMap = new Map(prev);
           newMap.delete(conversationId);
           return newMap;
         });
+        statusTimeoutRefs.current.delete(conversationId);
       }, status === 'error' ? 5000 : 1000);
+      statusTimeoutRefs.current.set(conversationId, timeout);
     }
   }, []);
 

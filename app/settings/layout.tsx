@@ -4,22 +4,173 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { cn } from '@/lib/utils';
+import {
+  User,
+  Bell,
+  Cpu,
+  Sparkles,
+  FlaskConical,
+  Box,
+  Users,
+  Building2,
+  Shield,
+  Smartphone,
+  FileText,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Settings,
+  Bot,
+  Star,
+} from 'lucide-react';
 
 interface SettingsLayoutProps {
   children: React.ReactNode;
 }
 
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  description?: string;
+  adminOnly?: boolean;
+  danger?: boolean;
+}
+
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const navSections: NavSection[] = [
+  {
+    title: 'Personal',
+    items: [
+      {
+        name: 'Profile',
+        href: '/settings/profile',
+        icon: User,
+        description: 'Your personal information'
+      },
+      {
+        name: 'Notifications',
+        href: '/settings/notifications',
+        icon: Bell,
+        description: 'Email and alert preferences'
+      },
+      {
+        name: 'Starred Emails',
+        href: '/settings/starred',
+        icon: Star,
+        description: 'Your saved favorites'
+      },
+    ],
+  },
+  {
+    title: 'AI & Content',
+    items: [
+      {
+        name: 'AI Models',
+        href: '/settings/models',
+        icon: Cpu,
+        description: 'Model selection & defaults'
+      },
+      {
+        name: 'Quick Actions',
+        href: '/settings/prompts',
+        icon: Sparkles,
+        description: 'Custom prompt shortcuts'
+      },
+      {
+        name: 'Agent Builder',
+        href: '/settings/modes',
+        icon: Bot,
+        description: 'Create & customize AI agents'
+      },
+      {
+        name: 'Artifact Types',
+        href: '/settings/artifact-types',
+        icon: Box,
+        description: 'Output format presets'
+      },
+      {
+        name: 'Automations',
+        href: '/settings/agents',
+        icon: Sparkles,
+        description: 'Scheduled insights & workflows'
+      },
+    ],
+  },
+  {
+    title: 'Team & Organization',
+    items: [
+      {
+        name: 'Team Members',
+        href: '/settings/team',
+        icon: Users,
+        description: 'Manage your team',
+        adminOnly: true
+      },
+      {
+        name: 'Organization',
+        href: '/settings/organization',
+        icon: Building2,
+        description: 'Workspace settings',
+        adminOnly: true
+      },
+    ],
+  },
+  {
+    title: 'Security & Access',
+    items: [
+      {
+        name: 'Password',
+        href: '/settings/security',
+        icon: Shield,
+        description: 'Update your password'
+      },
+      {
+        name: 'Active Sessions',
+        href: '/settings/sessions',
+        icon: Smartphone,
+        description: 'Manage logged-in devices'
+      },
+      {
+        name: 'Audit Log',
+        href: '/settings/audit',
+        icon: FileText,
+        description: 'Security event history'
+      },
+    ],
+  },
+  {
+    title: 'Account',
+    items: [
+      {
+        name: 'Delete Account',
+        href: '/settings/account',
+        icon: Trash2,
+        description: 'Permanently delete',
+        danger: true
+      },
+    ],
+  },
+];
+
 export default function SettingsLayout({ children }: SettingsLayoutProps) {
   const pathname = usePathname();
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [userName, setUserName] = useState<string>('');
+  const [userEmail, setUserEmail] = useState<string>('');
   const supabase = createClient();
 
   useEffect(() => {
-    checkAdminStatus();
+    checkUserData();
   }, []);
 
-  const checkAdminStatus = async () => {
+  const checkUserData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -30,189 +181,241 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
         .eq('user_id', user.id)
         .single();
 
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('full_name, email')
+        .eq('user_id', user.id)
+        .single();
+
       if (memberData?.role === 'admin') {
         setIsAdmin(true);
       }
+      if (profileData) {
+        setUserName(profileData.full_name || '');
+        setUserEmail(profileData.email || user.email || '');
+      }
     } catch (error) {
-      console.error('Error checking admin status:', error);
+      console.error('Error checking user data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const navItems = [
-    { name: 'Profile', href: '/settings/profile', icon: UserIcon },
-    { name: 'Prompt Library', href: '/settings/prompts', icon: SparklesIcon },
-    { name: 'Mode Lab', href: '/settings/modes', icon: FlaskIcon },
-    { name: 'Notifications', href: '/settings/notifications', icon: BellIcon },
-    { name: 'Security', href: '/settings/security', icon: LockIcon },
-    { name: 'Team', href: '/settings/team', icon: UsersIcon, adminOnly: true },
-    { name: 'Starred Emails', href: '/settings/starred', icon: StarIcon },
-    { name: 'Active Sessions', href: '/settings/sessions', icon: DevicePhoneMobileIcon },
-    { name: 'Security Log', href: '/settings/audit', icon: ClipboardDocumentListIcon },
-    { name: 'Account', href: '/settings/account', icon: TrashIcon, danger: true },
-    { name: 'Debug Mode', href: '/settings/debug', icon: BeakerIcon },
-  ];
+  // Find current page info for header and breadcrumbs
+  const currentSection = navSections.find(section =>
+    section.items.some(item => pathname === item.href || pathname.startsWith(item.href + '/'))
+  );
+  const currentPage = navSections
+    .flatMap(section => section.items)
+    .find(item => pathname === item.href || pathname.startsWith(item.href + '/'));
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 fixed w-full z-30 top-0 left-0">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-50 to-gray-100 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
+      {/* Compact Top Navigation */}
+      <nav className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <Link href="/" className="text-xl font-bold text-gray-900 dark:text-white">
-                  Command Center
-                </Link>
-              </div>
-            </div>
-            <div className="flex items-center">
+          <div className="flex items-center justify-between h-14">
+            <div className="flex items-center gap-3">
               <Link
                 href="/"
-                className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-3 py-2 rounded-md font-medium"
+                className="flex items-center gap-2 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
               >
-                Exit Settings
+                <ChevronLeft className="w-4 h-4" />
+                <span className="text-sm font-medium">Back</span>
               </Link>
+              <div className="h-4 w-px bg-gray-300 dark:bg-gray-700" />
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center">
+                  <Settings className="w-4 h-4 text-white" />
+                </div>
+                <span className="text-base font-semibold text-gray-900 dark:text-white">Settings</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{userName || 'User'}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{userEmail}</p>
+              </div>
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white text-sm font-semibold">
+                {userName?.[0]?.toUpperCase() || userEmail?.[0]?.toUpperCase() || 'U'}
+              </div>
             </div>
           </div>
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-10">
-        <div className="lg:grid lg:grid-cols-12 lg:gap-x-5">
-          <aside className="py-6 px-2 sm:px-6 lg:py-0 lg:px-0 lg:col-span-3">
-            <nav className="space-y-1">
-              {navItems.map((item) => {
-                if (item.adminOnly && !loading && !isAdmin) return null;
-                
-                const isActive = pathname === item.href;
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="flex gap-8">
+          {/* Sidebar Navigation */}
+          <aside className="w-64 flex-shrink-0 hidden lg:block">
+            <nav className="sticky top-20 space-y-6">
+              {navSections.map((section) => {
+                // Filter out admin-only items if not admin
+                const visibleItems = section.items.filter(
+                  item => !item.adminOnly || (item.adminOnly && !loading && isAdmin)
+                );
+
+                if (visibleItems.length === 0) return null;
+
                 return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className={`
-                      group rounded-md px-3 py-2 flex items-center text-sm font-medium transition-colors
-                      ${isActive 
-                        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-l-4 border-blue-600 dark:border-blue-500' 
-                        : 'text-gray-900 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white border-l-4 border-transparent'
-                      }
-                      ${item.danger ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10' : ''}
-                    `}
-                  >
-                    <item.icon
-                      className={`
-                        flex-shrink-0 -ml-1 mr-3 h-6 w-6
-                        ${isActive 
-                          ? 'text-blue-600 dark:text-blue-500' 
-                          : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-500 dark:group-hover:text-gray-300'
-                        }
-                        ${item.danger ? 'text-red-500 dark:text-red-500 group-hover:text-red-600 dark:group-hover:text-red-400' : ''}
-                      `}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate">{item.name}</span>
-                  </Link>
+                  <div key={section.title}>
+                    <h3 className="px-3 mb-2 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                      {section.title}
+                    </h3>
+                    <ul className="space-y-1">
+                      {visibleItems.map((item) => {
+                        const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+                        const Icon = item.icon;
+
+                        return (
+                          <li key={item.name}>
+                            <Link
+                              href={item.href}
+                              className={cn(
+                                "group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
+                                isActive
+                                  ? "bg-gradient-to-r from-purple-500/10 to-blue-500/10 text-purple-700 dark:text-purple-300 shadow-sm border border-purple-200/50 dark:border-purple-800/50"
+                                  : item.danger
+                                    ? "text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                    : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-gray-100"
+                              )}
+                            >
+                              <Icon
+                                className={cn(
+                                  "w-5 h-5 flex-shrink-0 transition-colors",
+                                  isActive
+                                    ? "text-purple-600 dark:text-purple-400"
+                                    : item.danger
+                                      ? "text-red-500"
+                                      : "text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300"
+                                )}
+                              />
+                              <span>{item.name}</span>
+                              {isActive && (
+                                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-purple-500" />
+                              )}
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 );
               })}
             </nav>
           </aside>
 
-          <main className="lg:col-span-9">
-            <div className="bg-white dark:bg-gray-900 shadow rounded-lg p-6 min-h-[500px]">
+          {/* Main Content */}
+          <main className="flex-1 min-w-0">
+            {/* Breadcrumb Navigation */}
+            {currentSection && currentPage && (
+              <nav aria-label="Breadcrumb" className="mb-4">
+                <ol className="flex items-center gap-1.5 text-sm">
+                  <li>
+                    <Link
+                      href="/settings"
+                      className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                    >
+                      Settings
+                    </Link>
+                  </li>
+                  <li aria-hidden="true">
+                    <ChevronRight className="w-3.5 h-3.5 text-gray-400 dark:text-gray-600" />
+                  </li>
+                  <li>
+                    <span className="text-gray-500 dark:text-gray-400">
+                      {currentSection.title}
+                    </span>
+                  </li>
+                  <li aria-hidden="true">
+                    <ChevronRight className="w-3.5 h-3.5 text-gray-400 dark:text-gray-600" />
+                  </li>
+                  <li aria-current="page">
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      {currentPage.name}
+                    </span>
+                  </li>
+                </ol>
+              </nav>
+            )}
+
+            {/* Page Header */}
+            {currentPage && (
+              <div className="mb-6">
+                <div className="flex items-center gap-3 mb-1">
+                  <div className={cn(
+                    "w-10 h-10 rounded-xl flex items-center justify-center",
+                    currentPage.danger
+                      ? "bg-red-100 dark:bg-red-900/30"
+                      : "bg-gradient-to-br from-purple-100 to-blue-100 dark:from-purple-900/30 dark:to-blue-900/30"
+                  )}>
+                    <currentPage.icon className={cn(
+                      "w-5 h-5",
+                      currentPage.danger
+                        ? "text-red-600 dark:text-red-400"
+                        : "text-purple-600 dark:text-purple-400"
+                    )} />
+                  </div>
+                  <div>
+                    <h1 className={cn(
+                      "text-xl font-semibold",
+                      currentPage.danger
+                        ? "text-red-900 dark:text-red-100"
+                        : "text-gray-900 dark:text-gray-100"
+                    )}>
+                      {currentPage.name}
+                    </h1>
+                    {currentPage.description && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {currentPage.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Content Card */}
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200/50 dark:border-gray-800/50 p-6 min-h-[500px]">
               {children}
             </div>
           </main>
         </div>
       </div>
+
+      {/* Mobile Bottom Navigation (visible on smaller screens) */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-t border-gray-200 dark:border-gray-800 z-40">
+        <div className="flex items-center justify-around py-2 px-4">
+          {[
+            { name: 'Profile', href: '/settings/profile', icon: User },
+            { name: 'AI', href: '/settings/models', icon: Cpu },
+            { name: 'Team', href: '/settings/team', icon: Users },
+            { name: 'Security', href: '/settings/security', icon: Shield },
+          ].map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  "flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors",
+                  isActive
+                    ? "text-purple-600 dark:text-purple-400"
+                    : "text-gray-500 dark:text-gray-400"
+                )}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="text-xs font-medium">{item.name}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Add padding at bottom for mobile nav */}
+      <div className="lg:hidden h-20" />
     </div>
-  );
-}
-
-// Icons
-function UserIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-    </svg>
-  );
-}
-
-function LockIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-    </svg>
-  );
-}
-
-function UsersIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-    </svg>
-  );
-}
-
-function StarIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-    </svg>
-  );
-}
-
-function DevicePhoneMobileIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-    </svg>
-  );
-}
-
-function ClipboardDocumentListIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-    </svg>
-  );
-}
-
-function TrashIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-  );
-}
-
-function BeakerIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-    </svg>
-  );
-}
-
-function BellIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-    </svg>
-  );
-}
-
-function SparklesIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-    </svg>
-  );
-}
-
-function FlaskIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l.8 1.6a2.25 2.25 0 01-2.012 3.1H5.412a2.25 2.25 0 01-2.012-3.1l.8-1.6" />
-    </svg>
   );
 }

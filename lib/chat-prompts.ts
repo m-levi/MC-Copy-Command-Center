@@ -11,6 +11,7 @@ import {
 } from './prompts/standard-email.prompt';
 import { buildDesignEmailV2Prompt } from './prompts/design-email-v2.prompt';
 import { SECTION_REGENERATION_PROMPTS } from './prompts/section-regeneration.prompt';
+import { composeSystemPrompt } from './prompts/root-system-prompt';
 import { BrandVoiceData } from '@/types';
 
 export interface PromptContext {
@@ -357,8 +358,7 @@ export function buildSectionRegenerationPrompt(
 
 /**
  * Build prompt for custom modes
- * Replaces template variables in a custom system prompt
- * Respects context_sources configuration for what info to include
+ * Uses the new layered architecture: Root System Prompt + Mode Extension + Brand Context
  */
 export function buildCustomModePrompt(
   systemPrompt: string,
@@ -367,51 +367,17 @@ export function buildCustomModePrompt(
     conversationContext?: any;
     memoryContext?: string;
     userMessage?: string;
-    contextSources?: {
-      brand_voice: boolean;
-      brand_details: boolean;
-      product_catalog: boolean;
-      past_emails: boolean;
-      web_research: boolean;
-      custom_documents: string[];
-    };
+    allowedArtifactKinds?: string[];
   } = {}
 ): string {
-  const contextSources = options.contextSources || {
-    brand_voice: true,
-    brand_details: true,
-    product_catalog: false,
-    past_emails: false,
-    web_research: false,
-    custom_documents: [],
-  };
-
-  // Build brand info based on context sources
-  let brandInfo = '';
-  if (contextSources.brand_details && brandContext) {
-    brandInfo = `Brand Name: ${brandContext.name || 'N/A'}\n`;
-    if (brandContext.brand_details) {
-      brandInfo += `Brand Details: ${brandContext.brand_details}\n`;
-    }
-    if (brandContext.website_url) {
-      brandInfo += `Website: ${brandContext.website_url}\n`;
-    }
-  }
-  if (contextSources.brand_voice && brandContext) {
-    if (brandContext.brand_guidelines) {
-      brandInfo += `Brand Guidelines: ${brandContext.brand_guidelines}\n`;
-    }
-    if (brandContext.copywriting_style_guide) {
-      brandInfo += `Copywriting Style Guide: ${brandContext.copywriting_style_guide}\n`;
-    }
-  }
-  brandInfo = brandInfo.trim() || buildBrandInfo(brandContext);
-  
+  // Build brand context string
+  const brandInfo = buildBrandInfo(brandContext);
   const contextInfo = buildContextInfo(options.conversationContext);
   const hostname = getHostnameFromUrl(brandContext?.website_url);
   const websiteHint = hostname ? ` (including ${hostname})` : '';
 
-  return systemPrompt
+  // Process the mode-specific prompt with variable substitution
+  let processedModePrompt = systemPrompt
     .replace(/\{\{BRAND_INFO\}\}/g, brandInfo)
     .replace(/\{\{BRAND_NAME\}\}/g, brandContext?.name || '')
     .replace(/\{\{WEBSITE_URL\}\}/g, brandContext?.website_url || '')
@@ -422,6 +388,23 @@ export function buildCustomModePrompt(
     .replace(/\{\{MEMORY_CONTEXT\}\}/g, options.memoryContext || '')
     .replace(/\{\{PRODUCTS\}\}/g, '') // Product context populated by product_search tool if enabled
     .replace(/\{\{RAG_CONTEXT\}\}/g, ''); // RAG disabled
+
+  // Add artifact kind restrictions if specified
+  if (options.allowedArtifactKinds && options.allowedArtifactKinds.length > 0) {
+    const kindsStr = options.allowedArtifactKinds.join(', ');
+    processedModePrompt += `\n\n## Artifact Restrictions
+IMPORTANT: When creating artifacts, you may ONLY use these artifact kinds: ${kindsStr}.
+Do NOT create email artifacts or other artifact types not in this list.
+If you need to provide content that doesn't fit these artifact types, include it directly in your response text instead.`;
+  }
+
+  // Compose the full prompt using the layered system
+  return composeSystemPrompt({
+    modePrompt: processedModePrompt,
+    brandContext: brandInfo,
+    memoryContext: options.memoryContext,
+    additionalContext: contextInfo || undefined,
+  });
 }
 
 /**

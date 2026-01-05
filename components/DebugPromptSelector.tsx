@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { usePathname, useParams } from 'next/navigation';
+import { logger } from '@/lib/logger';
 
 // Lazy load the Prompt Lab for better performance
 const DebugPromptLab = lazy(() => import('./DebugPromptLab'));
@@ -35,8 +36,8 @@ export default function DebugPromptSelector({ brandId: propBrandId, emailType = 
   const brandId = propBrandId || (params?.brandId as string);
 
   // Only show on relevant pages
-  const isEmailPage = pathname?.includes('/voice-builder') || 
-                      pathname?.includes('/chat') || 
+  const isEmailPage = pathname?.includes('/brand-builder') ||
+                      pathname?.includes('/chat') ||
                       pathname?.includes('/flow') ||
                       pathname?.includes('/brands/');
 
@@ -87,7 +88,7 @@ export default function DebugPromptSelector({ brandId: propBrandId, emailType = 
         }
       }
     } catch (error) {
-      console.error('Error checking debug mode:', error);
+      logger.error('Error checking debug mode:', error);
     }
   };
 
@@ -101,7 +102,7 @@ export default function DebugPromptSelector({ brandId: propBrandId, emailType = 
         setActivePrompts(data.filter((p: CustomPrompt) => p.is_active));
       }
     } catch (error) {
-      console.error('Error fetching prompts:', error);
+      logger.error('Error fetching prompts:', error);
     } finally {
       setLoading(false);
     }
@@ -117,7 +118,7 @@ export default function DebugPromptSelector({ brandId: propBrandId, emailType = 
         fetchPrompts(); // Refresh to get updated active state
       }
     } catch (error) {
-      console.error('Error activating prompt:', error);
+      logger.error('Error activating prompt:', error);
     }
   };
 
@@ -143,7 +144,7 @@ export default function DebugPromptSelector({ brandId: propBrandId, emailType = 
         }
       }
     } catch (error) {
-      console.error('Error switching to default prompts:', error);
+      logger.error('Error switching to default prompts:', error);
     }
   };
 

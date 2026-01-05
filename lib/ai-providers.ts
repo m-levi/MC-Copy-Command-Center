@@ -12,6 +12,7 @@ import 'server-only';
 import { gateway, createGateway } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { MODELS } from './ai-constants';
+import { logger } from './logger';
 
 /**
  * Default gateway instance
@@ -91,7 +92,7 @@ export const getToolsForModel = (modelId: string, websiteUrl?: string) => {
         web_search: createWebSearchTool(websiteUrl),
       };
     } catch (error) {
-      console.error('[AI Providers] Error creating web search tool:', error);
+      logger.error('[AI Providers] Error creating web search tool:', error);
       // Return undefined if web search tool creation fails
       return undefined;
     }

@@ -16,29 +16,17 @@ export async function GET() {
   }
 
   try {
+    // Get most recent brand where user is creator (via created_by or legacy user_id)
     const { data, error } = await supabase
       .from('brands')
       .select('id')
-      .eq('created_by', user.id)
+      .or(`created_by.eq.${user.id},user_id.eq.${user.id}`)
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
 
     if (error) {
-      // Try alternate query using user_id
-      const { data: altData, error: altError } = await supabase
-        .from('brands')
-        .select('id')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (altError) {
-        return NextResponse.json({ brandId: null });
-      }
-      
-      return NextResponse.json({ brandId: altData.id });
+      return NextResponse.json({ brandId: null });
     }
 
     return NextResponse.json({ brandId: data.id });
@@ -47,6 +35,28 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

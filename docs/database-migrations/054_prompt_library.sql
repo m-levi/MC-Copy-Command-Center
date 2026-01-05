@@ -76,3 +76,25 @@ COMMENT ON TABLE saved_prompts IS 'User-saved prompts for quick actions in chat'
 COMMENT ON COLUMN saved_prompts.modes IS 'Array of conversation modes where this prompt appears';
 COMMENT ON COLUMN saved_prompts.is_default IS 'System default prompts that cannot be deleted';
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -2,34 +2,28 @@ import { AIModelOption } from '@/types';
 import { MODELS } from './ai-constants';
 
 export const AI_MODELS: AIModelOption[] = [
-  // Primary models shown in model picker
+  // Primary Anthropic models
   {
     id: MODELS.CLAUDE_SONNET,
-    name: 'Sonnet 4.5',
+    name: 'Claude Sonnet 4.5',
     provider: 'anthropic',
-  },
-  {
-    id: MODELS.GEMINI_3,
-    name: 'Gemini 3',
-    provider: 'google',
   },
   {
     id: MODELS.CLAUDE_OPUS,
-    name: 'Opus 4.5',
+    name: 'Claude Opus 4.5',
     provider: 'anthropic',
   },
-  {
-    id: MODELS.GPT_5_1,
-    name: 'GPT 5.1',
-    provider: 'openai',
-  },
-  // Additional Anthropic models
   {
     id: MODELS.CLAUDE_HAIKU,
     name: 'Claude Haiku 4.5',
     provider: 'anthropic',
   },
-  // Additional OpenAI models
+  // OpenAI models
+  {
+    id: MODELS.GPT_5_1,
+    name: 'GPT 5.1',
+    provider: 'openai',
+  },
   {
     id: MODELS.GPT_5_1_INSTANT,
     name: 'GPT 5.1 Instant',
@@ -37,10 +31,45 @@ export const AI_MODELS: AIModelOption[] = [
   },
   {
     id: MODELS.GPT_5_1_MINI,
-    name: 'GPT 5 mini',
+    name: 'GPT 5 Mini',
     provider: 'openai',
   },
-  // Additional Google models
+  {
+    id: MODELS.GPT_5,
+    name: 'GPT 5',
+    provider: 'openai',
+  },
+  {
+    id: MODELS.O1,
+    name: 'O1',
+    provider: 'openai',
+  },
+  {
+    id: MODELS.O3,
+    name: 'O3',
+    provider: 'openai',
+  },
+  {
+    id: MODELS.O3_MINI,
+    name: 'O3 Mini',
+    provider: 'openai',
+  },
+  {
+    id: MODELS.O4_MINI,
+    name: 'O4 Mini',
+    provider: 'openai',
+  },
+  // Google models
+  {
+    id: MODELS.GEMINI_3,
+    name: 'Gemini 3 Pro',
+    provider: 'google',
+  },
+  {
+    id: MODELS.GEMINI_3_FLASH,
+    name: 'Gemini 3 Flash',
+    provider: 'google',
+  },
   {
     id: MODELS.GEMINI_PRO,
     name: 'Gemini 2.5 Pro',

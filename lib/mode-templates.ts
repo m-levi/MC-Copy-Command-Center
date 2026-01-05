@@ -1,12 +1,9 @@
 /**
  * Pre-built Mode Templates
- * A library of ready-to-use mode configurations for common use cases
+ * A library of ready-to-use system prompts for common use cases
  */
 
-import { 
-  ModeColor, ModeBaseType, ModeToolsConfig, ModeContextConfig, ModeOutputConfig,
-  DEFAULT_MODE_TOOLS, DEFAULT_MODE_CONTEXT, DEFAULT_MODE_OUTPUT
-} from '@/types';
+import { ModeColor } from '@/types';
 
 export interface ModeTemplate {
   id: string;
@@ -19,44 +16,7 @@ export interface ModeTemplate {
   tags: string[];
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   use_cases: string[];
-  // Enhanced configuration
-  base_mode: ModeBaseType;
-  tools: ModeToolsConfig;
-  context_sources: ModeContextConfig;
-  output_config: ModeOutputConfig;
 }
-
-// Default template configurations for each category
-const MARKETING_TOOLS: ModeToolsConfig = { ...DEFAULT_MODE_TOOLS, web_search: true };
-const RESEARCH_TOOLS: ModeToolsConfig = { ...DEFAULT_MODE_TOOLS, web_search: true };
-const CREATIVE_TOOLS: ModeToolsConfig = { ...DEFAULT_MODE_TOOLS, web_search: false };
-
-const MARKETING_CONTEXT: ModeContextConfig = { 
-  brand_voice: true, brand_details: true, product_catalog: false, 
-  past_emails: true, web_research: false, custom_documents: [] 
-};
-const BRAND_CONTEXT: ModeContextConfig = { 
-  brand_voice: true, brand_details: true, product_catalog: false, 
-  past_emails: true, web_research: false, custom_documents: [] 
-};
-const RESEARCH_CONTEXT: ModeContextConfig = { 
-  brand_voice: false, brand_details: true, product_catalog: false, 
-  past_emails: false, web_research: true, custom_documents: [] 
-};
-const TECHNICAL_CONTEXT: ModeContextConfig = { 
-  brand_voice: false, brand_details: true, product_catalog: false, 
-  past_emails: false, web_research: true, custom_documents: [] 
-};
-
-const MULTIPLE_VERSIONS_OUTPUT: ModeOutputConfig = { 
-  type: 'structured', email_format: null, show_thinking: false, version_count: 5 
-};
-const ANALYSIS_OUTPUT: ModeOutputConfig = { 
-  type: 'analysis', email_format: null, show_thinking: true, version_count: 1 
-};
-const FREEFORM_OUTPUT: ModeOutputConfig = { 
-  type: 'freeform', email_format: null, show_thinking: false, version_count: 1 
-};
 
 export const MODE_TEMPLATES: ModeTemplate[] = [
   // Marketing Category
@@ -70,10 +30,6 @@ export const MODE_TEMPLATES: ModeTemplate[] = [
     tags: ['email', 'strategy', 'campaigns', 'optimization'],
     difficulty: 'intermediate',
     use_cases: ['Campaign planning', 'A/B test strategy', 'Sequence optimization'],
-    base_mode: 'analyze',
-    tools: RESEARCH_TOOLS,
-    context_sources: MARKETING_CONTEXT,
-    output_config: ANALYSIS_OUTPUT,
     system_prompt: `You are an elite email marketing strategist with 15+ years of experience across ecommerce, SaaS, and DTC brands.
 
 <brand_context>
@@ -103,11 +59,7 @@ When asked about email strategy:
 - Use data and benchmarks to support recommendations
 - Provide frameworks and templates when helpful
 - Always tie recommendations back to business outcomes
-- Challenge assumptions when you see potential issues
-
-## TOOLS AVAILABLE
-
-You can search the web for current email marketing trends, competitor analysis, and industry benchmarks.`,
+- Challenge assumptions when you see potential issues`,
   },
   {
     id: 'subject-line-expert',
@@ -119,10 +71,6 @@ You can search the web for current email marketing trends, competitor analysis, 
     tags: ['subject lines', 'open rates', 'copywriting'],
     difficulty: 'beginner',
     use_cases: ['Subject line generation', 'A/B test variants', 'Preview text optimization'],
-    base_mode: 'create',
-    tools: CREATIVE_TOOLS,
-    context_sources: MARKETING_CONTEXT,
-    output_config: { ...MULTIPLE_VERSIONS_OUTPUT, version_count: 10 },
     system_prompt: `You are a subject line specialist who has analyzed millions of emails and knows exactly what makes people click.
 
 <brand_context>
@@ -174,10 +122,6 @@ For each subject line, provide:
     tags: ['copywriting', 'conversion', 'sales', 'cta'],
     difficulty: 'intermediate',
     use_cases: ['Sales emails', 'Landing page copy', 'CTA optimization'],
-    base_mode: 'create',
-    tools: CREATIVE_TOOLS,
-    context_sources: MARKETING_CONTEXT,
-    output_config: { ...MULTIPLE_VERSIONS_OUTPUT, version_count: 3 },
     system_prompt: `You are a direct response copywriter trained by the legends: Ogilvy, Halbert, Schwartz. You write copy that sells.
 
 <brand_context>
@@ -231,10 +175,6 @@ Always structure your copy with:
     tags: ['brand voice', 'tone', 'consistency', 'guidelines'],
     difficulty: 'advanced',
     use_cases: ['Voice development', 'Tone adjustment', 'Style guide creation'],
-    base_mode: 'chat',
-    tools: CREATIVE_TOOLS,
-    context_sources: BRAND_CONTEXT,
-    output_config: FREEFORM_OUTPUT,
     system_prompt: `You are a brand voice expert who helps companies develop distinctive, memorable voices that resonate with their audience.
 
 <brand_context>
@@ -283,10 +223,6 @@ You help brands:
     tags: ['storytelling', 'narrative', 'emotional', 'brand story'],
     difficulty: 'intermediate',
     use_cases: ['Brand stories', 'Customer narratives', 'Origin stories'],
-    base_mode: 'create',
-    tools: CREATIVE_TOOLS,
-    context_sources: BRAND_CONTEXT,
-    output_config: { ...FREEFORM_OUTPUT, version_count: 2 },
     system_prompt: `You are a master storyteller who weaves narratives that move people to action. You understand that stories are how humans make sense of the world.
 
 <brand_context>
@@ -328,6 +264,88 @@ Include:
 
   // Strategy Category
   {
+    id: 'calendar-planner',
+    name: 'Calendar Planner',
+    description: 'Plan monthly email campaigns with AI-powered brief generation',
+    category: 'strategy',
+    icon: '📅',
+    color: 'green',
+    tags: ['calendar', 'planning', 'campaigns', 'briefs', 'monthly'],
+    difficulty: 'intermediate',
+    use_cases: ['Monthly email planning', 'Campaign calendars', 'Email brief generation'],
+    system_prompt: `You are a strategic email marketing calendar planner for {{BRAND_NAME}}.
+
+<brand_context>
+{{BRAND_INFO}}
+</brand_context>
+
+## YOUR ROLE
+
+You help plan monthly email marketing calendars by:
+1. Understanding the brand's products, promotions, and seasonal opportunities
+2. Creating a strategic calendar artifact with send dates and campaign types
+3. Generating detailed email briefs for each calendar slot
+4. Helping refine briefs until they're ready for copywriting
+
+## WORKFLOW
+
+**Step 1: Gather Context**
+When a user starts a calendar planning session:
+- Ask which month they're planning for (or suggest the upcoming month)
+- Review their products and any upcoming promotions
+- Consider seasonal/holiday opportunities for that month
+- Ask about any specific campaigns they already have in mind
+
+**Step 2: Create Calendar**
+Once you have context, create a calendar showing:
+- Recommended send dates (typically 2-4 per week)
+- Campaign type for each slot (promotional, content, announcement, etc.)
+- Brief description of each email concept
+- Target segment (if applicable)
+
+**Step 3: Generate Email Briefs**
+For each calendar slot, create detailed email_brief artifacts containing:
+- Campaign objective
+- Target audience/segment
+- Key message and value proposition
+- Product focus (if applicable)
+- Call to action
+- Subject line direction
+- Content guidelines
+- Approval status (draft/approved)
+
+**Step 4: Iteration & Approval**
+- Help the user refine briefs based on feedback
+- Mark briefs as approved when ready
+- Offer to create email conversations for approved briefs
+
+## TOOLS AVAILABLE
+
+- **create_artifact**: Create calendar (spreadsheet) and email_brief artifacts
+- **invoke_specialist**: Call other specialists for help (email_writer, subject_line_expert, etc.)
+
+## OUTPUT GUIDELINES
+
+**Calendar Format** (spreadsheet):
+| Date | Day | Campaign Type | Email Concept | Segment | Status |
+|------|-----|---------------|---------------|---------|--------|
+| Jan 3 | Tue | Welcome | New Year Welcome | All | Draft |
+| Jan 5 | Thu | Promotional | Winter Sale | Engaged | Draft |
+
+**Email Brief Format** (email_brief artifact):
+- Title: "[Date] - [Campaign Type] - [Concept]"
+- Structured content with all brief elements
+- Clear approval status
+
+## IMPORTANT NOTES
+
+- Always align with the brand voice and style guide
+- Consider email frequency best practices (don't over-email)
+- Balance promotional and value-add content
+- Leave room for reactive/timely campaigns
+- Think about the customer journey and flow between emails`,
+  },
+  {
     id: 'campaign-planner',
     name: 'Campaign Planner',
     description: 'Plans comprehensive marketing campaigns from concept to execution',
@@ -337,10 +355,6 @@ Include:
     tags: ['campaigns', 'planning', 'calendar', 'execution'],
     difficulty: 'advanced',
     use_cases: ['Campaign briefs', 'Content calendars', 'Launch plans'],
-    base_mode: 'analyze',
-    tools: RESEARCH_TOOLS,
-    context_sources: { ...MARKETING_CONTEXT, product_catalog: true },
-    output_config: ANALYSIS_OUTPUT,
     system_prompt: `You are a campaign planning expert who turns marketing goals into detailed, executable plans.
 
 <brand_context>
@@ -396,10 +410,6 @@ Provide:
     tags: ['competitors', 'analysis', 'market research', 'positioning'],
     difficulty: 'intermediate',
     use_cases: ['Competitor research', 'Market positioning', 'Gap analysis'],
-    base_mode: 'analyze',
-    tools: RESEARCH_TOOLS,
-    context_sources: RESEARCH_CONTEXT,
-    output_config: ANALYSIS_OUTPUT,
     system_prompt: `You are a competitive intelligence analyst who uncovers actionable insights from competitor activities.
 
 <brand_context>
@@ -428,10 +438,6 @@ Provide:
 - Content marketing approach
 - Paid advertising patterns
 
-## TOOLS AVAILABLE
-
-You can search the web for competitor websites, email examples, social profiles, and industry analysis.
-
 ## OUTPUT FORMAT
 
 Provide:
@@ -453,10 +459,6 @@ Provide:
     tags: ['analytics', 'data', 'insights', 'reporting'],
     difficulty: 'advanced',
     use_cases: ['Performance analysis', 'Report interpretation', 'Trend identification'],
-    base_mode: 'analyze',
-    tools: RESEARCH_TOOLS,
-    context_sources: RESEARCH_CONTEXT,
-    output_config: ANALYSIS_OUTPUT,
     system_prompt: `You are a marketing analytics expert who transforms raw data into strategic insights.
 
 <brand_context>
@@ -515,10 +517,6 @@ Provide:
     tags: ['creative', 'concepts', 'direction', 'ideation'],
     difficulty: 'advanced',
     use_cases: ['Creative briefs', 'Concept development', 'Campaign themes'],
-    base_mode: 'create',
-    tools: CREATIVE_TOOLS,
-    context_sources: BRAND_CONTEXT,
-    output_config: { ...MULTIPLE_VERSIONS_OUTPUT, version_count: 5 },
     system_prompt: `You are an award-winning creative director who develops breakthrough ideas that capture attention and drive results.
 
 <brand_context>
@@ -569,10 +567,6 @@ For each concept, provide:
     tags: ['headlines', 'hooks', 'attention', 'copywriting'],
     difficulty: 'beginner',
     use_cases: ['Email headlines', 'Ad copy', 'Content titles'],
-    base_mode: 'create',
-    tools: CREATIVE_TOOLS,
-    context_sources: MARKETING_CONTEXT,
-    output_config: { ...MULTIPLE_VERSIONS_OUTPUT, version_count: 10 },
     system_prompt: `You are a headline generation machine that produces scroll-stopping, click-worthy headlines.
 
 <brand_context>
@@ -624,10 +618,6 @@ Group by style:
     tags: ['deliverability', 'html', 'technical', 'optimization'],
     difficulty: 'advanced',
     use_cases: ['Deliverability issues', 'HTML debugging', 'Technical setup'],
-    base_mode: 'chat',
-    tools: RESEARCH_TOOLS,
-    context_sources: TECHNICAL_CONTEXT,
-    output_config: { type: 'code', email_format: null, show_thinking: true, version_count: 1 },
     system_prompt: `You are an email technical expert who ensures emails reach the inbox and render perfectly.
 
 <brand_context>
@@ -683,10 +673,6 @@ Provide:
     tags: ['automation', 'workflows', 'sequences', 'triggers'],
     difficulty: 'advanced',
     use_cases: ['Flow design', 'Trigger logic', 'Sequence optimization'],
-    base_mode: 'analyze',
-    tools: RESEARCH_TOOLS,
-    context_sources: TECHNICAL_CONTEXT,
-    output_config: ANALYSIS_OUTPUT,
     system_prompt: `You are an email automation architect who designs sophisticated, high-performing automated workflows.
 
 <brand_context>
@@ -780,5 +766,23 @@ export const TEMPLATE_CATEGORY_META: Record<ModeTemplate['category'], {
   creative: { label: 'Creative', icon: '🎨', description: 'Creative direction and ideation' },
   technical: { label: 'Technical', icon: '⚙️', description: 'Technical optimization and automation' },
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

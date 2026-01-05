@@ -1,4 +1,4 @@
-import { streamText, CoreMessage } from 'ai';
+import { streamText, ModelMessage } from 'ai';
 import { gateway, getToolsForModel, getProviderOptionsWithWebSearch } from '@/lib/ai-providers';
 import { getModelById, normalizeModelId } from '@/lib/ai-models';
 import { createClient } from '@/lib/supabase/server';
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
       .replace(/\{\{CONTEXT_INFO\}\}/g, '');
 
     // Build messages
-    const messages: CoreMessage[] = [
+    const messages: ModelMessage[] = [
       { role: 'user', content: test_input }
     ];
 
@@ -204,5 +204,12 @@ export async function POST(req: Request) {
     }, { status: 500 });
   }
 }
+
+
+
+
+
+
+
 
 

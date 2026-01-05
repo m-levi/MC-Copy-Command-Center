@@ -81,6 +81,26 @@ export const PATCH = withErrorHandling(async (
   if (body.description !== undefined) updates.description = body.description?.trim() || null;
   if (body.icon !== undefined) updates.icon = body.icon;
   if (body.prompt !== undefined) updates.prompt = body.prompt.trim();
+  if (body.slash_command !== undefined) {
+    const slashCommand = body.slash_command?.trim().toLowerCase().replace(/^\//, '').replace(/\s/g, '') || null;
+    
+    // Check for duplicate slash command (excluding this prompt)
+    if (slashCommand) {
+      const { data: existingCommand } = await supabase
+        .from('saved_prompts')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('slash_command', slashCommand)
+        .neq('id', id)
+        .single();
+      
+      if (existingCommand) {
+        throw validationError(`Slash command "/${slashCommand}" is already in use`);
+      }
+    }
+    
+    updates.slash_command = slashCommand;
+  }
   if (body.modes !== undefined) updates.modes = body.modes;
   if (body.is_active !== undefined) updates.is_active = body.is_active;
   if (body.sort_order !== undefined) updates.sort_order = body.sort_order;
@@ -147,4 +167,27 @@ export const DELETE = withErrorHandling(async (
 
   return NextResponse.json({ success: true });
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

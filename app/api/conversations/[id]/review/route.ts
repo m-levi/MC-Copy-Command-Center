@@ -130,12 +130,13 @@ export const POST = withErrorHandling(async (
 
   // Create notifications and send emails to reviewers
   const serviceClient = getServiceClient();
-  
-  for (const reviewerId of reviewerIds) {
-    if (reviewerId === user.id) continue; // Don't notify yourself
 
-    // Create in-app notification
-    await supabase.from('notifications').insert({
+  // Filter out self from reviewers
+  const validReviewerIds = reviewerIds.filter((id: string) => id !== user.id);
+
+  if (validReviewerIds.length > 0) {
+    // Batch insert all notifications at once
+    const notifications = validReviewerIds.map((reviewerId: string) => ({
       user_id: reviewerId,
       type: 'review_requested',
       title: 'Review Requested',
@@ -146,28 +147,45 @@ export const POST = withErrorHandling(async (
         requester_id: user.id,
         message,
       },
-    });
+    }));
 
-    // Send email notification
+    await supabase.from('notifications').insert(notifications);
+
+    // Batch fetch email preferences and profiles for email sending
     if (serviceClient) {
-      const shouldEmail = await shouldSendEmail(serviceClient, reviewerId, 'review_requested');
-      if (shouldEmail) {
-        const { data: reviewerProfile } = await serviceClient
-          .from('profiles')
-          .select('email')
-          .eq('user_id', reviewerId)
-          .single();
+      // Fetch all email preferences in one query
+      const { data: emailPrefs } = await serviceClient
+        .from('user_notification_preferences')
+        .select('user_id, review_requested')
+        .in('user_id', validReviewerIds);
 
-        if (reviewerProfile?.email) {
-          sendReviewRequestEmail({
-            to: reviewerProfile.email,
-            requesterName,
-            conversationTitle: conversation.title || 'Untitled Email',
-            brandName: brand?.name,
-            conversationLink,
-            message,
-          }).catch(err => logger.error('[Review API] Failed to send review request email:', err));
-        }
+      const prefsMap = new Map(
+        (emailPrefs || []).map((p: { user_id: string; review_requested: boolean }) => [p.user_id, p.review_requested !== false])
+      );
+
+      // Filter to users who want email notifications
+      const usersToEmail = validReviewerIds.filter((id: string) => prefsMap.get(id) !== false);
+
+      if (usersToEmail.length > 0) {
+        // Batch fetch profiles for users who want emails
+        const { data: profiles } = await serviceClient
+          .from('profiles')
+          .select('user_id, email')
+          .in('user_id', usersToEmail);
+
+        // Send emails in parallel (non-blocking)
+        (profiles || []).forEach((profile: { user_id: string; email: string }) => {
+          if (profile.email) {
+            sendReviewRequestEmail({
+              to: profile.email,
+              requesterName,
+              conversationTitle: conversation.title || 'Untitled Email',
+              brandName: brand?.name,
+              conversationLink,
+              message,
+            }).catch(err => logger.error('[Review API] Failed to send review request email:', err));
+          }
+        });
       }
     }
   }
@@ -353,26 +371,31 @@ export const GET = withErrorHandling(async (
     return notFoundError('Conversation not found');
   }
 
-  // Get profile info for requester and reviewer
+  // Batch fetch profile info for requester and reviewer
+  const userIds = [
+    conversation.review_requested_by,
+    conversation.reviewed_by,
+  ].filter(Boolean) as string[];
+
   let requesterProfile = null;
   let reviewerProfile = null;
 
-  if (conversation.review_requested_by) {
-    const { data: profile } = await supabase
+  if (userIds.length > 0) {
+    const { data: profiles } = await supabase
       .from('profiles')
-      .select('full_name, email')
-      .eq('user_id', conversation.review_requested_by)
-      .single();
-    requesterProfile = profile;
-  }
+      .select('user_id, full_name, email')
+      .in('user_id', userIds);
 
-  if (conversation.reviewed_by) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name, email')
-      .eq('user_id', conversation.reviewed_by)
-      .single();
-    reviewerProfile = profile;
+    const profileMap = new Map(
+      (profiles || []).map(p => [p.user_id, p])
+    );
+
+    if (conversation.review_requested_by) {
+      requesterProfile = profileMap.get(conversation.review_requested_by) || null;
+    }
+    if (conversation.reviewed_by) {
+      reviewerProfile = profileMap.get(conversation.reviewed_by) || null;
+    }
   }
 
   return NextResponse.json({
@@ -441,6 +464,28 @@ export const DELETE = withErrorHandling(async (
     message: 'Review request cancelled',
   });
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

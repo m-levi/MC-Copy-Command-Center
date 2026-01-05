@@ -1,10 +1,11 @@
 'use client';
 
 import { Brand } from '@/types';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
-import { PERSONAL_AI_INFO } from '@/lib/personal-ai';
+import BrandSelectorDropdown from './BrandSelectorDropdown';
+import ActiveGenerationsIndicator from './ActiveGenerationsIndicator';
 
 interface SidebarHeaderProps {
   brandName: string;
@@ -17,6 +18,7 @@ interface SidebarHeaderProps {
   onMobileToggle?: (isOpen: boolean) => void;
   onOpenExplorer?: () => void;
   isMobile?: boolean;
+  hideBrandSwitcher?: boolean; // Hide brand switcher when it's in the main header
 }
 
 export default function SidebarHeader({
@@ -30,62 +32,18 @@ export default function SidebarHeader({
   onMobileToggle,
   onOpenExplorer,
   isMobile = false,
+  hideBrandSwitcher = false,
 }: SidebarHeaderProps) {
   const [showBrandSwitcher, setShowBrandSwitcher] = useState(false);
-  const [focusedBrandIndex, setFocusedBrandIndex] = useState<number>(-1);
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const brandSwitcherRef = useRef<HTMLButtonElement>(null);
-  const brandDropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownContainerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
   // Set up portal container on mount
   useEffect(() => {
     setPortalContainer(document.body);
   }, []);
-
-  // Brand switcher keyboard navigation
-  const handleBrandKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!showBrandSwitcher || allBrands.length === 0) return;
-
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        setFocusedBrandIndex(prev => 
-          prev < allBrands.length - 1 ? prev + 1 : 0
-        );
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setFocusedBrandIndex(prev => 
-          prev > 0 ? prev - 1 : allBrands.length - 1
-        );
-        break;
-      case 'Enter':
-        e.preventDefault();
-        if (focusedBrandIndex >= 0 && focusedBrandIndex < allBrands.length) {
-          const selectedBrand = allBrands[focusedBrandIndex];
-          onBrandSwitch?.(selectedBrand.id);
-          setShowBrandSwitcher(false);
-          setFocusedBrandIndex(-1);
-        }
-        break;
-      case 'Escape':
-        e.preventDefault();
-        setShowBrandSwitcher(false);
-        setFocusedBrandIndex(-1);
-        brandSwitcherRef.current?.focus();
-        break;
-    }
-  }, [showBrandSwitcher, allBrands, focusedBrandIndex, onBrandSwitch]);
-
-  // Open brand switcher and set initial focus
-  const handleOpenBrandSwitcher = useCallback(() => {
-    setShowBrandSwitcher(prev => !prev);
-    if (!showBrandSwitcher) {
-      const currentIndex = allBrands.findIndex(b => b.id === brandId);
-      setFocusedBrandIndex(currentIndex >= 0 ? currentIndex : 0);
-    }
-  }, [allBrands, brandId, showBrandSwitcher]);
 
   // Close brand switcher on resize
   useEffect(() => {
@@ -106,8 +64,8 @@ export default function SidebarHeader({
         showBrandSwitcher &&
         brandSwitcherRef.current &&
         !brandSwitcherRef.current.contains(event.target as Node) &&
-        brandDropdownRef.current &&
-        !brandDropdownRef.current.contains(event.target as Node)
+        dropdownContainerRef.current &&
+        !dropdownContainerRef.current.contains(event.target as Node)
       ) {
         setShowBrandSwitcher(false);
       }
@@ -122,156 +80,85 @@ export default function SidebarHeader({
     }
   }, [showBrandSwitcher]);
 
-  // Dropdown content component
-  const DropdownContent = () => (
-    <div 
-      ref={brandDropdownRef}
-      className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden"
-      style={{ 
-        maxHeight: isMobile ? '70vh' : '400px',
-        width: isMobile ? 'calc(100vw - 2rem)' : '280px',
-        maxWidth: '320px'
-      }}
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      onKeyDown={handleBrandKeyDown}
-      role="listbox"
-      aria-label="Select a brand"
-    >
-      <div className="flex flex-col">
-        {/* All Brands & AI Assistant - Fixed at Top */}
-        <div className="p-2 border-b border-gray-100 dark:border-gray-700/50 space-y-1">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onNavigateHome?.();
-              setShowBrandSwitcher(false);
-            }}
-            className="w-full px-3 py-2.5 text-sm text-left text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-700 dark:hover:text-blue-300 rounded-lg transition-colors flex items-center gap-2.5 font-medium"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-            </svg>
-            All Brands
-          </button>
-          
-          {/* Personal AI Assistant */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              router.push(`/brands/${PERSONAL_AI_INFO.id}/chat`);
-              setShowBrandSwitcher(false);
-            }}
-            className="w-full px-3 py-2.5 text-sm text-left text-gray-700 dark:text-gray-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 hover:text-violet-700 dark:hover:text-violet-300 rounded-lg transition-colors flex items-center gap-2.5 font-medium"
-          >
-            <span className="text-base">{PERSONAL_AI_INFO.icon}</span>
-            {PERSONAL_AI_INFO.name}
-            <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-400 rounded-full font-medium">
-              Private
-            </span>
-          </button>
-        </div>
-
-        {/* Brand List - Scrollable */}
-        <div className="p-2">
-          <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-            Your Brands
-          </div>
-          <div 
-            className="overflow-y-auto overscroll-contain space-y-0.5"
-            style={{ 
-              maxHeight: isMobile ? 'calc(70vh - 120px)' : '280px',
-              WebkitOverflowScrolling: 'touch',
-              touchAction: 'pan-y'
-            }}
-          >
-            {allBrands.map((b, index) => (
-              <button
-                key={b.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onBrandSwitch?.(b.id);
-                  setShowBrandSwitcher(false);
-                  setFocusedBrandIndex(-1);
-                }}
-                role="option"
-                aria-selected={b.id === brandId}
-                className={`
-                  w-full px-3 py-2.5 text-sm text-left transition-all cursor-pointer flex items-center justify-between rounded-lg
-                  ${index === focusedBrandIndex
-                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                    : b.id === brandId
-                      ? 'bg-gray-100 dark:bg-gray-700/50 text-gray-900 dark:text-white font-medium'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                  }
-                `}
-              >
-                <span className="truncate">{b.name}</span>
-                {b.id === brandId && (
-                  <svg className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   if (!isCollapsed) {
     return (
       <>
         <div className="p-3">
-          {/* Single Row: Brand Name and Switcher */}
+          {/* Single Row: Brand Name and Switcher (when not hidden by parent header) */}
           <div className="flex items-center justify-between gap-2">
-            {/* Brand Switcher */}
-            <div className="relative flex-1 min-w-0">
-              <button
-                ref={brandSwitcherRef}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  handleOpenBrandSwitcher();
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-                onKeyDown={handleBrandKeyDown}
-                className="flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 px-3 py-2 rounded-lg transition-all cursor-pointer w-full group"
-                aria-expanded={showBrandSwitcher}
-                aria-haspopup="listbox"
-              >
-                <div className="flex-1 min-w-0 text-left">
-                  <h2 className="text-sm font-bold truncate text-gray-900 dark:text-white tracking-tight">{brandName}</h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">Switch brand</p>
-                </div>
-                {(allBrands.length > 0 || onNavigateHome) && (
-                  <svg 
-                    className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform duration-200 ${showBrandSwitcher ? 'rotate-180' : ''} group-hover:text-gray-600 dark:group-hover:text-gray-300`} 
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                )}
-              </button>
+            {/* Brand Switcher - hidden when parent header has it */}
+            {!hideBrandSwitcher ? (
+              <div className="relative flex-1 min-w-0">
+                <button
+                  ref={brandSwitcherRef}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setShowBrandSwitcher(prev => !prev);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 px-3 py-2 rounded-lg transition-all cursor-pointer w-full group"
+                  aria-expanded={showBrandSwitcher}
+                  aria-haspopup="listbox"
+                >
+                  <div className="flex-1 min-w-0 text-left">
+                    <h2 className="text-sm font-bold truncate text-gray-900 dark:text-white tracking-tight">{brandName}</h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">Switch brand</p>
+                  </div>
+                  {(allBrands.length > 0 || onNavigateHome) && (
+                    <svg 
+                      className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform duration-200 ${showBrandSwitcher ? 'rotate-180' : ''} group-hover:text-gray-600 dark:group-hover:text-gray-300`} 
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  )}
+                </button>
 
-              {/* Desktop dropdown - inside relative container */}
-              {showBrandSwitcher && !isMobile && (
-                <div className="absolute top-full left-0 right-0 mt-1 z-[100]">
-                  <DropdownContent />
-                </div>
-              )}
-            </div>
+                {/* Desktop dropdown - inside relative container */}
+                {showBrandSwitcher && !isMobile && (
+                  <div ref={dropdownContainerRef} className="absolute top-full left-0 right-0 mt-1 z-[100]">
+                    <BrandSelectorDropdown
+                      allBrands={allBrands}
+                      currentBrandId={brandId}
+                      onBrandSelect={(id) => onBrandSwitch?.(id)}
+                      onNavigateHome={onNavigateHome}
+                      onClose={() => setShowBrandSwitcher(false)}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              // When brand switcher is hidden, show a simple title
+              <div className="flex-1 min-w-0 px-3 py-2">
+                <h2 className="text-sm font-bold truncate text-gray-900 dark:text-white tracking-tight">Conversations</h2>
+              </div>
+            )}
 
             {/* Right: Simplified Actions */}
-            <div className="flex items-center gap-0.5">
-              {brandId && (
+            <div className="flex items-center gap-1">
+              {/* Active Generations Indicator */}
+              <ActiveGenerationsIndicator 
+                compact 
+                onNavigateToConversation={(convId, navBrandId) => {
+                  if (navBrandId === brandId) {
+                    // If same brand, dispatch event to select conversation
+                    window.dispatchEvent(new CustomEvent('selectConversation', { 
+                      detail: { conversationId: convId } 
+                    }));
+                  } else {
+                    router.push(`/brands/${navBrandId}/chat?conversation=${convId}`);
+                  }
+                }}
+              />
+              
+              {brandId && !hideBrandSwitcher && (
                 <button
-                  onClick={() => router.push(`/brands/${brandId}`)}
+                  onClick={() => router.push(`/brands/${brandId}/settings`)}
                   className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all cursor-pointer"
                   title="Brand Settings"
                 >
@@ -316,10 +203,18 @@ export default function SidebarHeader({
             />
             {/* Dropdown positioned at top of screen */}
             <div 
+              ref={dropdownContainerRef}
               className="fixed left-4 right-4 top-4 z-[9999] lg:hidden"
-              style={{ maxWidth: '320px' }}
+              style={{ maxWidth: '340px' }}
             >
-              <DropdownContent />
+              <BrandSelectorDropdown
+                allBrands={allBrands}
+                currentBrandId={brandId}
+                onBrandSelect={(id) => onBrandSwitch?.(id)}
+                onNavigateHome={onNavigateHome}
+                onClose={() => setShowBrandSwitcher(false)}
+                isMobile={true}
+              />
             </div>
           </>,
           portalContainer

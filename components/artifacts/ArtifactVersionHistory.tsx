@@ -1,5 +1,24 @@
 'use client';
 
+/**
+ * ArtifactVersionHistory Component
+ * ================================
+ * 
+ * Displays a timeline of all saved versions for an artifact.
+ * 
+ * Features:
+ * - Shows version number (v1, v2, v3...)
+ * - Labels: "Original" for first version, "Edited"/"Restored" for changes
+ * - Relative timestamps (e.g., "2 hours ago")
+ * - "Current" badge on the latest version
+ * - Click to expand and view full content
+ * - Copy button to copy version content
+ * - Restore button to revert to a previous version (creates new version)
+ * 
+ * Note: This is different from A/B/C variants which are alternative
+ * versions generated at the same time. This tracks the edit history.
+ */
+
 import { memo, useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useArtifactContext } from '@/contexts/ArtifactContext';
@@ -301,6 +320,29 @@ export const ArtifactVersionHistory = memo(function ArtifactVersionHistory({
 });
 
 export default ArtifactVersionHistory;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

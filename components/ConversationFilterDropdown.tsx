@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { OrganizationMember } from '@/types';
 
-export type FilterType = 'all' | 'mine' | 'person' | 'emails' | 'flows' | 'planning' | 'archived';
+export type FilterType = 'all' | 'mine' | 'shared_with_me' | 'person' | 'emails' | 'flows' | 'planning' | 'archived';
 
 interface ConversationFilterDropdownProps {
   currentFilter: FilterType;
@@ -77,8 +77,8 @@ export default function ConversationFilterDropdown({
   const getFilterLabel = () => {
     if (compact) return ''; // Hide label in compact mode
     if (currentFilter === 'all') return 'All Conversations';
-    // ... existing logic ...
     if (currentFilter === 'mine') return 'Just Mine';
+    if (currentFilter === 'shared_with_me') return 'Shared with Me';
     if (currentFilter === 'emails') return 'Emails Only';
     if (currentFilter === 'flows') return 'Flows Only';
     if (currentFilter === 'planning') return 'Chat Mode';
@@ -137,6 +137,20 @@ export default function ConversationFilterDropdown({
             <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
           </svg>
           Just Mine
+        </div>
+      </button>
+
+      <button
+        onClick={() => handleFilterSelect('shared_with_me')}
+        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+          currentFilter === 'shared_with_me' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+          </svg>
+          Shared with Me
         </div>
       </button>
 

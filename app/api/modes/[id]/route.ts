@@ -21,7 +21,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 
   const { data, error } = await supabase
     .from('custom_modes')
-    .select('*')
+    .select('id, user_id, name, description, icon, color, system_prompt, is_active, is_default, sort_order, created_at, updated_at')
     .eq('id', id)
     .eq('user_id', user.id)
     .single();
@@ -50,11 +50,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
   const { id } = await params;
   const body = await request.json();
-  const { 
-    name, description, icon, color, system_prompt, is_active, sort_order,
-    base_mode, tools, context_sources, output_config, model_config,
-    category, tags, is_shared
-  } = body;
+  const { name, description, icon, color, system_prompt, is_active, sort_order } = body;
 
   // Check if mode exists and belongs to user
   const { data: existingMode, error: fetchError } = await supabase
@@ -113,39 +109,6 @@ export async function PUT(request: Request, { params }: RouteParams) {
     updateData.sort_order = sort_order;
   }
 
-  // Enhanced fields
-  if (base_mode !== undefined) {
-    updateData.base_mode = base_mode;
-  }
-
-  if (tools !== undefined) {
-    updateData.tools = tools;
-  }
-
-  if (context_sources !== undefined) {
-    updateData.context_sources = context_sources;
-  }
-
-  if (output_config !== undefined) {
-    updateData.output_config = output_config;
-  }
-
-  if (model_config !== undefined) {
-    updateData.model_config = model_config;
-  }
-
-  if (category !== undefined) {
-    updateData.category = category;
-  }
-
-  if (tags !== undefined) {
-    updateData.tags = tags;
-  }
-
-  if (is_shared !== undefined) {
-    updateData.is_shared = is_shared;
-  }
-
   if (Object.keys(updateData).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
   }
@@ -155,7 +118,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
     .update(updateData)
     .eq('id', id)
     .eq('user_id', user.id)
-    .select()
+    .select('id, user_id, name, description, icon, color, system_prompt, is_active, is_default, sort_order, created_at, updated_at')
     .single();
 
   if (error) {
@@ -207,5 +170,23 @@ export async function DELETE(request: Request, { params }: RouteParams) {
 
   return NextResponse.json({ success: true });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

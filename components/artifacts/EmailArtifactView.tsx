@@ -94,13 +94,24 @@ export const EmailArtifactView = memo(function EmailArtifactView({
   const currentContent = getVariantContent(selectedVariant);
   const currentApproach = getVariantApproach(selectedVariant);
 
-  // Clean content
+  // Clean content - remove code fences and approach line (since it's shown separately)
   const cleanContent = useMemo(() => {
-    return currentContent
+    let cleaned = currentContent
       .replace(/^```\n?/gm, '')
       .replace(/\n?```$/gm, '')
       .trim();
-  }, [currentContent]);
+    
+    // If approach is shown separately, remove it from the main content
+    if (currentApproach) {
+      // Remove **Approach:** line and any following empty lines
+      cleaned = cleaned
+        .replace(/^\*\*Approach:\*\*\s*[^\n]*\n*/im, '')
+        .replace(/^Approach:\s*[^\n]*\n*/im, '')
+        .trim();
+    }
+    
+    return cleaned;
+  }, [currentContent, currentApproach]);
 
   // Copy handler
   const handleCopy = useCallback(async (content: string, section?: string) => {
@@ -229,17 +240,17 @@ export const EmailArtifactView = memo(function EmailArtifactView({
                     onClick={() => isAvailable && onVariantChange(variant)}
                     disabled={!isAvailable}
                     className={cn(
-                      'w-8 h-8 rounded-lg text-sm font-bold transition-all relative',
+                      'w-9 h-9 rounded-xl text-sm font-bold transition-all relative',
                       isSelected
-                        ? 'bg-blue-500 text-white shadow-sm'
+                        ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/30 scale-105'
                         : isAvailable
-                          ? 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:border-blue-300'
-                          : 'bg-gray-100 dark:bg-gray-800/50 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                          ? 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:border-blue-400 hover:scale-105 hover:shadow-md'
+                          : 'bg-gray-100 dark:bg-gray-800/50 text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'
                     )}
                   >
                     {variant.toUpperCase()}
                     {isStreamingThis && (
-                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse ring-2 ring-white dark:ring-gray-800" />
                     )}
                   </button>
                 );
@@ -313,9 +324,16 @@ export const EmailArtifactView = memo(function EmailArtifactView({
         )}
 
         {currentApproach && !isStreaming && (
-          <div className="mx-4 mt-4 px-3 py-2 bg-violet-50 dark:bg-violet-900/20 rounded-lg border-l-2 border-violet-400">
-            <p className="text-xs font-medium text-violet-600 dark:text-violet-400 mb-0.5">Approach</p>
-            <p className="text-sm text-gray-700 dark:text-gray-300">{currentApproach}</p>
+          <div className="mx-4 mt-4 px-3.5 py-3 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/20 dark:to-purple-900/20 rounded-xl border border-violet-100 dark:border-violet-800/50">
+            <div className="flex items-center gap-2 mb-1.5">
+              <div className="w-5 h-5 rounded-full bg-violet-100 dark:bg-violet-800/50 flex items-center justify-center">
+                <svg className="w-3 h-3 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              </div>
+              <span className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide">Approach</span>
+            </div>
+            <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{currentApproach}</p>
           </div>
         )}
 
@@ -339,27 +357,27 @@ export const EmailArtifactView = memo(function EmailArtifactView({
         
         {/* Copy Button */}
         <div className="px-4 py-3">
-        <button
-          onClick={() => handleCopy(cleanContent)}
-          className={cn(
-            'w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-            copiedSection === 'all'
-              ? 'bg-green-500 text-white'
-              : 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100'
-          )}
-        >
-          {copiedSection === 'all' ? (
-            <>
-              <CheckIcon className="w-4 h-4" />
-              Copied!
-            </>
-          ) : (
-            <>
-              <CopyIcon className="w-4 h-4" />
-              Copy Email
-            </>
-          )}
-        </button>
+          <button
+            onClick={() => handleCopy(cleanContent)}
+            className={cn(
+              'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
+              copiedSection === 'all'
+                ? 'bg-green-500 text-white shadow-lg shadow-green-500/25'
+                : 'bg-gradient-to-r from-gray-900 to-gray-800 dark:from-white dark:to-gray-100 text-white dark:text-gray-900 hover:shadow-lg hover:shadow-gray-900/25 dark:hover:shadow-white/25 hover:-translate-y-0.5 active:translate-y-0'
+            )}
+          >
+            {copiedSection === 'all' ? (
+              <>
+                <CheckIcon className="w-4 h-4" />
+                Copied to Clipboard!
+              </>
+            ) : (
+              <>
+                <CopyIcon className="w-4 h-4" />
+                Copy Email Content
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>
@@ -411,11 +429,14 @@ function RawView({ content, isStreaming }: { content: string; isStreaming: boole
           
           if (!trimmed) return <div key={index} className="h-2" />;
           
-          const blockMatch = trimmed.match(/^\*\*([A-Z][A-Z0-9 _-]*)\*\*$/);
+          const blockMatch = trimmed.match(/^\*\*([A-Z][A-Z0-9 _+&-]*)\*\*$/);
           if (blockMatch) {
             return (
-              <div key={index} className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider pt-3 pb-1 first:pt-0 border-b border-gray-100 dark:border-gray-700 mb-2">
-                {blockMatch[1]}
+              <div key={index} className="flex items-center gap-2 pt-4 pb-2 first:pt-0 mb-2 border-b border-gray-100 dark:border-gray-700">
+                <div className="w-1 h-4 bg-blue-500 rounded-full" />
+                <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  {blockMatch[1]}
+                </span>
               </div>
             );
           }
@@ -425,10 +446,17 @@ function RawView({ content, isStreaming }: { content: string; isStreaming: boole
             const colonIndex = trimmed.indexOf(':');
             const label = trimmed.slice(0, colonIndex);
             const value = trimmed.slice(colonIndex + 1).trim();
+            const isCTA = label.toLowerCase() === 'cta';
             return (
-              <div key={index} className="text-gray-800 dark:text-gray-200">
-                <span className="font-semibold text-gray-600 dark:text-gray-400">{label}:</span>{' '}
-                <span>{value}</span>
+              <div key={index} className={cn(
+                "text-gray-800 dark:text-gray-200 py-0.5",
+                isCTA && "mt-1 p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800"
+              )}>
+                <span className={cn(
+                  "font-semibold",
+                  isCTA ? "text-blue-600 dark:text-blue-400" : "text-gray-600 dark:text-gray-400"
+                )}>{label}:</span>{' '}
+                <span className={isCTA ? "font-medium" : ""}>{value}</span>
               </div>
             );
           }
@@ -497,6 +525,13 @@ function PreviewView({ content }: { content: string }) {
 }
 
 export default EmailArtifactView;
+
+
+
+
+
+
+
 
 
 

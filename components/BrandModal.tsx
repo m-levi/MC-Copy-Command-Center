@@ -130,6 +130,22 @@ export default function BrandModal({ isOpen, onClose, onSave, brand }: BrandModa
     }
   }, [brand, isOpen]);
 
+  // Handle escape key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // Don't close if we're in the middle of analyzing
+        if (step === 'analyzing') return;
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, step, onClose]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -432,8 +448,8 @@ ${materials ? `Additional brand materials:\n${materials}` : ''}
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white dark:bg-gray-900 sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-lg sm:max-h-[85vh] overflow-hidden flex flex-col safe-area-bottom">
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
           <div className="flex items-center justify-between">
@@ -471,8 +487,8 @@ ${materials ? `Additional brand materials:\n${materials}` : ''}
                 {step === 'success' && "You're all set!"}
               </h2>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">
-              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg touch-target touch-feedback">
+              <svg className="w-6 h-6 sm:w-5 sm:h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -544,10 +560,10 @@ ${materials ? `Additional brand materials:\n${materials}` : ''}
               {error && <p className="text-sm text-red-600">{error}</p>}
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-600 dark:text-gray-400 font-medium">
+                <button type="button" onClick={onClose} className="flex-1 py-3 sm:py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-600 dark:text-gray-400 font-medium touch-feedback">
                   Cancel
                 </button>
-                <button type="submit" disabled={loading} className="flex-1 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl font-medium disabled:opacity-50 flex items-center justify-center gap-2">
+                <button type="submit" disabled={loading} className="flex-1 py-3 sm:py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl font-medium disabled:opacity-50 flex items-center justify-center gap-2 touch-feedback">
                   {loading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                   {brand ? 'Update' : 'Continue'}
                 </button>

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { CustomMode, ModeColor, MODE_COLOR_META, ConversationMode, isCustomMode } from '@/types';
 import { useCustomModes } from '@/hooks/useCustomModes';
-import { Lightbulb, Pencil, ChevronDown, Search, Check } from 'lucide-react';
+import { Lightbulb, Pencil, ChevronDown, Search, Check, Sparkles, GitMerge, Bot } from 'lucide-react';
 
 interface InlineModePicker {
   value: ConversationMode;
@@ -15,9 +15,12 @@ interface InlineModePicker {
 }
 
 // Built-in modes
+// 'assistant' is the orchestrator mode that can invoke specialists automatically
 const BUILT_IN_MODES = [
+  { id: 'assistant' as const, name: 'Assistant', description: 'AI figures out what you need', icon: Sparkles, color: 'indigo' as ModeColor },
   { id: 'planning' as const, name: 'Chat', description: 'Ask questions & explore ideas', icon: Lightbulb, color: 'blue' as ModeColor },
   { id: 'email_copy' as const, name: 'Write', description: 'Generate email copy', icon: Pencil, color: 'purple' as ModeColor },
+  { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation', icon: GitMerge, color: 'pink' as ModeColor },
 ];
 
 export default function InlineModePicker({ value, onChange, disabled, compact, minimal }: InlineModePicker) {
@@ -217,7 +220,7 @@ export default function InlineModePicker({ value, onChange, disabled, compact, m
       </button>
 
       {isOpen && (
-        <div className={`absolute ${minimal ? 'bottom-full mb-1.5' : 'top-full mt-1'} left-0 w-64 bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-800 z-50 overflow-hidden ${minimal ? 'animate-in fade-in zoom-in-95 duration-100 origin-bottom-left' : ''}`}>
+        <div className="absolute bottom-full mb-1.5 left-0 w-64 bg-white dark:bg-gray-900 rounded-xl shadow-lg border border-gray-200 dark:border-gray-800 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom-left">
           
           {/* Search Input */}
           {showSearch && (
@@ -229,8 +232,8 @@ export default function InlineModePicker({ value, onChange, disabled, compact, m
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search modes..."
-                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-gray-900 dark:text-gray-100"
+                  placeholder="Search agents..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-800 border-0 rounded-md focus:outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
             </div>
@@ -274,12 +277,20 @@ export default function InlineModePicker({ value, onChange, disabled, compact, m
               </>
             )}
 
-            {/* Divider */}
+            {/* Divider with section header */}
             {filteredModes.builtIn.length > 0 && filteredModes.custom.length > 0 && (
-              <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+              <div className="my-1.5">
+                <div className="border-t border-gray-100 dark:border-gray-800" />
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 mt-1">
+                  <Bot className="w-3 h-3 text-gray-400 dark:text-gray-500" />
+                  <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                    Your Agents
+                  </span>
+                </div>
+              </div>
             )}
 
-            {/* Custom Modes */}
+            {/* Custom Agents */}
             {filteredModes.custom.length > 0 && (
               <>
                 {filteredModes.custom.map((mode, idx) => {
@@ -325,7 +336,7 @@ export default function InlineModePicker({ value, onChange, disabled, compact, m
             {/* No results */}
             {filteredModes.builtIn.length === 0 && filteredModes.custom.length === 0 && (
               <div className="px-3 py-4 text-center">
-                <p className="text-xs text-gray-500 dark:text-gray-400">No modes found</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">No agents found</p>
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery('')}
@@ -340,7 +351,7 @@ export default function InlineModePicker({ value, onChange, disabled, compact, m
             {/* Loading */}
             {loading && (
               <div className="px-3 py-2 text-xs text-gray-500 text-center">
-                Loading modes...
+                Loading agents...
               </div>
             )}
           </div>
@@ -350,8 +361,8 @@ export default function InlineModePicker({ value, onChange, disabled, compact, m
             <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
               <p className="text-[10px] text-gray-400 dark:text-gray-500">
                 {allItems.length === totalModeCount 
-                  ? `${totalModeCount} mode${totalModeCount !== 1 ? 's' : ''} available`
-                  : `${allItems.length} of ${totalModeCount} modes`
+                  ? `${totalModeCount} agent${totalModeCount !== 1 ? 's' : ''} available`
+                  : `${allItems.length} of ${totalModeCount} agents`
                 }
               </p>
             </div>
@@ -361,4 +372,11 @@ export default function InlineModePicker({ value, onChange, disabled, compact, m
     </div>
   );
 }
+
+
+
+
+
+
+
 

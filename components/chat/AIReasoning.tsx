@@ -16,8 +16,21 @@ import {
   GlobeIcon,
   ChevronDownIcon,
   Loader2Icon,
+  BotIcon,
+  ZapIcon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+
+interface AgentInvocation {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_icon: string;
+  task: string;
+  status: 'invoking' | 'completed' | 'failed';
+  response?: string;
+  duration_ms?: number;
+}
 
 interface AIReasoningProps {
   thinking?: string;
@@ -25,6 +38,7 @@ interface AIReasoningProps {
   aiStatus?: AIStatus;
   className?: string;
   defaultOpen?: boolean;
+  agentInvocations?: AgentInvocation[];
 }
 
 // Parse thinking content for web search indicators and strategy sections
@@ -94,9 +108,13 @@ const AIReasoningBase = function AIReasoning({
   aiStatus = 'idle',
   className,
   defaultOpen = false,
+  agentInvocations = [],
 }: AIReasoningProps) {
   // ALWAYS start closed - user must manually open to view thinking
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Check if any agents are currently being invoked
+  const hasActiveAgents = agentInvocations.some(a => a.status === 'invoking');
   
   // Parse thinking content into sections
   const sections = useMemo(() => {
@@ -104,8 +122,8 @@ const AIReasoningBase = function AIReasoning({
     return parseThinkingContent(thinking);
   }, [thinking]);
   
-  // Don't render if no content and not streaming
-  if (!thinking && !isStreaming) return null;
+  // Don't render if no content, not streaming, and no agent invocations
+  if (!thinking && !isStreaming && agentInvocations.length === 0) return null;
   
   const StatusIcon = getStatusIcon(aiStatus);
   const statusLabel = getStatusLabel(aiStatus, isStreaming);
@@ -113,21 +131,25 @@ const AIReasoningBase = function AIReasoning({
   // Generate summary badges based on completed activities
   const summaryBadges = useMemo(() => {
     const badges: { label: string; icon: typeof SearchIcon }[] = [];
-    
+
+    if (agentInvocations.length > 0) {
+      badges.push({ label: `${agentInvocations.length} Agent${agentInvocations.length > 1 ? 's' : ''}`, icon: BotIcon });
+    }
+
     if (sections.some(s => s.type === 'web-search-start' || s.type === 'web-search-end')) {
       badges.push({ label: 'Web search', icon: GlobeIcon });
     }
-    
+
     if (sections.some(s => s.type === 'strategy')) {
       badges.push({ label: 'Strategy', icon: SparklesIcon });
     }
-    
+
     if (sections.some(s => s.type === 'text')) {
       badges.push({ label: 'Analysis', icon: BrainIcon });
     }
-    
+
     return badges;
-  }, [sections]);
+  }, [sections, agentInvocations]);
 
   // Generate streaming preview text
   const streamingPreview = useMemo(() => {
@@ -242,7 +264,7 @@ const AIReasoningBase = function AIReasoning({
                         className="text-blue-600 dark:text-blue-400"
                       />
                     );
-                  
+
                   case 'web-search-end':
                     return (
                       <ChainOfThoughtStep
@@ -253,7 +275,7 @@ const AIReasoningBase = function AIReasoning({
                         className="text-green-600 dark:text-green-400"
                       />
                     );
-                  
+
                   case 'strategy':
                     return (
                       <ChainOfThoughtStep
@@ -267,7 +289,7 @@ const AIReasoningBase = function AIReasoning({
                         </div>
                       </ChainOfThoughtStep>
                     );
-                  
+
                   case 'text':
                     return (
                       <ChainOfThoughtStep
@@ -281,12 +303,60 @@ const AIReasoningBase = function AIReasoning({
                         </div>
                       </ChainOfThoughtStep>
                     );
-                  
+
                   default:
                     return null;
                 }
               })}
-              
+
+              {/* Agent Invocations - show when agents are called */}
+              {agentInvocations.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-2 mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+                    <ZapIcon className="w-3.5 h-3.5" />
+                    <span>Agent Activity</span>
+                  </div>
+                  {agentInvocations.map((agent) => (
+                    <ChainOfThoughtStep
+                      key={agent.id}
+                      icon={BotIcon}
+                      label={
+                        <span className="flex items-center gap-2">
+                          <span>{agent.agent_icon}</span>
+                          <span className="font-medium">{agent.agent_name}</span>
+                          {agent.duration_ms && (
+                            <span className="text-[10px] text-gray-400">
+                              ({(agent.duration_ms / 1000).toFixed(1)}s)
+                            </span>
+                          )}
+                        </span>
+                      }
+                      status={agent.status === 'invoking' ? 'active' : agent.status === 'completed' ? 'complete' : 'pending'}
+                      className={
+                        agent.status === 'invoking'
+                          ? 'text-indigo-600 dark:text-indigo-400'
+                          : agent.status === 'completed'
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }
+                    >
+                      <div className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        <div className="italic mb-1">Task: {agent.task}</div>
+                        {agent.response && (
+                          <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-800/50 rounded text-gray-600 dark:text-gray-300 max-h-32 overflow-y-auto">
+                            <ReactMarkdown>
+                              {agent.response.length > 300
+                                ? agent.response.slice(0, 300) + '...'
+                                : agent.response}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                      </div>
+                    </ChainOfThoughtStep>
+                  ))}
+                </div>
+              )}
+
               {/* Show current status indicator at the end if still processing */}
               {isStreaming && sections.length > 0 && (
                 <ChainOfThoughtStep

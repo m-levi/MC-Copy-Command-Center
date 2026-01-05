@@ -1,10 +1,20 @@
-import { Message, ConversationContext, ConversationSummary } from '@/types';
+import { Message, ConversationContext, ConversationSummary, MessageMetadata, MessageRole } from '@/types';
 import { createClient } from '@/lib/supabase/server';
+
+/**
+ * Minimal message type for context extraction
+ * Accepts both full Message objects and simpler ChatMessage objects
+ */
+interface ContextMessage {
+  role: MessageRole | 'user' | 'assistant' | 'system';
+  content: string;
+  metadata?: MessageMetadata;
+}
 
 /**
  * Extract conversation context from messages
  */
-export function extractConversationContext(messages: Message[]): ConversationContext {
+export function extractConversationContext(messages: ContextMessage[]): ConversationContext {
   const context: ConversationContext = {
     goals: [],
     keyPoints: [],

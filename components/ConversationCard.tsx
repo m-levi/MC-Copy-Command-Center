@@ -1,15 +1,14 @@
 'use client';
 
-import { ConversationWithStatus, ConversationQuickAction, Conversation } from '@/types';
-import { useState, useRef, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { logger } from '@/lib/logger';
+import { ConversationWithStatus, ConversationQuickAction } from '@/types';
+import { useState, useRef } from 'react';
+import { useFlowChildren } from '@/hooks/useFlowChildren';
 
 interface ConversationCardProps {
   conversation: ConversationWithStatus;
   isActive: boolean;
   isPinned: boolean;
-  currentConversationId?: string | null; // To check if a child is active
+  currentConversationId?: string | null;
   onSelect: () => void;
   onSelectChild?: (childId: string) => void;
   onAction: (action: ConversationQuickAction) => void;
@@ -33,83 +32,21 @@ export default function ConversationCard({
   onToggleSelect
 }: ConversationCardProps) {
   const [showActions, setShowActions] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [flowChildren, setFlowChildren] = useState<Conversation[]>([]);
-  const [flowChildrenCount, setFlowChildrenCount] = useState<number>(0);
-  const [loadingChildren, setLoadingChildren] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
-  const supabase = createClient();
 
-  // Load flow children count on mount for flows
-  useEffect(() => {
-    if (conversation.is_flow && flowChildrenCount === 0) {
-      loadFlowChildrenCount();
-    }
-  }, [conversation.is_flow]);
-
-  const loadFlowChildrenCount = async () => {
-    if (!conversation.is_flow) return;
-    
-    try {
-      const { count } = await supabase
-        .from('conversations')
-        .select('id', { count: 'exact', head: true })
-        .eq('parent_conversation_id', conversation.id);
-
-      if (count !== null) {
-        setFlowChildrenCount(count);
-      }
-    } catch (error) {
-      logger.error('Error loading flow children count:', error);
-    }
-  };
-
-  // Auto-expand if active flow or if a child is active
-  useEffect(() => {
-    const isChildActive = flowChildren.some(c => c.id === currentConversationId);
-    if ((isActive || isChildActive) && conversation.is_flow) {
-      setIsExpanded(true);
-    }
-  }, [isActive, conversation.is_flow, currentConversationId, flowChildren]);
-
-  // Load children when expanded
-  useEffect(() => {
-    if (isExpanded && conversation.is_flow && flowChildren.length === 0 && !loadingChildren) {
-      loadFlowChildren();
-    }
-  }, [isExpanded, conversation.is_flow]);
-
-  const loadFlowChildren = async () => {
-    if (!conversation.is_flow) return;
-    
-    logger.log(`[ConversationCard] Loading children for flow:`, conversation.id);
-    setLoadingChildren(true);
-    try {
-      const { data } = await supabase
-        .from('conversations')
-        .select('*')
-        .eq('parent_conversation_id', conversation.id)
-        .order('flow_sequence_order', { ascending: true });
-
-      logger.log(`[ConversationCard] Loaded ${data?.length || 0} children for flow ${conversation.id}`);
-      if (data) {
-        setFlowChildren(data);
-      }
-    } catch (error) {
-      logger.error('Error loading flow children:', error);
-    } finally {
-      setLoadingChildren(false);
-    }
-  };
-
-  const handleToggleExpand = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    logger.log('[ConversationCard] Toggle expand clicked for', conversation.id, 'Current:', isExpanded);
-    if (conversation.is_flow) {
-      setIsExpanded(!isExpanded);
-      logger.log('[ConversationCard] Setting expanded to:', !isExpanded);
-    }
-  };
+  // Use shared hook for flow children management
+  const {
+    flowChildren,
+    flowChildrenCount,
+    isExpanded,
+    loadingChildren,
+    toggleExpand: handleToggleExpand,
+  } = useFlowChildren({
+    conversationId: conversation.id,
+    isFlow: conversation.is_flow || false,
+    isActive,
+    currentConversationId,
+  });
 
   // Get status display
   const getStatusDisplay = () => {
@@ -378,10 +315,7 @@ export default function ConversationCard({
                 key={child.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (onSelectChild) {
-                    logger.log('[ConversationCard] Selecting child:', child.id);
-                    onSelectChild(child.id);
-                  }
+                  onSelectChild?.(child.id);
                 }}
                 className={`
                   w-full text-left p-2.5 rounded-lg transition-all duration-150 flex items-center gap-2.5 border
