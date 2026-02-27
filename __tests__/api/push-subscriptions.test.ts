@@ -36,6 +36,36 @@ describe('/api/push/subscriptions', () => {
     expect(data.error).toBe('Unauthorized');
   });
 
+  it('GET returns subscriptions for authenticated user', async () => {
+    const mockSupabase = {
+      ...buildAuthMock('user-1'),
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            order: jest.fn().mockResolvedValue({
+              data: [
+                {
+                  id: 'sub-1',
+                  endpoint: 'https://push.example/device',
+                  device_label: 'Laptop',
+                },
+              ],
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    };
+    mockCreateClient.mockResolvedValue(mockSupabase as never);
+
+    const response = await GET();
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.subscriptions).toHaveLength(1);
+    expect(data.subscriptions[0].endpoint).toBe('https://push.example/device');
+  });
+
   it('POST validates subscription payload', async () => {
     const mockSupabase = buildAuthMock('user-1');
     mockCreateClient.mockResolvedValue(mockSupabase as never);
