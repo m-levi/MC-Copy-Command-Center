@@ -205,6 +205,39 @@ describe('API Schemas', () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it('should accept advanced agent configuration fields', () => {
+      const result = CreateModeSchema.safeParse({
+        name: 'Orchestrator Mode',
+        system_prompt: 'Route tasks to specialists.',
+        enabled_tools: {
+          invoke_agent: { enabled: true, allowed_agents: ['email_writer'] },
+        },
+        primary_artifact_types: ['email', 'calendar'],
+        is_agent_enabled: true,
+        agent_type: 'hybrid',
+        can_invoke_agents: ['email_writer'],
+        default_agent: 'email_writer',
+        agent_behavior: {
+          chain_limit: 3,
+          show_thinking: true,
+        },
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject out-of-range agent chain limit', () => {
+      const result = CreateModeSchema.safeParse({
+        name: 'Mode',
+        system_prompt: 'Prompt',
+        agent_behavior: {
+          chain_limit: 99,
+        },
+      });
+
+      expect(result.success).toBe(false);
+    });
   });
 
   describe('PasswordUpdateSchema', () => {
