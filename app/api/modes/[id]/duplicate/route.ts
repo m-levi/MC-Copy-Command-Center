@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { MODE_SELECT_FIELDS, normalizeModePayload } from '@/lib/modes/mode-persistence';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -44,20 +45,19 @@ export async function POST(request: Request, { params }: RouteParams) {
     : 0;
 
   // Create the duplicate
+  const duplicatePayload = normalizeModePayload(originalMode, { includeDefaults: true });
+
   const { data: newMode, error: createError } = await supabase
     .from('custom_modes')
     .insert({
       user_id: user.id,
+      ...duplicatePayload,
       name: `${originalMode.name} (Copy)`,
-      description: originalMode.description,
-      icon: originalMode.icon,
-      color: originalMode.color,
-      system_prompt: originalMode.system_prompt,
       is_active: false, // Start as inactive to avoid confusion
       is_default: false,
       sort_order: nextSortOrder,
     })
-    .select()
+    .select(MODE_SELECT_FIELDS)
     .single();
 
   if (createError) {

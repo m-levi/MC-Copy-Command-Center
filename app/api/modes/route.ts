@@ -6,6 +6,7 @@ import {
   throwValidationError,
   handleSupabaseError,
 } from '@/lib/api-error';
+import { MODE_SELECT_FIELDS, normalizeModePayload } from '@/lib/modes/mode-persistence';
 
 /**
  * GET /api/modes
@@ -24,7 +25,7 @@ export const GET = withErrorHandling(async (request: Request) => {
 
   let query = supabase
     .from('custom_modes')
-    .select('id, user_id, name, description, icon, color, system_prompt, is_active, is_default, sort_order, created_at, updated_at')
+    .select(MODE_SELECT_FIELDS)
     .eq('user_id', user.id)
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: false });
@@ -55,7 +56,9 @@ export const POST = withErrorHandling(async (request: Request) => {
   }
 
   const body = await request.json();
-  const { name, description, icon, color, system_prompt, is_active } = body;
+  const normalizedMode = normalizeModePayload(body, { includeDefaults: true });
+  const name = normalizedMode.name as string | undefined;
+  const system_prompt = normalizedMode.system_prompt as string | undefined;
 
   // Validation
   if (!name || name.trim().length === 0) {
@@ -86,16 +89,13 @@ export const POST = withErrorHandling(async (request: Request) => {
     .from('custom_modes')
     .insert({
       user_id: user.id,
+      ...normalizedMode,
       name: name.trim(),
-      description: description?.trim() || null,
-      icon: icon || '💬',
-      color: color || 'blue',
       system_prompt: system_prompt.trim(),
-      is_active: is_active ?? true,
       is_default: false,
       sort_order: nextSortOrder,
     })
-    .select('id, user_id, name, description, icon, color, system_prompt, is_active, is_default, sort_order, created_at, updated_at')
+    .select(MODE_SELECT_FIELDS)
     .single();
 
   if (error) {

@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { normalizeModePayload } from '@/lib/modes/mode-persistence';
+import { DEFAULT_MODE_TOOL_CONFIG, type AgentBehavior, type AgentType, type ModeToolConfig } from '@/types';
 
 interface ImportedMode {
   name: string;
@@ -8,6 +10,13 @@ interface ImportedMode {
   color?: string;
   system_prompt: string;
   is_active?: boolean;
+  enabled_tools?: ModeToolConfig;
+  primary_artifact_types?: string[];
+  is_agent_enabled?: boolean;
+  agent_type?: AgentType;
+  can_invoke_agents?: string[];
+  default_agent?: string;
+  agent_behavior?: AgentBehavior;
 }
 
 interface ImportData {
@@ -84,14 +93,19 @@ export async function POST(request: Request) {
       }
       existingNames.add(finalName.toLowerCase());
 
+      const normalized = normalizeModePayload(mode as unknown as Record<string, unknown>, {
+        includeDefaults: true,
+      });
+
       return {
         user_id: user.id,
         name: finalName.substring(0, 100),
-        description: mode.description?.substring(0, 500) || null,
-        icon: mode.icon || '💬',
-        color: mode.color || 'blue',
-        system_prompt: mode.system_prompt,
-        is_active: mode.is_active ?? true,
+        ...normalized,
+        description:
+          typeof normalized.description === 'string'
+            ? normalized.description.substring(0, 500)
+            : normalized.description,
+        enabled_tools: (normalized.enabled_tools as ModeToolConfig | undefined) || DEFAULT_MODE_TOOL_CONFIG,
         is_default: false,
         sort_order: nextSortOrder++,
       };

@@ -1,6 +1,14 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
 
+type ModeVersionExportRow = {
+  mode_id: string;
+  version_number: number;
+  system_prompt: string;
+  notes: string | null;
+  created_at: string;
+};
+
 /**
  * GET /api/modes/export
  * Export modes as JSON
@@ -35,7 +43,7 @@ export async function GET(request: Request) {
   }
 
   // Optionally include version history
-  let versions: Record<string, any[]> = {};
+  let versions: Record<string, ModeVersionExportRow[]> = {};
   if (includeVersions && modes && modes.length > 0) {
     const modeIds = modes.map(m => m.id);
     const { data: versionData } = await supabase
@@ -45,11 +53,11 @@ export async function GET(request: Request) {
       .order('version_number', { ascending: false });
 
     if (versionData) {
-      versions = versionData.reduce((acc, v) => {
+      versions = versionData.reduce<Record<string, ModeVersionExportRow[]>>((acc, v) => {
         if (!acc[v.mode_id]) acc[v.mode_id] = [];
         acc[v.mode_id].push(v);
         return acc;
-      }, {} as Record<string, any[]>);
+      }, {});
     }
   }
 
@@ -64,6 +72,13 @@ export async function GET(request: Request) {
       color: mode.color,
       system_prompt: mode.system_prompt,
       is_active: mode.is_active,
+      enabled_tools: mode.enabled_tools,
+      primary_artifact_types: mode.primary_artifact_types,
+      is_agent_enabled: mode.is_agent_enabled,
+      agent_type: mode.agent_type,
+      can_invoke_agents: mode.can_invoke_agents,
+      default_agent: mode.default_agent,
+      agent_behavior: mode.agent_behavior,
       ...(includeVersions && versions[mode.id] ? {
         versions: versions[mode.id].map(v => ({
           version_number: v.version_number,

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { MODE_SELECT_FIELDS, normalizeModePayload } from '@/lib/modes/mode-persistence';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -21,7 +22,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 
   const { data, error } = await supabase
     .from('custom_modes')
-    .select('id, user_id, name, description, icon, color, system_prompt, is_active, is_default, sort_order, created_at, updated_at')
+    .select(MODE_SELECT_FIELDS)
     .eq('id', id)
     .eq('user_id', user.id)
     .single();
@@ -50,7 +51,8 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, icon, color, system_prompt, is_active, sort_order } = body;
+  const normalizedMode = normalizeModePayload(body);
+  const { name, system_prompt } = body as { name?: string; system_prompt?: string };
 
   // Check if mode exists and belongs to user
   const { data: existingMode, error: fetchError } = await supabase
@@ -70,10 +72,12 @@ export async function PUT(request: Request, { params }: RouteParams) {
   }
 
   // Build update object with only provided fields
-  const updateData: Record<string, unknown> = {};
-  
+  const updateData: Record<string, unknown> = {
+    ...normalizedMode,
+  };
+
   if (name !== undefined) {
-    if (!name || name.trim().length === 0) {
+    if (typeof name !== 'string' || name.trim().length === 0) {
       return NextResponse.json({ error: 'Name cannot be empty' }, { status: 400 });
     }
     if (name.length > 100) {
@@ -81,32 +85,12 @@ export async function PUT(request: Request, { params }: RouteParams) {
     }
     updateData.name = name.trim();
   }
-  
-  if (description !== undefined) {
-    updateData.description = description?.trim() || null;
-  }
-  
-  if (icon !== undefined) {
-    updateData.icon = icon;
-  }
-  
-  if (color !== undefined) {
-    updateData.color = color;
-  }
-  
+
   if (system_prompt !== undefined) {
-    if (!system_prompt || system_prompt.trim().length === 0) {
+    if (typeof system_prompt !== 'string' || system_prompt.trim().length === 0) {
       return NextResponse.json({ error: 'System prompt cannot be empty' }, { status: 400 });
     }
     updateData.system_prompt = system_prompt.trim();
-  }
-  
-  if (is_active !== undefined) {
-    updateData.is_active = is_active;
-  }
-  
-  if (sort_order !== undefined) {
-    updateData.sort_order = sort_order;
   }
 
   if (Object.keys(updateData).length === 0) {
@@ -118,7 +102,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
     .update(updateData)
     .eq('id', id)
     .eq('user_id', user.id)
-    .select('id, user_id, name, description, icon, color, system_prompt, is_active, is_default, sort_order, created_at, updated_at')
+    .select(MODE_SELECT_FIELDS)
     .single();
 
   if (error) {

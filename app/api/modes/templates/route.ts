@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { MODE_TEMPLATES, getTemplatesByCategory, searchTemplates, TEMPLATE_CATEGORY_META } from '@/lib/mode-templates';
+import { MODE_SELECT_FIELDS, normalizeModePayload } from '@/lib/modes/mode-persistence';
 
 /**
  * GET /api/modes/templates
@@ -21,7 +22,11 @@ export async function GET(request: Request) {
   let templates = MODE_TEMPLATES;
 
   if (category) {
-    templates = getTemplatesByCategory(category as any);
+    if (category in TEMPLATE_CATEGORY_META) {
+      templates = getTemplatesByCategory(category as keyof typeof TEMPLATE_CATEGORY_META);
+    } else {
+      templates = [];
+    }
   }
 
   if (search) {
@@ -65,21 +70,24 @@ export async function POST(request: Request) {
     ? (existingModes[0].sort_order || 0) + 1 
     : 0;
 
-  // Create mode from template (simplified - just core fields)
+  const mergedTemplateConfig = {
+    ...template,
+    ...customizations,
+  } as Record<string, unknown>;
+  const normalizedMode = normalizeModePayload(mergedTemplateConfig, { includeDefaults: true });
+
   const { data, error } = await supabase
     .from('custom_modes')
     .insert({
       user_id: user.id,
-      name: customizations?.name || template.name,
-      description: customizations?.description || template.description,
-      icon: customizations?.icon || template.icon,
-      color: customizations?.color || template.color,
-      system_prompt: customizations?.system_prompt || template.system_prompt,
-      is_active: true,
+      ...normalizedMode,
+      name: (customizations?.name || template.name).trim(),
+      system_prompt: String(customizations?.system_prompt || template.system_prompt).trim(),
+      is_active: normalizedMode.is_active ?? true,
       is_default: false,
       sort_order: nextSortOrder,
     })
-    .select('id, user_id, name, description, icon, color, system_prompt, is_active, is_default, sort_order, created_at, updated_at')
+    .select(MODE_SELECT_FIELDS)
     .single();
 
   if (error) {

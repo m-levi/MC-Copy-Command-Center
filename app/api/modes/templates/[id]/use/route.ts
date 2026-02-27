@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { MODE_SELECT_FIELDS, normalizeModePayload } from '@/lib/modes/mode-persistence';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -45,21 +46,25 @@ export async function POST(request: Request, { params }: RouteParams) {
     ? (existingModes[0].sort_order || 0) + 1 
     : 0;
 
+  const templatePayload = {
+    ...template,
+    enabled_tools: template.enabled_tools || template.tools,
+  } as Record<string, unknown>;
+  const normalizedMode = normalizeModePayload(templatePayload, { includeDefaults: true });
+
   // Create the mode
   const { data: mode, error: modeError } = await supabase
     .from('custom_modes')
     .insert({
       user_id: user.id,
-      name: template.name,
-      description: template.description,
-      icon: template.icon,
-      color: template.color,
-      system_prompt: template.system_prompt,
-      is_active: true,
+      ...normalizedMode,
+      name: String(template.name).trim(),
+      system_prompt: String(template.system_prompt).trim(),
+      is_active: normalizedMode.is_active ?? true,
       is_default: false,
       sort_order: nextSortOrder,
     })
-    .select()
+    .select(MODE_SELECT_FIELDS)
     .single();
 
   if (modeError) {
