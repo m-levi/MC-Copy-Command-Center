@@ -99,7 +99,7 @@ The brief gives you facts. Your job is to find the angle that makes it memorable
 
 ## EXAMPLES
 
-Use these examples for structure and length only. Your tone comes exclusively from {{BRAND_VOICE}}.
+Use these examples for structure and length only. Your tone comes exclusively from the brand voice guide above.
 
 Study these. They show the quality, length, and variety you're aiming for.
 
@@ -469,7 +469,6 @@ export function buildDesignEmailV2Prompt(params: {
   let systemPrompt = DESIGN_EMAIL_V2_SYSTEM_PROMPT
     .replace(/{{BRAND_INFO}}/g, brandInfo || 'No brand information provided.')
     .replace(/{{BRAND_VOICE_GUIDELINES}}/g, brandVoiceGuidelines || 'No style guide provided.')
-    .replace(/{{BRAND_VOICE}}/g, brandVoiceGuidelines || 'No style guide provided.')
     .replace(/{{WEBSITE_URL}}/g, websiteUrl ? `Website: ${websiteUrl}` : '')
     .replace(/{{BRAND_NAME}}/g, brandName || 'the brand');
 
