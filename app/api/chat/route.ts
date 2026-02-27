@@ -743,10 +743,17 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
     logger.log(`[Chat API] Starting stream with ${model.provider} model`);
     logger.log(`[Chat API] System prompt length: ${systemPrompt.length}`);
     logger.log(`[Chat API] Messages count: ${formattedMessages.length}`);
+    logger.log('[Chat API] Message windowing:', {
+      originalMessageCount: messages.length,
+      windowedMessageCount: processedMessages.length,
+    });
     logger.log(`[Chat API] Mode: ${isPersonalAIMode ? 'Personal AI' : isOrchestratorMode ? 'Orchestrator' : 'Brand Mode'}`);
     logger.log(`[Chat API] Orchestrator enabled: ${isOrchestratorMode}`);
     logger.log(`[Chat API] Web search enabled: ${webSearchEnabled}`);
     logger.log(`[Chat API] Supermemory enabled: ${shouldEnableMemory}`);
+    logger.log('[Chat API] Active tools:', {
+      toolNames: Object.keys(tools).sort(),
+    });
     
     // Log attachment details for debugging
     if (attachments && attachments.length > 0) {
