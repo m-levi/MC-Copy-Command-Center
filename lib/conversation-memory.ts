@@ -49,7 +49,12 @@ export function extractConversationContext(messages: ContextMessage[]): Conversa
       if (content.includes('increase') || content.includes('boost')) {
         context.goals?.push('increase_engagement');
       }
-      if (content.includes('convert') || content.includes('purchase')) {
+      if (
+        content.includes('convert') ||
+        content.includes('conversion') ||
+        content.includes('conversions') ||
+        content.includes('purchase')
+      ) {
         context.goals?.push('drive_conversions');
       }
     }
@@ -58,6 +63,10 @@ export function extractConversationContext(messages: ContextMessage[]): Conversa
     if (message.metadata?.context) {
       Object.assign(context, message.metadata.context);
     }
+  }
+
+  if (context.goals && context.goals.length > 1) {
+    context.goals = Array.from(new Set(context.goals));
   }
 
   return context;
