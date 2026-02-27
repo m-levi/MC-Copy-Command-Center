@@ -105,5 +105,36 @@ describe('processPendingPushNotifications', () => {
       expect.objectContaining({ push_status: 'sent' })
     );
   });
+
+  it('is idempotent when there are no pending notifications', async () => {
+    mockIsWebPushConfigured.mockReturnValue(true);
+
+    const notificationsTable = {
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue({
+        data: [],
+        error: null,
+      }),
+    };
+
+    const mockSupabase = {
+      from: jest.fn((table: string) => {
+        if (table === 'notifications') return notificationsTable;
+        throw new Error(`Unexpected table: ${table}`);
+      }),
+    };
+
+    mockCreateClient.mockResolvedValue(mockSupabase as never);
+
+    const result = await processPendingPushNotifications();
+
+    expect(result.processed).toBe(0);
+    expect(result.sent).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(result.skipped).toBe(0);
+    expect(mockSendWebPushNotification).not.toHaveBeenCalled();
+  });
 });
 
