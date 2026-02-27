@@ -127,16 +127,15 @@ ${config.memoryContext ? `<memory_context>\n${config.memoryContext}\n</memory_co
     const taskPrompt = buildSpecialistTaskPrompt({
       specialist: invocation.specialist,
       task: invocation.task,
-      context: invocation.context as any,
-      expectedOutput: invocation.expectedOutput as any,
+      context: invocation.context as Parameters<typeof buildSpecialistTaskPrompt>[0]['context'],
+      expectedOutput: invocation.expectedOutput as Parameters<typeof buildSpecialistTaskPrompt>[0]['expectedOutput'],
     });
 
     // Get the model using the gateway
     const model = gateway.languageModel(modelId);
 
     // Build specialist tools based on config
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const specialistTools: Record<string, any> = {};
+    const specialistTools: Record<string, unknown> = {};
 
     if (specialistConfig.tools.create_artifact?.enabled) {
       specialistTools.create_artifact = createArtifactTool;
@@ -175,14 +174,16 @@ ${config.memoryContext ? `<memory_context>\n${config.memoryContext}\n</memory_co
     for (const step of result.steps || []) {
       for (const toolCall of step.toolCalls || []) {
         if (toolCall.toolName === 'create_artifact') {
-          // The actual artifact creation happens in the chat route
-          // Here we just note that an artifact was requested
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const args = (toolCall as any).args || {};
+          const toolCallArgs =
+            ('input' in toolCall ? (toolCall as { input?: unknown }).input : undefined) ||
+            ('args' in toolCall ? (toolCall as { args?: unknown }).args : undefined) ||
+            {};
+          const args = toolCallArgs as Record<string, unknown>;
           artifacts.push({
             id: 'pending', // Will be assigned by chat route
-            kind: args.kind,
-            title: args.title,
+            kind: (args.kind as SpecialistResult['artifacts'][number]['kind']) || 'markdown',
+            title: (args.title as string) || 'Generated Artifact',
+            toolInput: args,
           });
         }
       }

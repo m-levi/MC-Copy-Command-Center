@@ -14,6 +14,22 @@ import { SECTION_REGENERATION_PROMPTS } from './prompts/section-regeneration.pro
 import { composeSystemPrompt } from './prompts/root-system-prompt';
 import { BrandVoiceData } from '@/types';
 
+type PromptBrandContext = {
+  name?: string | null;
+  brand_details?: string | null;
+  brand_guidelines?: string | null;
+  copywriting_style_guide?: string | null;
+  brand_voice?: BrandVoiceData | null;
+  website_url?: string | null;
+};
+
+type PromptConversationContext = {
+  campaignType?: string;
+  targetAudience?: string;
+  tone?: string;
+  goals?: string[];
+};
+
 export interface PromptContext {
   brandInfo: string;
   ragContext: string;
@@ -115,7 +131,7 @@ export function formatBrandVoiceForPrompt(voice: BrandVoiceData): string {
  * Build brand information string
  * Uses structured BrandVoiceData when available for optimal AI consumption
  */
-export function buildBrandInfo(brandContext: any): string {
+export function buildBrandInfo(brandContext?: PromptBrandContext | null): string {
   if (!brandContext) {
     return 'No brand information provided.';
   }
@@ -143,7 +159,7 @@ ${brandContext.website_url ? `\nBrand Website: ${brandContext.website_url}` : ''
 /**
  * Build conversation context info
  */
-export function buildContextInfo(conversationContext?: any): string {
+export function buildContextInfo(conversationContext?: PromptConversationContext): string {
   if (!conversationContext) return '';
 
   return `
@@ -362,14 +378,18 @@ export function buildSectionRegenerationPrompt(
  */
 export function buildCustomModePrompt(
   systemPrompt: string,
-  brandContext: any,
+  brandContext: PromptBrandContext | null | undefined,
   options: {
-    conversationContext?: any;
+    conversationContext?: PromptConversationContext;
     memoryContext?: string;
     userMessage?: string;
     allowedArtifactKinds?: string[];
   } = {}
 ): string {
+  const modeTemplate = systemPrompt;
+  const referencesBrandInTemplate = /\{\{BRAND_INFO\}\}|\{\{BRAND_NAME\}\}|\{\{WEBSITE_URL\}\}/.test(modeTemplate);
+  const referencesContextInTemplate = /\{\{CONTEXT_INFO\}\}/.test(modeTemplate);
+
   // Build brand context string
   const brandInfo = buildBrandInfo(brandContext);
   const contextInfo = buildContextInfo(options.conversationContext);
@@ -401,9 +421,9 @@ If you need to provide content that doesn't fit these artifact types, include it
   // Compose the full prompt using the layered system
   return composeSystemPrompt({
     modePrompt: processedModePrompt,
-    brandContext: brandInfo,
+    brandContext: referencesBrandInTemplate ? undefined : brandInfo,
     memoryContext: options.memoryContext,
-    additionalContext: contextInfo || undefined,
+    additionalContext: referencesContextInTemplate ? undefined : contextInfo || undefined,
   });
 }
 
@@ -411,11 +431,11 @@ If you need to provide content that doesn't fit these artifact types, include it
  * Main system prompt builder - routes to appropriate prompt
  */
 export function buildSystemPrompt(
-  brandContext: any,
+  brandContext: PromptBrandContext | null | undefined,
   ragContext: string = '', // RAG disabled for performance - kept for API compatibility
   options: {
     regenerateSection?: { type: string; title: string };
-    conversationContext?: any;
+    conversationContext?: PromptConversationContext;
     conversationMode?: string;
     memoryContext?: string;
     emailType?: string;

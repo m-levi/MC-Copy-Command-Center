@@ -1,8 +1,8 @@
 import { streamText, ModelMessage, LanguageModel, generateText, stepCountIs } from 'ai';
 import { gateway, getToolsForModel, getProviderOptionsWithWebSearch, MODELS } from '@/lib/ai-providers';
 import { getModelById, normalizeModelId } from '@/lib/ai-models';
-import { Message, FlowType, isCustomMode, getCustomModeId } from '@/types';
-import { extractConversationContext } from '@/lib/conversation-memory';
+import { Message, FlowType, isCustomMode, getCustomModeId, DEFAULT_MODE_TOOL_CONFIG } from '@/types';
+import { extractConversationContext, buildMessageContext } from '@/lib/conversation-memory';
 import { buildFlowOutlinePrompt, buildConversationalFlowPrompt } from '@/lib/flow-prompts';
 import { buildSystemPrompt, buildBrandInfo, buildContextInfo, buildCustomModePrompt } from '@/lib/chat-prompts';
 import { buildDesignEmailV2Prompt } from '@/lib/prompts/design-email-v2.prompt';
@@ -14,8 +14,8 @@ import { smartExtractProductLinks } from '@/lib/url-extractor';
 import { withSupermemory, addMemoryTool } from '@supermemory/tools/ai-sdk';
 import { getSupermemoryUserId, isSupermemoryConfigured } from '@/lib/supermemory';
 import { isPersonalAI, buildPersonalAIPrompt } from '@/lib/personal-ai';
-import { getToolsForMode, getToolsForModeWithShopify, detectArtifactContent, parseEmailVersions, getAgentDisplayInfo } from '@/lib/tools';
-import { checkArtifactWorthiness, quickRejectCheck, validateArtifactToolInput, isConversationalContent } from '@/lib/artifact-worthiness';
+import { getToolsForModeWithShopify, getAgentDisplayInfo } from '@/lib/tools';
+import type { ModeToolOptions } from '@/lib/tools';
 import { z } from 'zod';
 // Orchestrator imports
 import {
@@ -29,6 +29,8 @@ import {
   type OrchestratorConfig,
 } from '@/lib/agents/orchestrator-service';
 import type { SpecialistType } from '@/types/orchestrator';
+import { evaluateAgentInvocationPolicy } from '@/lib/agents/invocation-policy';
+import { persistArtifactFromToolInput, type ArtifactToolInputPayload } from '@/lib/chat/artifact-persistence';
 
 export const runtime = 'edge';
 
@@ -108,6 +110,33 @@ function validateAttachments(attachments: Array<{ data: string; name: string }> 
 function isValidUUID(str: string): boolean {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   return uuidRegex.test(str);
+}
+
+function buildWindowedPromptMessages(messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>, conversationId?: string): Array<{ role: 'user' | 'assistant' | 'system'; content: string }> {
+  const syntheticMessages = messages.map((message, index) => ({
+    id: `msg_${index}`,
+    conversation_id: conversationId || 'transient',
+    role: message.role,
+    content: message.content || '',
+    created_at: new Date().toISOString(),
+  })) as Message[];
+
+  return buildMessageContext(syntheticMessages, undefined, 20).map((message) => ({
+    role: message.role,
+    content: message.content || '',
+  }));
+}
+
+function extractToolInput(part: { input?: unknown } & Record<string, unknown>): unknown {
+  if (part.input !== undefined) {
+    return part.input;
+  }
+
+  if ('args' in part) {
+    return part.args || {};
+  }
+
+  return {};
 }
 
 // =============================================================================
@@ -254,7 +283,7 @@ export async function POST(req: Request) {
       effectiveCustomModeId 
         ? supabase
             .from('custom_modes')
-            .select('id, name, system_prompt, enabled_tools')
+            .select('id, name, system_prompt, enabled_tools, is_agent_enabled, agent_type, can_invoke_agents, default_agent, agent_behavior')
             .eq('id', effectiveCustomModeId)
             .single()
         : Promise.resolve({ data: null, error: null }),
@@ -276,7 +305,12 @@ export async function POST(req: Request) {
 
     // Build system prompt with brand context, RAG, and memory
     let systemPrompt: string;
-    let processedMessages = messages;
+    const windowedMessages = buildWindowedPromptMessages(messages, conversationId);
+    let processedMessages = windowedMessages;
+
+    const modeToolConfig = ((customMode?.enabled_tools as ModeToolOptions | undefined) ||
+      (DEFAULT_MODE_TOOL_CONFIG as ModeToolOptions));
+    const webSearchEnabled = modeToolConfig.web_search?.enabled === true;
 
     // Check if this is a Personal AI conversation (no brand context)
     const isPersonalAIMode = isPersonalAI(brandContext?.id);
@@ -309,7 +343,8 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
     const shouldEnableMemory = isSupermemoryConfigured() &&
                                brandContext?.id &&
                                user?.id &&
-                               !isPersonalAIMode;
+                               !isPersonalAIMode &&
+                               modeToolConfig.save_memory?.enabled === true;
 
     if (isPersonalAIMode) {
       // Personal AI mode: Use generic assistant prompt without brand context
@@ -319,7 +354,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
       // Orchestrator mode: Use the orchestrator prompt with specialist invocation capabilities
       logger.log('[Chat API] Orchestrator mode - using orchestrator prompt');
       systemPrompt = buildOrchestratorSystemPrompt(orchestratorConfig);
-      processedMessages = messages;
+      processedMessages = windowedMessages;
     } else {
       // Brand mode: Build brand-specific prompts
       // Build brand info string for prompts
@@ -345,7 +380,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         userMessage: latestUserMessage,
         allowedArtifactKinds,
       });
-      processedMessages = messages;
+      processedMessages = windowedMessages;
     // Flow mode: Use conversational flow prompt for guided flow creation
     } else if (conversationMode === 'flow') {
       logger.log('[Chat API] Using conversational flow prompt');
@@ -391,7 +426,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
           conversationMode,
           emailType
         });
-        processedMessages = messages;
+        processedMessages = windowedMessages;
       }
     } else {
       systemPrompt = buildSystemPrompt(brandContext, '', {
@@ -400,6 +435,7 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
         conversationMode,
         emailType
       });
+      processedMessages = windowedMessages;
     }
     } // Close isPersonalAIMode else block
 
@@ -410,11 +446,11 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
     if (debugPromptResult && debugPromptResult.system_prompt) {
       logger.log(`[Chat API] DEBUG MODE: Using custom prompt: ${debugPromptResult.name}`);
       
-      // IMPORTANT: Reset processedMessages to original messages when using custom debug prompt.
+      // IMPORTANT: Reset processedMessages to the windowed request messages when using custom debug prompt.
       // The default flow (e.g., Design Email V2) may have transformed processedMessages with its
       // own template. Using a custom debug prompt should bypass that transformation entirely,
-      // pairing the custom system prompt with the user's original messages.
-      processedMessages = messages;
+      // pairing the custom system prompt with the active request context.
+      processedMessages = windowedMessages;
       
       // Get user's message for the COPY_BRIEF variable
       const userMessages = messages.filter((m) => m.role === 'user');
@@ -654,7 +690,9 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
     // Build tools based on provider
     // - Anthropic: Uses explicit web_search tool
     // - OpenAI/Google: Web search configured via provider options
-    const baseTools = getToolsForModel(modelId, websiteUrl);
+    const baseTools = webSearchEnabled
+      ? (getToolsForModel(modelId, websiteUrl) || {})
+      : {};
     
     // Add memory tool if Supermemory is configured and memory is enabled
     // This gives the AI the ability to save important information to memory
@@ -669,13 +707,13 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
     // Get mode-specific tools (artifact creation, conversation creation, actions, image generation)
     // Pass custom mode tool config if available
     // Also load Shopify MCP tools if brand has a Shopify store
-    const toolConfig = customMode?.enabled_tools || undefined;
+    const toolConfig = modeToolConfig;
     const shopifyDomain = brandContext?.shopify_domain || undefined;
     const shopifyConfig = toolConfig?.shopify_product_search;
 
     // Use async function to load mode tools with potential Shopify MCP integration
     const modeTools = await getToolsForModeWithShopify(conversationMode || 'email_copy', {
-      modeTools: toolConfig || {},
+      modeTools: toolConfig,
       shopifyDomain,
       shopifyConfig,
     });
@@ -707,8 +745,8 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
     logger.log(`[Chat API] Messages count: ${formattedMessages.length}`);
     logger.log(`[Chat API] Mode: ${isPersonalAIMode ? 'Personal AI' : isOrchestratorMode ? 'Orchestrator' : 'Brand Mode'}`);
     logger.log(`[Chat API] Orchestrator enabled: ${isOrchestratorMode}`);
-    logger.log(`[Chat API] Web search enabled: ${model.provider === 'anthropic' ? 'via tool' : 'via provider options'}`);
-    logger.log(`[Chat API] Supermemory enabled: ${isSupermemoryConfigured() && brandContext?.id && user?.id && !isPersonalAIMode}`);
+    logger.log(`[Chat API] Web search enabled: ${webSearchEnabled}`);
+    logger.log(`[Chat API] Supermemory enabled: ${shouldEnableMemory}`);
     
     // Log attachment details for debugging
     if (attachments && attachments.length > 0) {
@@ -727,7 +765,9 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
     // Use Vercel AI SDK streamText with AI Gateway
     let result;
     try {
-      const providerOptions = getProviderOptionsWithWebSearch(modelId, 10000, websiteUrl);
+      const providerOptions = getProviderOptionsWithWebSearch(modelId, 10000, websiteUrl, {
+        enabled: webSearchEnabled,
+      });
 
       // =======================================================================
       // ARTIFACT-REQUIRED MODES: Force tool use until primary artifact exists
@@ -795,6 +835,7 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
     const encoder = new TextEncoder();
     let fullText = '';
     let fullReasoning = '';
+    let agentInvocationCount = 0;
     
     const readable = new ReadableStream({
       async start(controller) {
@@ -833,7 +874,7 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                 // Handle specific tool calls
                 if (part.toolName === 'invoke_specialist') {
                   // Orchestrator is invoking a specialist agent
-                  const toolInput = 'input' in part ? part.input : ('args' in part ? (part as any).args : {});
+                  const toolInput = extractToolInput(part as { input?: unknown } & Record<string, unknown>);
                   const specialistArgs = toolInput as {
                     specialist: SpecialistType;
                     task: string;
@@ -868,26 +909,53 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                         specialistMessages
                       );
 
+                      const persistedSpecialistArtifacts: Array<{ id: string; kind: string; title: string }> = [];
+
+                      if (specialistResult.artifacts && specialistResult.artifacts.length > 0) {
+                        for (const artifact of specialistResult.artifacts) {
+                          if (!artifact.toolInput) {
+                            continue;
+                          }
+
+                          const persistResult = await persistArtifactFromToolInput({
+                            supabase,
+                            conversationId,
+                            userId: user?.id,
+                            brandId: brandContext?.id,
+                            toolInput: artifact.toolInput as ArtifactToolInputPayload,
+                            conversationMode,
+                            userMessage: messages[messages.length - 1]?.content,
+                          });
+
+                          if (persistResult.ok) {
+                            persistedSpecialistArtifacts.push({
+                              id: persistResult.artifact.id,
+                              kind: persistResult.artifact.kind,
+                              title: persistResult.artifact.title,
+                            });
+                            sendMessage('artifact_created', {
+                              artifactId: persistResult.artifact.id,
+                              kind: persistResult.artifact.kind,
+                              title: persistResult.artifact.title,
+                            });
+                          } else {
+                            sendMessage('artifact_error', {
+                              error: persistResult.error,
+                              details: persistResult.details,
+                            });
+                          }
+                        }
+                      }
+
                       // Send specialist result to frontend
                       sendMessage('specialist_result', {
                         specialist: specialistResult.specialist,
                         status: specialistResult.status,
                         response: specialistResult.response,
-                        artifacts: specialistResult.artifacts,
+                        artifacts: persistedSpecialistArtifacts,
                         modelUsed: specialistResult.modelUsed,
                         durationMs: specialistResult.durationMs,
                       });
-
-                      // If specialist created artifacts, send them
-                      if (specialistResult.artifacts) {
-                        for (const artifact of specialistResult.artifacts) {
-                          sendMessage('artifact_created', {
-                            artifactId: artifact.id,
-                            kind: artifact.kind,
-                            title: artifact.title,
-                          });
-                        }
-                      }
 
                       // Stream the specialist's response as text
                       if (specialistResult.response) {
@@ -912,249 +980,34 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                 } else if (part.toolName === 'create_artifact') {
                   sendMessage('status', { status: 'creating_artifact' });
 
-                  // Create artifact in database
                   try {
-                    // AI SDK uses 'input' for tool call arguments, not 'args'
-                    const toolInput = 'input' in part ? part.input : ('args' in part ? (part as any).args : {});
-                    const artifactArgs = toolInput as {
-                      kind: 'email' | 'flow' | 'campaign' | 'template' | 'subject_lines' | 'content_brief' | 'email_brief' | 'calendar' | 'markdown' | 'spreadsheet' | 'code' | 'checklist';
-                      title: string;
-                      description?: string;
-                      content: string;
-                      metadata?: Record<string, unknown>;
-                    };
-
-                    // Validate artifact kind against custom mode's allowed_kinds
+                    const toolInput = extractToolInput(part as { input?: unknown } & Record<string, unknown>);
                     const allowedKinds = toolConfig?.create_artifact?.allowed_kinds as string[] | undefined;
-                    if (allowedKinds && allowedKinds.length > 0 && !allowedKinds.includes(artifactArgs.kind)) {
-                      logger.warn('[Chat API] Artifact kind not allowed by custom mode:', {
-                        requestedKind: artifactArgs.kind,
-                        allowedKinds,
-                        customModeName: customMode?.name,
-                      });
-                      sendMessage('artifact_error', {
-                        error: 'Artifact kind not allowed',
-                        kind: artifactArgs.kind,
-                        title: artifactArgs.title,
-                        details: `This mode only allows: ${allowedKinds.join(', ')}`,
-                      });
-                      break;
-                    }
-
-                    // Validate artifact content - reject if it contains questions/clarifications
-                    const contentToCheck = artifactArgs.content || '';
-                    logger.info('[Chat API] Artifact kind received:', artifactArgs.kind);
-                    const worthinessCheck = checkArtifactWorthiness(contentToCheck, {
+                    const persistenceResult = await persistArtifactFromToolInput({
+                      supabase,
+                      conversationId,
+                      userId: user?.id,
+                      brandId: brandContext?.id,
+                      toolInput: toolInput as ArtifactToolInputPayload,
+                      allowedKinds,
+                      conversationMode,
                       userMessage: messages[messages.length - 1]?.content,
-                      conversationMode: conversationMode,
-                      kind: artifactArgs.kind as import('@/types/artifacts').ArtifactKind,
                     });
-                    logger.info('[Chat API] Worthiness check result:', JSON.stringify(worthinessCheck));
 
-                    if (!worthinessCheck.isWorthy) {
-                      logger.warn('[Chat API] Artifact rejected by worthiness check:', worthinessCheck.reason);
-                      sendMessage('artifact_error', {
-                        error: 'Content not suitable for artifact',
-                        reason: worthinessCheck.reason,
-                        kind: artifactArgs.kind,
-                        title: artifactArgs.title,
-                      });
-                      break;
-                    }
-
-                    // Build metadata based on artifact kind
-                    // The tool schema uses flat fields (versions, steps, etc.) at top level
-                    const toolArgs = toolInput as {
-                      kind: string;
-                      title: string;
-                      description?: string;
-                      content: string;
-                      // Email fields
-                      versions?: Array<{
-                        id: 'a' | 'b' | 'c';
-                        content: string;
-                        approach?: string;
-                        subject_line?: string;
-                        preview_text?: string;
-                      }>;
-                      selected_variant?: 'a' | 'b' | 'c';
-                      email_type?: string;
-                      // Flow fields
-                      steps?: Array<{ id: string; type: string; title: string }>;
-                      flow_type?: string;
-                      // Subject lines
-                      subject_line_variants?: Array<{ text: string; approach?: string }>;
-                      // Calendar fields
-                      calendar_slots?: Array<{
-                        id: string;
-                        date: string;
-                        title: string;
-                        description?: string;
-                        email_type?: string;
-                        status?: string;
-                        timing?: string;
-                      }>;
-                      calendar_month?: string;
-                      calendar_view_mode?: string;
-                      campaign_name?: string;
-                      // Email brief fields
-                      brief_campaign_type?: string;
-                      send_date?: string;
-                      target_segment?: string;
-                      objective?: string;
-                      key_message?: string;
-                      value_proposition?: string;
-                      call_to_action?: string;
-                      subject_line_direction?: string;
-                      tone_notes?: string;
-                      approval_status?: string;
-                      calendar_artifact_id?: string;
-                    };
-
-                    const baseMetadata: Record<string, unknown> = {
-                      status: 'draft',
-                    };
-
-                    // For email artifacts, extract version content to metadata fields
-                    if (artifactArgs.kind === 'email' && toolArgs.versions) {
-                      for (const version of toolArgs.versions) {
-                        baseMetadata[`version_${version.id}_content`] = version.content;
-                        baseMetadata[`version_${version.id}_approach`] = version.approach;
-                        baseMetadata[`version_${version.id}_subject_line`] = version.subject_line;
-                        baseMetadata[`version_${version.id}_preview_text`] = version.preview_text;
-                      }
-                      baseMetadata.selected_variant = toolArgs.selected_variant || 'a';
-                      baseMetadata.email_type = toolArgs.email_type;
-                    }
-
-                    // For subject_lines artifacts, extract variants
-                    if (artifactArgs.kind === 'subject_lines' && toolArgs.subject_line_variants) {
-                      baseMetadata.variants = toolArgs.subject_line_variants;
-                      baseMetadata.selected_index = 0;
-                    }
-
-                    // For flow artifacts, extract steps
-                    if (artifactArgs.kind === 'flow' && toolArgs.steps) {
-                      baseMetadata.steps = toolArgs.steps;
-                      baseMetadata.flow_type = toolArgs.flow_type;
-                    }
-
-                    // For calendar artifacts, extract slots and month
-                    if (artifactArgs.kind === 'calendar' && toolArgs.calendar_slots) {
-                      baseMetadata.slots = toolArgs.calendar_slots;
-                      baseMetadata.month = toolArgs.calendar_month;
-                      baseMetadata.view_mode = toolArgs.calendar_view_mode || 'month';
-                      baseMetadata.campaign_name = toolArgs.campaign_name;
-                    }
-
-                    // For email_brief artifacts, extract brief data
-                    if (artifactArgs.kind === 'email_brief') {
-                      baseMetadata.campaign_type = toolArgs.brief_campaign_type;
-                      baseMetadata.send_date = toolArgs.send_date;
-                      baseMetadata.target_segment = toolArgs.target_segment;
-                      baseMetadata.objective = toolArgs.objective;
-                      baseMetadata.key_message = toolArgs.key_message;
-                      baseMetadata.value_proposition = toolArgs.value_proposition;
-                      baseMetadata.call_to_action = toolArgs.call_to_action;
-                      baseMetadata.subject_line_direction = toolArgs.subject_line_direction;
-                      baseMetadata.tone_notes = toolArgs.tone_notes;
-                      baseMetadata.approval_status = toolArgs.approval_status || 'draft';
-                      baseMetadata.calendar_artifact_id = toolArgs.calendar_artifact_id;
-                    }
-
-                    // =================================================================
-                    // ARTIFACT VALIDATION: Block spurious/conversational artifacts
-                    // =================================================================
-
-                    // Validate structured artifact types (calendar, email_brief)
-                    const validationResult = validateArtifactToolInput(
-                      artifactArgs.kind,
-                      toolArgs as Record<string, unknown>
-                    );
-
-                    if (!validationResult.isValid) {
-                      logger.warn('[Chat API] Artifact validation failed:', {
-                        kind: artifactArgs.kind,
-                        errors: validationResult.errors,
-                      });
-                      sendMessage('artifact_error', {
-                        error: 'Artifact validation failed',
-                        kind: artifactArgs.kind,
-                        title: artifactArgs.title,
-                        details: validationResult.errors.join('; '),
-                      });
-                      break;
-                    }
-
-                    // Log validation warnings (non-blocking)
-                    if (validationResult.warnings.length > 0) {
-                      logger.log('[Chat API] Artifact validation warnings:', validationResult.warnings);
-                    }
-
-                    // Check for conversational content being saved as artifact
-                    if (artifactArgs.content && isConversationalContent(artifactArgs.content)) {
-                      // Allow for calendar/email_brief since their value is in metadata
-                      if (artifactArgs.kind !== 'calendar' && artifactArgs.kind !== 'email_brief') {
-                        logger.warn('[Chat API] Blocking conversational artifact:', {
-                          kind: artifactArgs.kind,
-                          contentPreview: artifactArgs.content.slice(0, 100),
-                        });
-                        sendMessage('artifact_error', {
-                          error: 'Cannot save conversational content as artifact',
-                          kind: artifactArgs.kind,
-                          title: artifactArgs.title,
-                          details: 'Artifacts should contain deliverable content, not questions or conversational text',
-                        });
-                        break;
-                      }
-                    }
-
-                    // Ensure user_id is available (required by database constraint)
-                    if (!user?.id) {
-                      logger.warn('[Chat API] Cannot save artifact - user not authenticated');
-                      sendMessage('artifact_error', {
-                        error: 'Failed to save artifact',
-                        kind: artifactArgs.kind,
-                        title: artifactArgs.title,
-                        details: 'User authentication required to save artifacts',
-                      });
-                      break;
-                    }
-
-                    const { data: artifact, error: artifactError } = await supabase
-                      .from('artifacts')
-                      .insert({
-                        conversation_id: conversationId,
-                        user_id: user.id,
-                        brand_id: brandContext?.id,
-                        kind: artifactArgs.kind,
-                        title: artifactArgs.title,
-                        content: artifactArgs.content,
-                        metadata: baseMetadata,
-                      })
-                      .select()
-                      .single();
-
-                    if (artifact && !artifactError) {
+                    if (persistenceResult.ok) {
                       sendMessage('artifact_created', {
-                        artifactId: artifact.id,
-                        kind: artifactArgs.kind,
-                        title: artifactArgs.title,
+                        artifactId: persistenceResult.artifact.id,
+                        kind: persistenceResult.artifact.kind,
+                        title: persistenceResult.artifact.title,
                       });
-                      logger.log('[Chat API] Artifact created via tool:', artifact.id);
                     } else {
-                      logger.error('[Chat API] Failed to create artifact:', artifactError);
-                      // Send error to client so they know artifact wasn't saved
                       sendMessage('artifact_error', {
-                        error: 'Failed to save artifact',
-                        kind: artifactArgs.kind,
-                        title: artifactArgs.title,
-                        details: artifactError?.message || 'Database error',
+                        error: persistenceResult.error,
+                        details: persistenceResult.details,
                       });
                     }
                   } catch (err) {
                     logger.error('[Chat API] Artifact creation error:', err);
-                    // Send error to client
                     sendMessage('artifact_error', {
                       error: 'Failed to create artifact',
                       details: err instanceof Error ? err.message : 'Unknown error',
@@ -1164,7 +1017,7 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                   sendMessage('status', { status: 'preparing_conversation' });
                   
                   // Send pending action to frontend for approval
-                  const toolInput = 'input' in part ? part.input : ('args' in part ? (part as any).args : {});
+                  const toolInput = extractToolInput(part as { input?: unknown } & Record<string, unknown>);
                   const convArgs = toolInput as {
                     title: string;
                     initial_prompt: string;
@@ -1184,7 +1037,7 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                 } else if (part.toolName === 'create_bulk_conversations') {
                   sendMessage('status', { status: 'preparing_conversations' });
                   
-                  const toolInput = 'input' in part ? part.input : ('args' in part ? (part as any).args : {});
+                  const toolInput = extractToolInput(part as { input?: unknown } & Record<string, unknown>);
                   const bulkArgs = toolInput as {
                     conversations: Array<{
                       title: string;
@@ -1204,7 +1057,7 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                 } else if (part.toolName === 'suggest_conversation_plan') {
                   sendMessage('status', { status: 'planning_conversations' });
 
-                  const toolInput = 'input' in part ? part.input : ('args' in part ? (part as any).args : {});
+                  const toolInput = extractToolInput(part as { input?: unknown } & Record<string, unknown>);
                   const planArgs = toolInput as {
                     plan_name: string;
                     plan_description: string;
@@ -1237,7 +1090,7 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                   fullText += syntheticText;
                   sendMessage('text', { content: syntheticText });
                 } else if (part.toolName === 'suggest_action') {
-                  const toolInput = 'input' in part ? part.input : ('args' in part ? (part as any).args : {});
+                  const toolInput = extractToolInput(part as { input?: unknown } & Record<string, unknown>);
                   const actionArgs = toolInput as {
                     label: string;
                     action_type: string;
@@ -1257,7 +1110,7 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                   });
                 } else if (part.toolName === 'invoke_agent') {
                   // Agent is invoking another agent - this enables agent chaining!
-                  const toolInput = 'input' in part ? part.input : ('args' in part ? (part as any).args : {});
+                  const toolInput = extractToolInput(part as { input?: unknown } & Record<string, unknown>);
                   const agentArgs = toolInput as {
                     agent_id: string;
                     task: string;
@@ -1268,6 +1121,11 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
 
                   // Get display info for the agent being invoked
                   const agentInfo = getAgentDisplayInfo(agentArgs.agent_id);
+                  const invocationPolicy = evaluateAgentInvocationPolicy({
+                    mode: customMode,
+                    requestedAgentId: agentArgs.agent_id,
+                    currentInvocationCount: agentInvocationCount,
+                  });
 
                   // Send status update for UI
                   sendMessage('status', { status: 'invoking_agent' });
@@ -1280,17 +1138,34 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                     task: agentArgs.task,
                     context: agentArgs.context,
                     expected_output: agentArgs.expected_output,
-                    status: 'invoking',
+                    status: invocationPolicy.allowed ? 'invoking' : 'blocked',
                   });
+
+                  if (!invocationPolicy.allowed || !invocationPolicy.targetAgentId) {
+                    sendMessage('agent_response', {
+                      agent_id: agentArgs.agent_id,
+                      agent_name: agentInfo?.name || agentArgs.agent_id,
+                      agent_icon: agentInfo?.icon || '🤖',
+                      status: 'failed',
+                      error: invocationPolicy.reason,
+                    });
+                    logger.warn('[Chat API] Agent invocation blocked by policy', {
+                      requestedAgentId: agentArgs.agent_id,
+                      reason: invocationPolicy.reason,
+                      chainLimit: invocationPolicy.chainLimit,
+                    });
+                    break;
+                  }
 
                   // Execute the specialist agent
                   if (brandContext?.id && user?.id) {
                     try {
+                      agentInvocationCount += 1;
                       logger.log(`[Chat API] Invoking agent: ${agentArgs.agent_id} for task: ${agentArgs.task}`);
 
                       const specialistResult = await executeSpecialist(
                         {
-                          specialist: agentArgs.agent_id as any,
+                          specialist: invocationPolicy.targetAgentId,
                           task: agentArgs.task,
                           context: agentArgs.context,
                           expectedOutput: agentArgs.expected_output,
@@ -1302,8 +1177,48 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                           userId: user.id,
                           conversationId: conversationId || '',
                         },
-                        messages.slice(-5) as ModelMessage[]
+                        (windowedMessages as ModelMessage[])
                       );
+
+                      const persistedSpecialistArtifacts: Array<{ id: string; kind: string; title: string }> = [];
+
+                      if (specialistResult.artifacts && specialistResult.artifacts.length > 0) {
+                        const allowedKinds = toolConfig?.create_artifact?.allowed_kinds as string[] | undefined;
+                        for (const artifact of specialistResult.artifacts) {
+                          if (!artifact.toolInput) {
+                            continue;
+                          }
+
+                          const persistResult = await persistArtifactFromToolInput({
+                            supabase,
+                            conversationId,
+                            userId: user.id,
+                            brandId: brandContext.id,
+                            toolInput: artifact.toolInput as ArtifactToolInputPayload,
+                            allowedKinds,
+                            conversationMode,
+                            userMessage: messages[messages.length - 1]?.content,
+                          });
+
+                          if (persistResult.ok) {
+                            persistedSpecialistArtifacts.push({
+                              id: persistResult.artifact.id,
+                              kind: persistResult.artifact.kind,
+                              title: persistResult.artifact.title,
+                            });
+                            sendMessage('artifact_created', {
+                              artifactId: persistResult.artifact.id,
+                              kind: persistResult.artifact.kind,
+                              title: persistResult.artifact.title,
+                            });
+                          } else {
+                            sendMessage('artifact_error', {
+                              error: persistResult.error,
+                              details: persistResult.details,
+                            });
+                          }
+                        }
+                      }
 
                       // Send the agent's response back
                       sendMessage('agent_response', {
@@ -1312,7 +1227,7 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                         agent_icon: agentInfo?.icon || '🤖',
                         status: specialistResult.status,
                         response: specialistResult.response,
-                        artifacts: specialistResult.artifacts,
+                        artifacts: persistedSpecialistArtifacts,
                         model_used: specialistResult.modelUsed,
                         duration_ms: specialistResult.durationMs,
                       });
@@ -1412,11 +1327,27 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                 break;
                 
               case 'finish':
+                {
+                  const finishPart = part as {
+                    usage?: {
+                      inputTokens?: number;
+                      outputTokens?: number;
+                      reasoningTokens?: number;
+                    };
+                    totalUsage?: {
+                      inputTokens?: number;
+                      outputTokens?: number;
+                      reasoningTokens?: number;
+                    };
+                  };
+                  const usage = finishPart.totalUsage || finishPart.usage;
                 logger.log('[Chat API] Stream finished', { 
                   textLength: fullText.length,
-                  reasoningLength: fullReasoning.length 
+                  reasoningLength: fullReasoning.length,
+                  tokenUsage: usage || null,
                 });
                 break;
+                }
                 
               case 'error':
                 logger.error('[Chat API] Stream error:', part.error);

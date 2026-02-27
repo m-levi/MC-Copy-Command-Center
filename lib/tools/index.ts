@@ -59,6 +59,7 @@ import {
   DEFAULT_SHOPIFY_TOOL_CONFIG,
 } from './shopify-mcp-tool';
 import type { ShopifyMCPTools, ShopifyMCPConfig, ShopifyToolConfig } from './shopify-mcp-tool';
+import { DEFAULT_MODE_TOOL_CONFIG } from '@/types';
 
 // Re-export all tools and types
 export {
@@ -172,10 +173,10 @@ export interface ModeToolOptions {
  * Default is enabled if not specified
  */
 function isToolEnabled(config: ModeToolOptions | undefined, toolName: string): boolean {
-  if (!config) return true; // No config = all tools enabled
+  if (!config) return false;
   const toolConfig = config[toolName as keyof ModeToolOptions] as ToolEnabledConfig | undefined;
-  if (!toolConfig) return true; // No tool-specific config = enabled
-  return toolConfig.enabled !== false; // Explicitly check for false
+  if (!toolConfig) return false;
+  return toolConfig.enabled === true;
 }
 
 /**
@@ -184,39 +185,40 @@ function isToolEnabled(config: ModeToolOptions | undefined, toolName: string): b
  * Respects enabled/disabled settings from toolConfig
  */
 export function getToolsForMode(mode: string, toolConfig?: ModeToolOptions) {
+  const effectiveToolConfig = toolConfig || (DEFAULT_MODE_TOOL_CONFIG as ModeToolOptions);
   const universalTools = getUniversalTools();
   
   // Build tools based on configuration, filtering out disabled tools
   const tools: Record<string, unknown> = {};
   
   // Add universal tools only if enabled
-  if (isToolEnabled(toolConfig, 'create_artifact')) {
+  if (isToolEnabled(effectiveToolConfig, 'create_artifact')) {
     tools.create_artifact = universalTools.create_artifact;
   }
-  if (isToolEnabled(toolConfig, 'create_conversation')) {
+  if (isToolEnabled(effectiveToolConfig, 'create_conversation')) {
     tools.create_conversation = universalTools.create_conversation;
   }
-  if (isToolEnabled(toolConfig, 'create_bulk_conversations')) {
+  if (isToolEnabled(effectiveToolConfig, 'create_bulk_conversations')) {
     tools.create_bulk_conversations = universalTools.create_bulk_conversations;
   }
-  if (isToolEnabled(toolConfig, 'suggest_action')) {
+  if (isToolEnabled(effectiveToolConfig, 'suggest_action')) {
     tools.suggest_action = universalTools.suggest_action;
   }
-  if (isToolEnabled(toolConfig, 'suggest_conversation_plan')) {
+  if (isToolEnabled(effectiveToolConfig, 'suggest_conversation_plan')) {
     tools.suggest_conversation_plan = universalTools.suggest_conversation_plan;
   }
-  if (isToolEnabled(toolConfig, 'invoke_agent')) {
+  if (isToolEnabled(effectiveToolConfig, 'invoke_agent')) {
     tools.invoke_agent = universalTools.invoke_agent;
   }
   
   // Add image generation if enabled
-  if (toolConfig?.generate_image?.enabled) {
+  if (effectiveToolConfig?.generate_image?.enabled) {
     tools.generate_image = _createImageGenerationTool({
-      defaultModel: toolConfig.generate_image.default_model,
-      defaultSize: toolConfig.generate_image.default_size as '1024x1024' | '1024x1792' | '1792x1024' | undefined,
-      defaultStyle: toolConfig.generate_image.default_style,
-      maxImages: toolConfig.generate_image.max_images,
-      allowedModels: toolConfig.generate_image.allowed_models,
+      defaultModel: effectiveToolConfig.generate_image.default_model,
+      defaultSize: effectiveToolConfig.generate_image.default_size as '1024x1024' | '1024x1792' | '1792x1024' | undefined,
+      defaultStyle: effectiveToolConfig.generate_image.default_style,
+      maxImages: effectiveToolConfig.generate_image.max_images,
+      allowedModels: effectiveToolConfig.generate_image.allowed_models,
     });
   }
   

@@ -109,9 +109,17 @@ export const getToolsForModel = (modelId: string, websiteUrl?: string) => {
 export const getProviderOptionsWithWebSearch = (
   modelId: string, 
   budgetTokens = 10000,
-  websiteUrl?: string
+  websiteUrl?: string,
+  webSearchConfig?: boolean | { enabled?: boolean }
 ) => {
+  const webSearchEnabled = typeof webSearchConfig === 'boolean'
+    ? webSearchConfig
+    : webSearchConfig?.enabled === true;
   const baseOptions = getProviderOptions(modelId, budgetTokens);
+
+  if (!webSearchEnabled) {
+    return baseOptions;
+  }
   
   // Add OpenAI web search configuration
   if (modelId.startsWith('openai/')) {

@@ -261,6 +261,7 @@ export interface SpecialistResult {
     id: string;
     kind: ArtifactKind;
     title: string;
+    toolInput?: Record<string, unknown>;
   }[];
 
   // Conversations created
