@@ -892,6 +892,26 @@ export interface ConversationWithStatus extends Conversation {
   aiProgress?: number; // 0-100 for progress bar
 }
 
+export interface EmailNotificationPreferences {
+  enabled: boolean;
+  comment_added: boolean;
+  comment_assigned: boolean;
+  comment_mention: boolean;
+  review_requested: boolean;
+  review_completed: boolean;
+  team_invite: boolean;
+}
+
+export interface PushNotificationPreferences {
+  enabled: boolean;
+  comment_added: boolean;
+  comment_assigned: boolean;
+  comment_mention: boolean;
+  review_requested: boolean;
+  review_completed: boolean;
+  team_invite: boolean;
+}
+
 // User Preferences
 export interface UserPreferences {
   id: string;
@@ -905,6 +925,8 @@ export interface UserPreferences {
   // AI Model preferences
   enabled_models: string[] | null; // null means all models enabled
   default_model: string | null;
+  email_notifications?: EmailNotificationPreferences | null;
+  push_notifications?: PushNotificationPreferences | null;
   created_at: string;
   updated_at: string;
 }

@@ -101,19 +101,19 @@ export const MobileBottomNav = memo(function MobileBottomNav({
         className
       )}
     >
-      <div className="flex items-center justify-around h-14 px-2">
+      <div className="flex items-center justify-around h-16 px-2">
         {navItems.map((item) => {
           const content = (
             <div
               className={cn(
                 'flex flex-col items-center justify-center',
-                'min-w-[56px] h-12',
+                'min-w-[56px] min-h-[44px] px-2',
                 'rounded-xl',
                 'transition-all duration-200',
                 'touch-manipulation',
                 'active:scale-95',
                 item.highlight
-                  ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/30 -mt-4'
+                  ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/30 -mt-5'
                   : item.isActive
                     ? 'text-blue-600 dark:text-blue-400'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
@@ -133,7 +133,7 @@ export const MobileBottomNav = memo(function MobileBottomNav({
               <Link
                 key={item.id}
                 href={item.href}
-                className="flex items-center justify-center"
+                className="flex items-center justify-center touch-target"
               >
                 {content}
               </Link>
@@ -144,7 +144,7 @@ export const MobileBottomNav = memo(function MobileBottomNav({
             <button
               key={item.id}
               onClick={item.onClick}
-              className="flex items-center justify-center"
+              className="flex items-center justify-center touch-target"
               aria-label={item.label}
             >
               {content}

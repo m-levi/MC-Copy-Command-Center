@@ -211,6 +211,24 @@ export function getDefaultPreferences(userId: string): UserPreferences {
     archived_conversations: [],
     enabled_models: null, // null means all models enabled
     default_model: null,
+    email_notifications: {
+      enabled: true,
+      comment_added: true,
+      comment_assigned: true,
+      comment_mention: true,
+      review_requested: true,
+      review_completed: true,
+      team_invite: true,
+    },
+    push_notifications: {
+      enabled: true,
+      comment_added: true,
+      comment_assigned: true,
+      comment_mention: true,
+      review_requested: true,
+      review_completed: true,
+      team_invite: true,
+    },
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };

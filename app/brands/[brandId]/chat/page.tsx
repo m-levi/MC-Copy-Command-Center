@@ -4922,6 +4922,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
             onStop={handleStopGeneration}
             disabled={false}
             isGenerating={sending}
+            mobileBottomOffset
             conversationId={currentConversation.id}
             brandId={brandId}
             mode={conversationMode}

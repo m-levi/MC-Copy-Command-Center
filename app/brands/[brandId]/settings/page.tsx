@@ -331,153 +331,249 @@ export default function SettingsPage({ params }: { params: Promise<{ brandId: st
     );
   }
 
+  const activeNavItem = navItems.find(item => item.id === activeSection);
+
   return (
-    <div className="flex h-full">
-      {/* Settings Sidebar */}
-      <aside 
-        className={cn(
-          'bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 flex flex-col',
-          sidebarCollapsed ? 'w-16' : 'w-64'
-        )}
-      >
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3">
-          <div className="space-y-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeSection === item.id;
-              
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveSection(item.id)}
-                  className={cn(
-                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left group',
-                    isActive
-                      ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
-                  )}
-                >
-                  <Icon className={cn(
-                    'w-5 h-5 flex-shrink-0',
-                    isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'
-                  )} />
-                  {!sidebarCollapsed && (
-                    <>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium truncate">{item.label}</span>
-                          {item.badge && (
-                            <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded">
-                              {item.badge}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <ChevronRight className={cn(
-                        'w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity',
-                        isActive && 'opacity-100'
-                      )} />
-                    </>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-
-        {/* Sidebar Footer */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-800">
-          {!sidebarCollapsed && (
-            <Link
-              href={`/brands/${brand.id}/brand-builder`}
-              className="flex items-center gap-2 w-full px-3 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              <Sparkles className="w-4 h-4" />
-              Brand Builder
-            </Link>
-          )}
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={cn(
-              'flex items-center justify-center w-full p-2 mt-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors',
-              sidebarCollapsed && 'mx-auto'
-            )}
-          >
-            <ChevronRight className={cn(
-              'w-5 h-5 text-gray-400 transition-transform',
-              sidebarCollapsed ? 'rotate-0' : 'rotate-180'
-            )} />
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-hidden flex flex-col">
-        {/* Top Bar */}
-        <header className="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800">
-          <div className="max-w-4xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                  {navItems.find(item => item.id === activeSection)?.label}
+    <div className="h-full">
+      {/* Mobile Layout */}
+      <main className="lg:hidden h-full overflow-hidden flex flex-col">
+        <header className="sticky top-0 z-20 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800">
+          <div className="px-4 py-3 space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate">
+                  {activeNavItem?.label}
                 </h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {navItems.find(item => item.id === activeSection)?.description}
+                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                  {activeNavItem?.description}
                 </p>
               </div>
-              
-              <div className="flex items-center gap-3">
-                {/* Save Status */}
-                {saveStatus !== 'idle' && (
-                  <div className={cn(
-                    'flex items-center gap-2 px-3 py-1.5 rounded-full text-sm',
-                    saveStatus === 'saving' && 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400',
-                    saveStatus === 'saved' && 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400',
-                    saveStatus === 'error' && 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
-                  )}>
-                    {saveStatus === 'saving' && (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Saving...</span>
-                      </>
-                    )}
-                    {saveStatus === 'saved' && (
-                      <>
-                        <Save className="w-4 h-4" />
-                        <span>Saved</span>
-                      </>
-                    )}
-                    {saveStatus === 'error' && (
-                      <>
-                        <AlertCircle className="w-4 h-4" />
-                        <span>Error</span>
-                      </>
-                    )}
-                  </div>
-                )}
 
-                {/* Export Button */}
+              <div className="flex items-center gap-2 flex-shrink-0">
                 <Button
                   variant="outline"
                   onClick={handleExport}
-                  className="shadow-sm"
+                  className="h-8 px-2.5 text-xs"
                 >
-                  <Download className="w-4 h-4 mr-2" />
+                  <Download className="w-3.5 h-3.5 mr-1" />
                   Export
                 </Button>
               </div>
             </div>
+
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide-mobile">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeSection === item.id;
+
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveSection(item.id)}
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+                      isActive
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{item.label}</span>
+                    {item.badge && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px]">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </header>
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-4xl mx-auto px-6 py-8">
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {saveStatus !== 'idle' && (
+            <div className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg text-xs mb-4',
+              saveStatus === 'saving' && 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400',
+              saveStatus === 'saved' && 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400',
+              saveStatus === 'error' && 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
+            )}>
+              {saveStatus === 'saving' && (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Saving changes...</span>
+                </>
+              )}
+              {saveStatus === 'saved' && (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>All changes saved</span>
+                </>
+              )}
+              {saveStatus === 'error' && (
+                <>
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Error saving changes</span>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="pb-6">
             {renderSection()}
           </div>
         </div>
       </main>
+
+      {/* Desktop Layout */}
+      <div className="hidden lg:flex h-full">
+        {/* Settings Sidebar */}
+        <aside 
+          className={cn(
+            'bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 flex flex-col',
+            sidebarCollapsed ? 'w-16' : 'w-64'
+          )}
+        >
+          {/* Navigation */}
+          <nav className="flex-1 overflow-y-auto py-4 px-3">
+            <div className="space-y-1">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeSection === item.id;
+                
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveSection(item.id)}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left group',
+                      isActive
+                        ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                    )}
+                  >
+                    <Icon className={cn(
+                      'w-5 h-5 flex-shrink-0',
+                      isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'
+                    )} />
+                    {!sidebarCollapsed && (
+                      <>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate">{item.label}</span>
+                            {item.badge && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded">
+                                {item.badge}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className={cn(
+                          'w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity',
+                          isActive && 'opacity-100'
+                        )} />
+                      </>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+
+          {/* Sidebar Footer */}
+          <div className="p-4 border-t border-gray-200 dark:border-gray-800">
+            {!sidebarCollapsed && (
+              <Link
+                href={`/brands/${brand.id}/brand-builder`}
+                className="flex items-center gap-2 w-full px-3 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                <Sparkles className="w-4 h-4" />
+                Brand Builder
+              </Link>
+            )}
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className={cn(
+                'flex items-center justify-center w-full p-2 mt-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors',
+                sidebarCollapsed && 'mx-auto'
+              )}
+            >
+              <ChevronRight className={cn(
+                'w-5 h-5 text-gray-400 transition-transform',
+                sidebarCollapsed ? 'rotate-0' : 'rotate-180'
+              )} />
+            </button>
+          </div>
+        </aside>
+
+        {/* Main Content */}
+        <main className="flex-1 overflow-hidden flex flex-col">
+          {/* Top Bar */}
+          <header className="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800">
+            <div className="max-w-4xl mx-auto px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                    {activeNavItem?.label}
+                  </h1>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {activeNavItem?.description}
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  {/* Save Status */}
+                  {saveStatus !== 'idle' && (
+                    <div className={cn(
+                      'flex items-center gap-2 px-3 py-1.5 rounded-full text-sm',
+                      saveStatus === 'saving' && 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400',
+                      saveStatus === 'saved' && 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400',
+                      saveStatus === 'error' && 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
+                    )}>
+                      {saveStatus === 'saving' && (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      )}
+                      {saveStatus === 'saved' && (
+                        <>
+                          <Save className="w-4 h-4" />
+                          <span>Saved</span>
+                        </>
+                      )}
+                      {saveStatus === 'error' && (
+                        <>
+                          <AlertCircle className="w-4 h-4" />
+                          <span>Error</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Export Button */}
+                  <Button
+                    variant="outline"
+                    onClick={handleExport}
+                    className="shadow-sm"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Export
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="max-w-4xl mx-auto px-6 py-8">
+              {renderSection()}
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

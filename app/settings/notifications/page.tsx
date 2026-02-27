@@ -18,7 +18,27 @@ interface EmailNotificationSettings {
   team_invite: boolean;
 }
 
+interface PushNotificationSettings {
+  enabled: boolean;
+  comment_added: boolean;
+  comment_assigned: boolean;
+  comment_mention: boolean;
+  review_requested: boolean;
+  review_completed: boolean;
+  team_invite: boolean;
+}
+
 const defaultSettings: EmailNotificationSettings = {
+  enabled: true,
+  comment_added: true,
+  comment_assigned: true,
+  comment_mention: true,
+  review_requested: true,
+  review_completed: true,
+  team_invite: true,
+};
+
+const defaultPushSettings: PushNotificationSettings = {
   enabled: true,
   comment_added: true,
   comment_assigned: true,
@@ -69,8 +89,13 @@ const notificationTypes = [
 
 export default function NotificationsPage() {
   const [settings, setSettings] = useState<EmailNotificationSettings>(defaultSettings);
+  const [pushSettings, setPushSettings] = useState<PushNotificationSettings>(defaultPushSettings);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pushPermission, setPushPermission] = useState<NotificationPermission>('default');
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushEndpoint, setPushEndpoint] = useState<string | null>(null);
+  const [pushActionLoading, setPushActionLoading] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
   const [testMessage, setTestMessage] = useState('');
@@ -78,7 +103,10 @@ export default function NotificationsPage() {
   const router = useRouter();
 
   useEffect(() => {
-    loadSettings();
+    void loadSettings();
+    void loadPushSubscriptionStatus();
+    // Run once on mount to hydrate preference and subscription state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadSettings = async () => {
@@ -98,6 +126,9 @@ export default function NotificationsPage() {
       if (data.email_notifications) {
         setSettings({ ...defaultSettings, ...data.email_notifications });
       }
+      if (data.push_notifications) {
+        setPushSettings({ ...defaultPushSettings, ...data.push_notifications });
+      }
     } catch (error) {
       console.error('Error loading notification settings:', error);
       toast.error(getErrorMessage(error));
@@ -106,7 +137,31 @@ export default function NotificationsPage() {
     }
   };
 
-  const saveSettings = async (newSettings: EmailNotificationSettings) => {
+  const loadPushSubscriptionStatus = async () => {
+    if (typeof window === 'undefined') return;
+
+    const supportsPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    if (!supportsPush) return;
+
+    setPushPermission(Notification.permission);
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+
+      if (subscription) {
+        setPushSubscribed(true);
+        setPushEndpoint(subscription.endpoint);
+      } else {
+        setPushSubscribed(false);
+        setPushEndpoint(null);
+      }
+    } catch (error) {
+      console.error('Error checking push subscription:', error);
+    }
+  };
+
+  const saveEmailSettings = async (newSettings: EmailNotificationSettings) => {
     setSaving(true);
     try {
       const response = await fetch('/api/user-preferences', {
@@ -130,10 +185,136 @@ export default function NotificationsPage() {
     }
   };
 
+  const savePushSettings = async (newSettings: PushNotificationSettings) => {
+    setSaving(true);
+    try {
+      const response = await fetch('/api/user-preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          push_notifications: newSettings,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to save push preferences');
+      toast.success('Push preferences saved');
+    } catch (error) {
+      console.error('Error saving push settings:', error);
+      toast.error(getErrorMessage(error));
+      loadSettings();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  };
+
+  const handleSubscribeToPush = async () => {
+    if (typeof window === 'undefined') return;
+
+    const supportsPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    if (!supportsPush) {
+      toast.error('Push notifications are not supported in this browser.');
+      return;
+    }
+
+    setPushActionLoading(true);
+    try {
+      const permission = await Notification.requestPermission();
+      setPushPermission(permission);
+
+      if (permission !== 'granted') {
+        toast.error('Push permission was not granted.');
+        return;
+      }
+
+      const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidPublicKey) {
+        toast.error('Push notifications are not configured yet.');
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        });
+      }
+
+      const response = await fetch('/api/push/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscription: subscription.toJSON(),
+          deviceLabel: navigator.platform,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to register push subscription');
+      }
+
+      const updatedPushSettings = { ...pushSettings, enabled: true };
+      setPushSettings(updatedPushSettings);
+      await savePushSettings(updatedPushSettings);
+
+      setPushSubscribed(true);
+      setPushEndpoint(subscription.endpoint);
+      toast.success('Push notifications enabled');
+    } catch (error) {
+      console.error('Error enabling push notifications:', error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      setPushActionLoading(false);
+    }
+  };
+
+  const handleUnsubscribeFromPush = async () => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    setPushActionLoading(true);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      const endpoint = subscription?.endpoint || pushEndpoint;
+
+      if (subscription) {
+        await subscription.unsubscribe();
+      }
+
+      await fetch('/api/push/subscriptions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint }),
+      });
+
+      setPushSubscribed(false);
+      setPushEndpoint(null);
+      toast.success('Push notifications disabled');
+    } catch (error) {
+      console.error('Error disabling push notifications:', error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      setPushActionLoading(false);
+    }
+  };
+
   const toggleMasterSwitch = async () => {
     const newSettings = { ...settings, enabled: !settings.enabled };
     setSettings(newSettings);
-    await saveSettings(newSettings);
+    await saveEmailSettings(newSettings);
   };
 
   const sendTestEmail = async () => {
@@ -173,7 +354,21 @@ export default function NotificationsPage() {
     
     const newSettings = { ...settings, [key]: !settings[key] };
     setSettings(newSettings);
-    await saveSettings(newSettings);
+    await saveEmailSettings(newSettings);
+  };
+
+  const togglePushMasterSwitch = async () => {
+    const newSettings = { ...pushSettings, enabled: !pushSettings.enabled };
+    setPushSettings(newSettings);
+    await savePushSettings(newSettings);
+  };
+
+  const togglePushSetting = async (key: keyof PushNotificationSettings) => {
+    if (key === 'enabled') return togglePushMasterSwitch();
+
+    const newSettings = { ...pushSettings, [key]: !pushSettings[key] };
+    setPushSettings(newSettings);
+    await savePushSettings(newSettings);
   };
 
   if (loading) {
@@ -266,6 +461,111 @@ export default function NotificationsPage() {
             </button>
           </div>
         ))}
+      </div>
+
+      {/* Push Notifications */}
+      <div className="mt-10">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+          Push Notifications
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Receive instant browser notifications when you&apos;re away from the app.
+        </p>
+
+        <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30 rounded-xl border border-blue-100 dark:border-blue-900/50">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h4 className="font-semibold text-gray-900 dark:text-gray-100">
+                Device push status
+              </h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Permission: <span className="font-medium">{pushPermission}</span>{' '}
+                {pushSubscribed ? '• Subscribed on this device' : '• Not subscribed on this device'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={togglePushMasterSwitch}
+                disabled={saving}
+                className={`relative w-14 h-7 rounded-full transition-colors duration-200 ${
+                  pushSettings.enabled
+                    ? 'bg-blue-500'
+                    : 'bg-gray-300 dark:bg-gray-700'
+                } ${saving ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title="Toggle all push notification types"
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-sm transition-transform duration-200 ${
+                    pushSettings.enabled ? 'translate-x-7' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+              {pushSubscribed ? (
+                <button
+                  onClick={handleUnsubscribeFromPush}
+                  disabled={pushActionLoading}
+                  className="px-4 py-2 rounded-lg font-medium text-sm bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {pushActionLoading ? 'Updating...' : 'Disable Push'}
+                </button>
+              ) : (
+                <button
+                  onClick={handleSubscribeToPush}
+                  disabled={pushActionLoading}
+                  className="px-4 py-2 rounded-lg font-medium text-sm bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {pushActionLoading ? 'Enabling...' : 'Enable Push'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {pushPermission === 'denied' && (
+            <p className="text-sm text-amber-700 dark:text-amber-300 mt-3">
+              Browser permission is blocked. Enable notifications in your browser/site settings.
+            </p>
+          )}
+        </div>
+
+        <div className={`space-y-4 transition-opacity duration-200 ${!pushSettings.enabled || !pushSubscribed ? 'opacity-50 pointer-events-none' : ''}`}>
+          <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">
+            Push Notification Types
+          </h4>
+
+          {notificationTypes.map((type) => (
+            <div
+              key={`push-${type.key}`}
+              className="flex items-center justify-between p-4 bg-white dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{type.icon}</span>
+                <div>
+                  <h4 className="font-medium text-gray-900 dark:text-gray-100">
+                    {type.title}
+                  </h4>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {type.description}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => togglePushSetting(type.key)}
+                disabled={saving || !pushSettings.enabled || !pushSubscribed}
+                className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${
+                  pushSettings[type.key]
+                    ? 'bg-blue-500'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                } ${saving ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200 ${
+                    pushSettings[type.key] ? 'translate-x-6' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Test Email Section */}

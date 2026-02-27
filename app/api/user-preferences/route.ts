@@ -3,6 +3,26 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+const defaultEmailNotifications = {
+  enabled: true,
+  comment_added: true,
+  comment_assigned: true,
+  comment_mention: true,
+  review_requested: true,
+  review_completed: true,
+  team_invite: true,
+};
+
+const defaultPushNotifications = {
+  enabled: true,
+  comment_added: true,
+  comment_assigned: true,
+  comment_mention: true,
+  review_requested: true,
+  review_completed: true,
+  team_invite: true,
+};
+
 /**
  * GET /api/user-preferences
  * Fetch user preferences
@@ -33,7 +53,9 @@ export async function GET() {
           pinned_conversations: [],
           archived_conversations: [],
           enabled_models: null,
-          default_model: null
+          default_model: null,
+          email_notifications: defaultEmailNotifications,
+          push_notifications: defaultPushNotifications,
         });
       }
       throw error;
@@ -73,10 +95,12 @@ export async function POST(request: Request) {
       'pinned_conversations',
       'archived_conversations',
       'enabled_models',
-      'default_model'
+      'default_model',
+      'email_notifications',
+      'push_notifications',
     ];
 
-    const updates: any = {
+    const updates: Record<string, unknown> = {
       user_id: user.id
     };
 

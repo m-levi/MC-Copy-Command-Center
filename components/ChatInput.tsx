@@ -28,6 +28,8 @@ interface ChatInputProps {
   onStop?: () => void;
   disabled?: boolean;
   isGenerating?: boolean;
+  className?: string;
+  mobileBottomOffset?: boolean;
   conversationId?: string | null;
   brandId?: string | null;
   mode?: ConversationMode;
@@ -63,6 +65,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   onStop, 
   disabled, 
   isGenerating, 
+  className,
+  mobileBottomOffset = false,
   conversationId,
   brandId,
   mode = 'email_copy',
@@ -90,6 +94,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         onStop={onStop}
         disabled={disabled}
         isGenerating={isGenerating}
+        className={className}
+        mobileBottomOffset={mobileBottomOffset}
         conversationId={conversationId}
         brandId={brandId}
         mode={mode}
@@ -121,6 +127,8 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
   onStop, 
   disabled, 
   isGenerating, 
+  className,
+  mobileBottomOffset = false,
   conversationId,
   brandId,
   mode = 'email_copy',
@@ -514,7 +522,13 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
   };
 
   return (
-    <div className="relative px-4 sm:px-6 lg:px-8 pt-0 pb-4 sm:pb-6 bg-transparent">
+    <div
+      className={cn(
+        'relative px-4 sm:px-6 lg:px-8 pt-0 pb-4 sm:pb-6 bg-transparent',
+        mobileBottomOffset && 'pb-mobile-nav',
+        className
+      )}
+    >
       <div className="max-w-5xl mx-auto relative">
         
         {/* Slash Command Menu */}

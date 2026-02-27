@@ -190,16 +190,16 @@ export default function EditDocumentPage({ params }: { params: Promise<{ brandId
 
   if (isLoading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+      <div className="h-dvh min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
         <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col bg-white dark:bg-gray-950">
+    <div className="h-dvh min-h-screen flex flex-col bg-white dark:bg-gray-950">
       {/* Top Bar */}
-      <div className="sticky top-0 z-50 flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-950/80 backdrop-blur-xl">
+      <div className="sticky top-0 z-50 flex items-center justify-between gap-3 px-3 sm:px-6 py-3 border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-950/80 backdrop-blur-xl">
         <div className="flex items-center gap-4">
           <button
             onClick={() => router.push(`/brands/${brandId}/documents`)}
@@ -238,7 +238,7 @@ export default function EditDocumentPage({ params }: { params: Promise<{ brandId
           )}
 
           {/* Visibility Selector */}
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
             {visibilityOptions.map((opt) => {
               const Icon = opt.icon;
               return (
@@ -253,7 +253,7 @@ export default function EditDocumentPage({ params }: { params: Promise<{ brandId
                   )}
                 >
                   <Icon className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{opt.label}</span>
+                    <span className="hidden md:inline">{opt.label}</span>
                 </button>
               );
             })}
@@ -272,14 +272,14 @@ export default function EditDocumentPage({ params }: { params: Promise<{ brandId
 
       {/* Editor Container */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-8 py-12">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
           {/* Title Input */}
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Untitled Document"
-            className="w-full px-0 py-3 mb-6 text-4xl font-bold bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-700 focus:outline-none focus:ring-0"
+            className="w-full px-0 py-3 mb-6 text-2xl sm:text-4xl font-bold bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-700 focus:outline-none focus:ring-0"
           />
 
           {/* AI-Generated Metadata */}
@@ -321,7 +321,7 @@ export default function EditDocumentPage({ params }: { params: Promise<{ brandId
       </div>
 
       {/* Keyboard Shortcuts Helper */}
-      <div className="fixed bottom-6 right-6 px-4 py-2 bg-gray-900/90 dark:bg-gray-800/90 text-white rounded-lg text-xs backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
+      <div className="hidden sm:block fixed bottom-6 right-6 px-4 py-2 bg-gray-900/90 dark:bg-gray-800/90 text-white rounded-lg text-xs backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
         <div className="flex items-center gap-4">
           <span><kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">⌘S</kbd> Save</span>
           <span><kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">⌘B</kbd> Bold</span>

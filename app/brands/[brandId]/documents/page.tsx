@@ -158,6 +158,7 @@ export default function DocumentsPage({ params }: { params: Promise<{ brandId: s
   const [showLinkAdder, setShowLinkAdder] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [showAddMenu, setShowAddMenu] = useState(false);
   const [sharingDocument, setSharingDocument] = useState<BrandDocumentV2 | null>(null);
   
   // Selection
@@ -268,6 +269,21 @@ export default function DocumentsPage({ params }: { params: Promise<{ brandId: s
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
+
+  useEffect(() => {
+    if (!showAddMenu) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowAddMenu(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showAddMenu]);
 
   // Handle file upload
   const handleFileUpload = async (files: Array<{
@@ -904,50 +920,74 @@ export default function DocumentsPage({ params }: { params: Promise<{ brandId: s
                   </div>
                   
                   {/* Add Button */}
-                  <div className="relative group flex-shrink-0">
-                    <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-sm transition-colors text-sm">
+                  <div className="relative flex-shrink-0">
+                    <button
+                      onClick={() => setShowAddMenu((prev) => !prev)}
+                      className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-sm transition-colors text-sm"
+                    >
                       <Plus className="w-4 h-4" />
                       <span className="hidden sm:inline">Add</span>
                     </button>
                     
-                    <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                      <button
-                        onClick={() => setShowUploader(true)}
-                        className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      >
-                        <Upload className="w-4 h-4" />
-                        Upload Files
-                      </button>
-                      <button
-                        onClick={() => router.push(`/brands/${brandId}/documents/new`)}
-                        className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      >
-                        <FileText className="w-4 h-4" />
-                        Create Document
-                      </button>
-                      <button
-                        onClick={() => setShowLinkAdder(true)}
-                        className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      >
-                        <LinkIcon className="w-4 h-4" />
-                        Add Link
-                      </button>
-                      <div className="border-t border-gray-200 dark:border-gray-700" />
-                      <button
-                        onClick={() => setShowDrivePicker(true)}
-                        className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      >
-                        <Cloud className="w-4 h-4" />
-                        Import from Google Drive
-                      </button>
-                    </div>
+                    {showAddMenu && (
+                      <>
+                        <button
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowAddMenu(false)}
+                          aria-label="Close add menu"
+                        />
+                        <div className="absolute right-0 top-full mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden z-50">
+                          <button
+                            onClick={() => {
+                              setShowUploader(true);
+                              setShowAddMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            <Upload className="w-4 h-4" />
+                            Upload Files
+                          </button>
+                          <button
+                            onClick={() => {
+                              router.push(`/brands/${brandId}/documents/new`);
+                              setShowAddMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            <FileText className="w-4 h-4" />
+                            Create Document
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowLinkAdder(true);
+                              setShowAddMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            <LinkIcon className="w-4 h-4" />
+                            Add Link
+                          </button>
+                          <div className="border-t border-gray-200 dark:border-gray-700" />
+                          <button
+                            onClick={() => {
+                              setShowDrivePicker(true);
+                              setShowAddMenu(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            <Cloud className="w-4 h-4" />
+                            Import from Google Drive
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
                 
                 {/* Bottom Row: Search and View Options */}
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   {/* Search */}
-                  <div className="relative flex-1 max-w-md">
+                  <div className="relative flex-1 min-w-[180px] max-w-md">
                     {(searchQuery && searchQuery !== debouncedSearchQuery) || isSearching ? (
                       <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 animate-spin" />
                     ) : (
