@@ -247,9 +247,6 @@ export interface ExtendedToolsConfig {
   shopifyConfig?: ShopifyToolConfig;
 }
 
-// Re-export ModeToolOptions for use in chat route
-export type { ToolEnabledConfig };
-
 /**
  * Get all tools for a mode including Shopify MCP tools
  * This is the main function to use in the chat API for comprehensive tool loading
