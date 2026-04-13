@@ -4,6 +4,9 @@ import { useEffect, useState, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +20,6 @@ function ConfirmPageContent() {
   useEffect(() => {
     const confirmEmail = async () => {
       try {
-        // Get the token hash from the URL
         const token_hash = searchParams.get('token_hash');
         const type = searchParams.get('type');
 
@@ -27,7 +29,6 @@ function ConfirmPageContent() {
           return;
         }
 
-        // Verify the OTP
         const { error } = await supabase.auth.verifyOtp({
           token_hash,
           type: type as any,
@@ -43,7 +44,6 @@ function ConfirmPageContent() {
         setStatus('success');
         setMessage('Email confirmed successfully!');
 
-        // Redirect to home after a delay
         setTimeout(() => {
           router.push('/');
           router.refresh();
@@ -59,89 +59,51 @@ function ConfirmPageContent() {
   }, [searchParams, router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-950 animate-in fade-in duration-300">
-      <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-md border border-gray-200 dark:border-gray-700 text-center">
-        {status === 'loading' && (
-          <>
-            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              Confirming Your Email
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">
-              Please wait while we verify your email address...
-            </p>
-          </>
-        )}
+    <div className="min-h-screen flex items-center justify-center bg-background p-6">
+      <Card className="w-full max-w-md text-center">
+        <CardContent className="space-y-4">
+          {status === 'loading' && (
+            <>
+              <Loader2 className="size-16 mx-auto text-muted-foreground animate-spin" />
+              <h1 className="text-2xl font-bold">Confirming Your Email</h1>
+              <p className="text-muted-foreground">
+                Please wait while we verify your email address...
+              </p>
+            </>
+          )}
 
-        {status === 'success' && (
-          <>
-            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg
-                className="w-8 h-8 text-green-600 dark:text-green-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              Email Confirmed!
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              {message}
-            </p>
-            <p className="text-sm text-gray-500 dark:text-gray-500">
-              Redirecting you to the dashboard...
-            </p>
-          </>
-        )}
+          {status === 'success' && (
+            <>
+              <div className="size-16 mx-auto rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                <CheckCircle2 className="size-8 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <h1 className="text-2xl font-bold">Email Confirmed!</h1>
+              <p className="text-muted-foreground">{message}</p>
+              <p className="text-sm text-muted-foreground">
+                Redirecting you to the dashboard...
+              </p>
+            </>
+          )}
 
-        {status === 'error' && (
-          <>
-            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg
-                className="w-8 h-8 text-red-600 dark:text-red-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              Confirmation Failed
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              {message}
-            </p>
-            <div className="flex gap-3 justify-center">
-              <Link
-                href="/login"
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
-              >
-                Go to Login
-              </Link>
-              <Link
-                href="/forgot-password"
-                className="px-6 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-semibold rounded-lg transition-colors"
-              >
-                Reset Password
-              </Link>
-            </div>
-          </>
-        )}
-      </div>
+          {status === 'error' && (
+            <>
+              <div className="size-16 mx-auto rounded-full bg-destructive/10 flex items-center justify-center">
+                <XCircle className="size-8 text-destructive" />
+              </div>
+              <h1 className="text-2xl font-bold">Confirmation Failed</h1>
+              <p className="text-muted-foreground">{message}</p>
+              <div className="flex gap-3 justify-center">
+                <Button asChild>
+                  <Link href="/login">Go to Login</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/forgot-password">Reset Password</Link>
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -150,16 +112,14 @@ export default function ConfirmPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-950 animate-in fade-in duration-300">
-          <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-lg w-full max-w-md border border-gray-200 dark:border-gray-700 text-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              Loading...
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">
-              Please wait...
-            </p>
-          </div>
+        <div className="min-h-screen flex items-center justify-center bg-background p-6">
+          <Card className="w-full max-w-md text-center">
+            <CardContent className="space-y-4">
+              <Loader2 className="size-16 mx-auto text-muted-foreground animate-spin" />
+              <h1 className="text-2xl font-bold">Loading...</h1>
+              <p className="text-muted-foreground">Please wait...</p>
+            </CardContent>
+          </Card>
         </div>
       }
     >
@@ -167,5 +127,3 @@ export default function ConfirmPage() {
     </Suspense>
   );
 }
-
-
