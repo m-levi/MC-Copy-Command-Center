@@ -483,7 +483,7 @@ const ChatMessageModern = memo(function ChatMessageModern({
 
   // Render content with inline highlights
   const renderContent = () => {
-    const content = stripCampaignTags(messageContent || 'No content');
+    const content = stripCampaignTags(messageContent || "I wasn't able to generate a response. Please try again.");
     
     // If we have highlights, wrap them
     if (inlineHighlights.length > 0) {

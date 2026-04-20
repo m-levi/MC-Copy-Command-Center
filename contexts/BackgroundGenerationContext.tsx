@@ -331,7 +331,7 @@ export function BackgroundGenerationProvider({ children }: { children: React.Rea
       state.status = 'finalizing';
       state.progress = 100;
       state.completedAt = new Date();
-      
+
       // Get user for DB insert
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -342,6 +342,15 @@ export function BackgroundGenerationProvider({ children }: { children: React.Rea
       const metadata: Record<string, unknown> = {};
       if (productLinks.length > 0) {
         metadata.productLinks = productLinks;
+      }
+
+      // Never persist a blank assistant message — that renders as "No content"
+      // in the chat. Fall back to a helpful placeholder so the user can retry.
+      if (!fullContent.trim()) {
+        fullContent = fullThinking.trim()
+          ? "I thought through your request but didn't produce a final response. Please try again or rephrase."
+          : "I wasn't able to generate a response. Please try again.";
+        state.content = fullContent;
       }
 
       // Save AI message to database
