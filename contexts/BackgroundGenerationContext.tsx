@@ -4,6 +4,7 @@ import React, { createContext, useContext, useCallback, useRef, useState, useEff
 import { Message, AIStatus, Brand, ConversationMode, EmailType, FlowType, ProductLink } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 import { logger } from '@/lib/logger';
+import { CHAT_FALLBACKS } from '@/lib/chat/fallbacks';
 import toast from 'react-hot-toast';
 
 // Types for background generation tracking
@@ -348,8 +349,8 @@ export function BackgroundGenerationProvider({ children }: { children: React.Rea
       // in the chat. Fall back to a helpful placeholder so the user can retry.
       if (!fullContent.trim()) {
         fullContent = fullThinking.trim()
-          ? "I thought through your request but didn't produce a final response. Please try again or rephrase."
-          : "I wasn't able to generate a response. Please try again.";
+          ? CHAT_FALLBACKS.thinkingOnly
+          : CHAT_FALLBACKS.sendRetry;
         state.content = fullContent;
       }
 
