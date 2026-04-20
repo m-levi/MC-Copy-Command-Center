@@ -16,6 +16,8 @@ export const MODELS = {
   CLAUDE_HAIKU: 'anthropic/claude-haiku-4.5',
 
   // OpenAI models - use '-thinking' variants for reasoning output
+  GPT_5_4: 'openai/gpt-5.4-thinking',         // Latest, streams reasoning
+  GPT_5_4_INSTANT: 'openai/gpt-5.4-instant',  // Latest, fast (no reasoning)
   GPT_5_1: 'openai/gpt-5.1-thinking',         // Streams reasoning/thinking
   GPT_5_1_INSTANT: 'openai/gpt-5.1-instant',  // Fast, no reasoning stream
   GPT_5_1_MINI: 'openai/gpt-5-mini',          // Smaller model

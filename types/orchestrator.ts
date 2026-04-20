@@ -306,7 +306,7 @@ export const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
   generation: 'anthropic/claude-sonnet-4.6',
   analysis: 'anthropic/claude-sonnet-4.6',
   quick: 'anthropic/claude-haiku-4.5',
-  vision: 'openai/gpt-5.1-thinking',
+  vision: 'openai/gpt-5.4-thinking',
 };
 
 // ============================================================================

@@ -85,7 +85,7 @@ export function getModelForSpecialist(
     generation: MODELS.CLAUDE_SONNET_4_6,
     analysis: MODELS.CLAUDE_SONNET_4_6,
     quick: MODELS.CLAUDE_HAIKU,
-    vision: MODELS.GPT_5_1,
+    vision: MODELS.GPT_5_4,
   };
 
   const effectiveRouting = { ...defaultRouting, ...routing };

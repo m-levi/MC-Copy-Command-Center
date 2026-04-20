@@ -33,7 +33,17 @@ export const AI_MODELS: AIModelOption[] = [
     name: 'Claude Haiku 4.5',
     provider: 'anthropic',
   },
-  // OpenAI models
+  // OpenAI models (newest first)
+  {
+    id: MODELS.GPT_5_4,
+    name: 'GPT 5.4',
+    provider: 'openai',
+  },
+  {
+    id: MODELS.GPT_5_4_INSTANT,
+    name: 'GPT 5.4 Instant',
+    provider: 'openai',
+  },
   {
     id: MODELS.GPT_5_1,
     name: 'GPT 5.1',
