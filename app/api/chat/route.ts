@@ -1464,20 +1464,31 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
 
           // Safety net: if the model finished without emitting any visible text
           // (e.g. it only called tools, or extended thinking timed out), send a
-          // human-readable fallback so the message isn't saved blank — which
-          // was rendering as "No content" in the chat.
-          // Skip when the client cancelled upstream — we've already received
-          // 'abort' and there's nothing useful to say.
-          const clientAborted = req.signal?.aborted === true;
-          if (!fullText.trim() && !clientAborted) {
+          // human-readable fallback so the message isn't saved blank.
+          //
+          // We used to skip this whenever req.signal.aborted was true, but Edge
+          // runtime was reporting spurious aborts for long streams — users got
+          // thinking content with no text and the client's "I thought through
+          // your request…" guard would then be the saved message. Always emit
+          // the fallback: if the client really disconnected, the write is a
+          // no-op; if it's still listening, it gets a usable message.
+          if (!fullText.trim()) {
             const fallbackText = createdArtifactSummaries.length > 0
               ? buildArtifactCreatedFallback(createdArtifactSummaries)
               : CHAT_FALLBACKS.streamProducedNothing;
             fullText = fallbackText;
-            sendMessage('text', { content: fallbackText });
-            logger.warn('[Chat API] Emitted fallback text (stream produced no visible content)');
-          } else if (!fullText.trim() && clientAborted) {
-            logger.log('[Chat API] Stream was cancelled by client — skipping fallback text');
+            logger.warn('[Chat API] Stream produced no visible text — emitting fallback', {
+              reasoningLength: fullReasoning.length,
+              artifactsCreated: createdArtifactSummaries.length,
+              signalAborted: req.signal?.aborted === true,
+            });
+            try {
+              sendMessage('text', { content: fallbackText });
+            } catch (err) {
+              // If the underlying stream is already closed, swallow — the
+              // fallback was best-effort anyway.
+              logger.warn('[Chat API] Could not enqueue fallback text (stream closed):', err);
+            }
           }
 
           // NOTE: Fallback artifact detection removed - if AI doesn't explicitly use
