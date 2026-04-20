@@ -1417,20 +1417,41 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                 sendMessage('thinking_start', {});
                 sendMessage('status', { status: 'thinking' });
                 break;
-                
+
               case 'reasoning-end':
                 if (fullReasoning) {
                   sendMessage('thinking_end', {});
                 }
                 break;
-                
-              case 'finish':
-                logger.log('[Chat API] Stream finished', { 
-                  textLength: fullText.length,
-                  reasoningLength: fullReasoning.length 
+
+              // AI SDK v6 emits tool-error separately from the 'error' event
+              // when an individual tool.execute throws. Surface it so the UI
+              // can show a useful failure rather than sitting on empty text.
+              case 'tool-error': {
+                const erroredPart = part as { toolName?: string; error?: unknown };
+                const toolErr = erroredPart.error;
+                const toolErrMessage =
+                  toolErr instanceof Error ? toolErr.message : String(toolErr ?? 'Unknown tool error');
+                logger.error('[Chat API] Tool error:', erroredPart.toolName, toolErrMessage);
+                sendMessage('tool_use', { tool: erroredPart.toolName, status: 'end' });
+                sendMessage('error', {
+                  error: `Tool ${erroredPart.toolName || 'call'} failed: ${toolErrMessage}`,
                 });
                 break;
-                
+              }
+
+              // AI SDK v6 emits 'abort' when the stream is cancelled upstream.
+              case 'abort':
+                logger.warn('[Chat API] Stream aborted upstream');
+                break;
+
+              case 'finish':
+                logger.log('[Chat API] Stream finished', {
+                  textLength: fullText.length,
+                  reasoningLength: fullReasoning.length,
+                });
+                break;
+
               case 'error':
                 logger.error('[Chat API] Stream error:', part.error);
                 sendMessage('error', { error: String(part.error) });

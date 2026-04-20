@@ -814,12 +814,17 @@ export type QuickAction =
 
 // AI Models - Using AI Gateway model identifiers (format: provider/model-name)
 // See: https://sdk.vercel.ai/docs/ai-sdk-core/ai-gateway
-export type AIModel = 
-  // Anthropic models
+export type AIModel =
+  // Anthropic models (newest first)
+  | 'anthropic/claude-opus-4.7'
+  | 'anthropic/claude-opus-4.6'
+  | 'anthropic/claude-sonnet-4.6'
   | 'anthropic/claude-sonnet-4.5'
   | 'anthropic/claude-opus-4.5'
   | 'anthropic/claude-haiku-4.5'
   // OpenAI models - '-thinking' variants stream reasoning
+  | 'openai/gpt-5.4-thinking'
+  | 'openai/gpt-5.4-instant'
   | 'openai/gpt-5.1-thinking'
   | 'openai/gpt-5.1-instant'
   | 'openai/gpt-5-mini'
@@ -829,6 +834,8 @@ export type AIModel =
   | 'openai/o3-mini'
   | 'openai/o4-mini'
   // Google models
+  | 'google/gemini-3.1-pro'
+  | 'google/gemini-3.1-flash'
   | 'google/gemini-3-pro'
   | 'google/gemini-3-flash'
   | 'google/gemini-2.5-pro'
