@@ -3565,6 +3565,10 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       let finalThinking = ''; // Final parsed thinking content
       let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'other';
       let finalContent = ''; // Final response content (email or clarification)
+      // Captured if the server emits a 'error' stream event. If set, we abort
+      // the normal save path and surface the error rather than silently saving
+      // an empty / thinking-only message.
+      let streamErrorMessage: string | null = null;
       const CHECKPOINT_INTERVAL = 100; // Create checkpoint every 100 chunks
       
       // Track artifacts created during streaming (for tool-call-only responses)
@@ -3875,6 +3879,17 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                     ));
                     break;
 
+                  case 'error':
+                    // Server-side stream error. Capture it so we skip the happy-
+                    // path save below — otherwise a thinking-only transcript
+                    // would be persisted with our "I thought through your
+                    // request…" fallback, hiding the real failure from the user.
+                    streamErrorMessage = typeof message.error === 'string'
+                      ? message.error
+                      : 'The AI service returned an error. Please try again.';
+                    logger.error('[Stream] Server emitted error event:', streamErrorMessage);
+                    break;
+
                   default:
                     logger.warn('[Stream] Unknown message type:', message.type);
                 }
@@ -3901,7 +3916,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           // ====================================================================
           // POST-PROCESSING: Content is already clean!
           // ====================================================================
-          
+
+          // If the server emitted an error event mid-stream, bail out now.
+          // Without this, a stream that began thinking before failing would
+          // fall through to the save path, where our thinking-only guard
+          // replaces the empty body with "I thought through your request…"
+          // and persists that — masking the real failure.
+          if (streamErrorMessage) {
+            throw new Error(streamErrorMessage);
+          }
+
           logger.log('[PostProcess] Stream complete!');
           logger.log('[PostProcess] Total content:', allStreamedContent.length, 'chars');
           logger.log('[PostProcess] Total thinking:', allThinkingContent.length, 'chars');
