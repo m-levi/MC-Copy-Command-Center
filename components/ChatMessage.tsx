@@ -1061,7 +1061,7 @@ const ChatMessage = memo(function ChatMessage({
                           remarkPlugins={remarkPlugins}
                           components={markdownComponents}
                         >
-                          {stripCampaignTags(messageContent || 'No content')}
+                          {stripCampaignTags(messageContent || "I wasn't able to generate a response. Please try again.")}
                         </ReactMarkdown>
                       </div>
                     )}

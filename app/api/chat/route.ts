@@ -795,7 +795,10 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
     const encoder = new TextEncoder();
     let fullText = '';
     let fullReasoning = '';
-    
+    // Track artifacts emitted during streaming so we can synthesize a
+    // human-readable fallback response when the model only produces tool calls.
+    const createdArtifactSummaries: Array<{ kind: string; title: string }> = [];
+
     const readable = new ReadableStream({
       async start(controller) {
         const sendMessage = (type: string, data: Record<string, unknown>) => {
@@ -1141,6 +1144,10 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                         kind: artifactArgs.kind,
                         title: artifactArgs.title,
                       });
+                      createdArtifactSummaries.push({
+                        kind: artifactArgs.kind,
+                        title: artifactArgs.title,
+                      });
                       logger.log('[Chat API] Artifact created via tool:', artifact.id);
                     } else {
                       logger.error('[Chat API] Failed to create artifact:', artifactError);
@@ -1317,9 +1324,15 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                         duration_ms: specialistResult.durationMs,
                       });
 
-                      // If the agent produced text, add it to the stream
+                      // If the agent produced text, add it to the stream AND
+                      // push it to the client as a text event so it displays.
+                      // Previously this only updated the server-side accumulator,
+                      // which left the client with empty content when the agent
+                      // produced the only textual response.
                       if (specialistResult.response) {
-                        fullText += `\n\n**${agentInfo?.name || agentArgs.agent_id}**: ${specialistResult.response}`;
+                        const agentText = `\n\n**${agentInfo?.name || agentArgs.agent_id}**: ${specialistResult.response}`;
+                        fullText += agentText;
+                        sendMessage('text', { content: agentText });
                       }
 
                       logger.log(`[Chat API] Agent ${agentArgs.agent_id} completed in ${specialistResult.durationMs}ms`);
@@ -1404,20 +1417,41 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
                 sendMessage('thinking_start', {});
                 sendMessage('status', { status: 'thinking' });
                 break;
-                
+
               case 'reasoning-end':
                 if (fullReasoning) {
                   sendMessage('thinking_end', {});
                 }
                 break;
-                
-              case 'finish':
-                logger.log('[Chat API] Stream finished', { 
-                  textLength: fullText.length,
-                  reasoningLength: fullReasoning.length 
+
+              // AI SDK v6 emits tool-error separately from the 'error' event
+              // when an individual tool.execute throws. Surface it so the UI
+              // can show a useful failure rather than sitting on empty text.
+              case 'tool-error': {
+                const erroredPart = part as { toolName?: string; error?: unknown };
+                const toolErr = erroredPart.error;
+                const toolErrMessage =
+                  toolErr instanceof Error ? toolErr.message : String(toolErr ?? 'Unknown tool error');
+                logger.error('[Chat API] Tool error:', erroredPart.toolName, toolErrMessage);
+                sendMessage('tool_use', { tool: erroredPart.toolName, status: 'end' });
+                sendMessage('error', {
+                  error: `Tool ${erroredPart.toolName || 'call'} failed: ${toolErrMessage}`,
                 });
                 break;
-                
+              }
+
+              // AI SDK v6 emits 'abort' when the stream is cancelled upstream.
+              case 'abort':
+                logger.warn('[Chat API] Stream aborted upstream');
+                break;
+
+              case 'finish':
+                logger.log('[Chat API] Stream finished', {
+                  textLength: fullText.length,
+                  reasoningLength: fullReasoning.length,
+                });
+                break;
+
               case 'error':
                 logger.error('[Chat API] Stream error:', part.error);
                 sendMessage('error', { error: String(part.error) });
@@ -1426,6 +1460,39 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
           }
 
           logger.log('[Chat API] fullStream iteration complete, fullText length:', fullText.length);
+
+          // Safety net: if the model finished without emitting any visible text
+          // (e.g. it only called tools, or extended thinking timed out), send a
+          // human-readable fallback so the message isn't saved blank — which
+          // was rendering as "No content" in the chat.
+          if (!fullText.trim()) {
+            let fallbackText: string;
+            if (createdArtifactSummaries.length > 0) {
+              const kindLabels: Record<string, string> = {
+                calendar: 'calendar',
+                email: 'email copy',
+                email_brief: 'email brief',
+                flow: 'flow',
+                subject_lines: 'subject lines',
+                content_brief: 'content brief',
+                template: 'template',
+                campaign: 'campaign plan',
+                markdown: 'document',
+                spreadsheet: 'spreadsheet',
+                code: 'code snippet',
+                checklist: 'checklist',
+              };
+              const descriptions = createdArtifactSummaries.map(
+                (a) => `${kindLabels[a.kind] || a.kind} "${a.title}"`
+              );
+              fallbackText = `I've created ${descriptions.join(' and ')} for you. You can view and edit it in the sidebar.`;
+            } else {
+              fallbackText = "I wasn't able to generate a response this time. Please try rephrasing your request or send it again.";
+            }
+            fullText = fallbackText;
+            sendMessage('text', { content: fallbackText });
+            logger.warn('[Chat API] Emitted fallback text (stream produced no visible content)');
+          }
 
           // NOTE: Fallback artifact detection removed - if AI doesn't explicitly use
           // create_artifact tool, content displays inline. This is cleaner and prevents

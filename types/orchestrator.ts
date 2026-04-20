@@ -297,14 +297,16 @@ export interface ModelRoutingConfig {
 }
 
 /**
- * Default model routing configuration
+ * Default model routing configuration.
+ * IDs must match entries in lib/ai-constants.ts — the previous date-suffixed
+ * IDs weren't served by the Gateway, so specialists returned nothing.
  */
 export const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
-  reasoning: 'anthropic/claude-sonnet-4-5-20250514',
-  generation: 'anthropic/claude-sonnet-4-5-20250514',
-  analysis: 'anthropic/claude-sonnet-4-5-20250514',
-  quick: 'anthropic/claude-sonnet-4-5-20250514',
-  vision: 'openai/gpt-4o',
+  reasoning: 'anthropic/claude-opus-4.7',
+  generation: 'anthropic/claude-sonnet-4.6',
+  analysis: 'anthropic/claude-sonnet-4.6',
+  quick: 'anthropic/claude-haiku-4.5',
+  vision: 'openai/gpt-5.4-thinking',
 };
 
 // ============================================================================
