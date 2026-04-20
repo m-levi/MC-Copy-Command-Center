@@ -16,7 +16,7 @@ import { getSpecialist, SPECIALIST_REGISTRY, buildSpecialistSummary } from './sp
 import { buildOrchestratorPrompt } from '@/lib/prompts/orchestrator.prompt';
 import { invokeSpecialistTool, buildSpecialistTaskPrompt } from '@/lib/tools/invoke-specialist-tool';
 import { createArtifactTool } from '@/lib/tools/artifact-tool';
-import { gateway, getModel } from '@/lib/ai-providers';
+import { gateway, getModel, MODELS } from '@/lib/ai-providers';
 
 // ============================================================================
 // TYPES
@@ -76,13 +76,16 @@ export function getModelForSpecialist(
   const specialistConfig = getSpecialist(specialist);
   const category = specialistConfig.modelCategory;
 
-  // Use custom routing if provided, otherwise use defaults
+  // Use custom routing if provided, otherwise use defaults.
+  // These must match entries in AI_MODELS / MODELS — the date-suffixed IDs
+  // used previously (claude-sonnet-4-5-20250514, gpt-4o) aren't served by
+  // the AI Gateway and caused specialists to fail silently.
   const defaultRouting: ModelRoutingConfig = {
-    reasoning: 'anthropic/claude-sonnet-4-5-20250514',
-    generation: 'anthropic/claude-sonnet-4-5-20250514',
-    analysis: 'anthropic/claude-sonnet-4-5-20250514',
-    quick: 'anthropic/claude-sonnet-4-5-20250514',
-    vision: 'openai/gpt-4o',
+    reasoning: MODELS.CLAUDE_OPUS_4_7,
+    generation: MODELS.CLAUDE_SONNET_4_6,
+    analysis: MODELS.CLAUDE_SONNET_4_6,
+    quick: MODELS.CLAUDE_HAIKU,
+    vision: MODELS.GPT_5_1,
   };
 
   const effectiveRouting = { ...defaultRouting, ...routing };
