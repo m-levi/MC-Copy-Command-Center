@@ -247,8 +247,10 @@ export interface ExtendedToolsConfig {
   shopifyConfig?: ShopifyToolConfig;
 }
 
-// Re-export ModeToolOptions for use in chat route
-export type { ToolEnabledConfig };
+// ToolEnabledConfig is already exported at its declaration above;
+// a second `export type { ToolEnabledConfig }` here made Next.js
+// 16 / TypeScript reject the build with
+// "Export declaration conflicts with exported declaration".
 
 /**
  * Get all tools for a mode including Shopify MCP tools
