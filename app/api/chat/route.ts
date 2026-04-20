@@ -16,6 +16,7 @@ import { getSupermemoryUserId, isSupermemoryConfigured } from '@/lib/supermemory
 import { isPersonalAI, buildPersonalAIPrompt } from '@/lib/personal-ai';
 import { getToolsForMode, getToolsForModeWithShopify, detectArtifactContent, parseEmailVersions, getAgentDisplayInfo } from '@/lib/tools';
 import { checkArtifactWorthiness, quickRejectCheck, validateArtifactToolInput, isConversationalContent } from '@/lib/artifact-worthiness';
+import { CHAT_FALLBACKS, buildArtifactCreatedFallback } from '@/lib/chat/fallbacks';
 import { z } from 'zod';
 // Orchestrator imports
 import {
@@ -1465,33 +1466,18 @@ Example: "The brand prefers a casual, friendly tone. They never use words like '
           // (e.g. it only called tools, or extended thinking timed out), send a
           // human-readable fallback so the message isn't saved blank — which
           // was rendering as "No content" in the chat.
-          if (!fullText.trim()) {
-            let fallbackText: string;
-            if (createdArtifactSummaries.length > 0) {
-              const kindLabels: Record<string, string> = {
-                calendar: 'calendar',
-                email: 'email copy',
-                email_brief: 'email brief',
-                flow: 'flow',
-                subject_lines: 'subject lines',
-                content_brief: 'content brief',
-                template: 'template',
-                campaign: 'campaign plan',
-                markdown: 'document',
-                spreadsheet: 'spreadsheet',
-                code: 'code snippet',
-                checklist: 'checklist',
-              };
-              const descriptions = createdArtifactSummaries.map(
-                (a) => `${kindLabels[a.kind] || a.kind} "${a.title}"`
-              );
-              fallbackText = `I've created ${descriptions.join(' and ')} for you. You can view and edit it in the sidebar.`;
-            } else {
-              fallbackText = "I wasn't able to generate a response this time. Please try rephrasing your request or send it again.";
-            }
+          // Skip when the client cancelled upstream — we've already received
+          // 'abort' and there's nothing useful to say.
+          const clientAborted = req.signal?.aborted === true;
+          if (!fullText.trim() && !clientAborted) {
+            const fallbackText = createdArtifactSummaries.length > 0
+              ? buildArtifactCreatedFallback(createdArtifactSummaries)
+              : CHAT_FALLBACKS.streamProducedNothing;
             fullText = fallbackText;
             sendMessage('text', { content: fallbackText });
             logger.warn('[Chat API] Emitted fallback text (stream produced no visible content)');
+          } else if (!fullText.trim() && clientAborted) {
+            logger.log('[Chat API] Stream was cancelled by client — skipping fallback text');
           }
 
           // NOTE: Fallback artifact detection removed - if AI doesn't explicitly use

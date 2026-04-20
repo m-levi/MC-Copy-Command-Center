@@ -1,6 +1,13 @@
 /**
- * Marketing Agent Workflow using AI SDK 6
- * Orchestrates data gathering, analysis, and insight generation
+ * Marketing Agent Workflow
+ * Orchestrates data gathering, analysis, and insight generation.
+ *
+ * NOTE: This Deno edge function is still pinned to AI SDK v4
+ * (npm:ai@4, npm:@ai-sdk/openai@1). The rest of the Next.js app is on v6.
+ * Upgrading here means replacing `maxSteps: N` with
+ * `stopWhen: stepCountIs(N)` and bumping both npm imports — track that as
+ * a follow-up; this file is deployed as a separate Supabase function and
+ * doesn't affect the Next.js build.
  */
 
 import { generateText } from 'npm:ai@4'

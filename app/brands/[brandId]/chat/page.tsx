@@ -62,6 +62,7 @@ import { extractCampaignIdea, stripCampaignTags } from '@/lib/campaign-parser';
 import { logger } from '@/lib/logger';
 import { ErrorBoundary, SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { sanitizeContent, stripControlMarkers, parseStreamedContent } from '@/lib/chat-utils';
+import { CHAT_FALLBACKS, buildArtifactCreatedFallback } from '@/lib/chat/fallbacks';
 import ChatHeader from '@/components/chat/ChatHeader';
 import ChatEmptyState, { NoConversationState, PreparingResponseIndicator } from '@/components/chat/ChatEmptyState';
 import { ArtifactProvider, useArtifactContext, useOptionalArtifactContext } from '@/contexts/ArtifactContext';
@@ -2640,12 +2641,30 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         }
       }
 
-      finalContent = stripControlMarkers(streamingContent.trim());
+      // Run the shared AI response parser so regenerated messages that come
+      // back as <clarification_request>…</clarification_request> still get
+      // routed through the clarification UI (metadata.clarification + a
+      // 'clarification' responseType). Previously the regenerate path just
+      // treated everything as plain email copy.
+      const parsedStream = parseStreamedContent(streamingContent);
+      let finalClarification = parsedStream.clarification || '';
+
+      if (parsedStream.responseType === 'clarification' && finalClarification) {
+        finalContent = stripControlMarkers(finalClarification);
+        finalResponseType = 'clarification';
+      } else if (parsedStream.emailCopy) {
+        finalContent = stripControlMarkers(parsedStream.emailCopy);
+        finalResponseType = 'email_copy';
+      } else {
+        finalContent = stripControlMarkers(streamingContent.trim());
+      }
+
       if (!finalContent) {
         finalContent = finalThinking.trim()
-          ? "I thought through your request but didn't produce a final response. Please try again or rephrase."
-          : "I wasn't able to generate a response. Please try again.";
+          ? CHAT_FALLBACKS.thinkingOnly
+          : CHAT_FALLBACKS.sendRetry;
         finalResponseType = 'other';
+        finalClarification = '';
       }
 
       const metadataPayload: Record<string, any> = {
@@ -2653,6 +2672,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       };
       if (productLinks.length > 0) {
         metadataPayload.productLinks = productLinks;
+      }
+      if (finalResponseType === 'clarification' && finalClarification) {
+        metadataPayload.clarification = finalClarification;
       }
       const metadataToSave = Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
 
@@ -2820,12 +2842,27 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         }
       }
 
-      finalContent = stripControlMarkers(streamingContent.trim());
+      // Same shared parser as handleRegenerateMessage so clarification
+      // responses stay routed through the clarification UI.
+      const parsedStream = parseStreamedContent(streamingContent);
+      let finalClarification = parsedStream.clarification || '';
+
+      if (parsedStream.responseType === 'clarification' && finalClarification) {
+        finalContent = stripControlMarkers(finalClarification);
+        finalResponseType = 'clarification';
+      } else if (parsedStream.emailCopy) {
+        finalContent = stripControlMarkers(parsedStream.emailCopy);
+        finalResponseType = 'email_copy';
+      } else {
+        finalContent = stripControlMarkers(streamingContent.trim());
+      }
+
       if (!finalContent) {
         finalContent = finalThinking.trim()
-          ? "I thought through your request but didn't produce a final response. Please try again or rephrase."
-          : "I wasn't able to regenerate this section. Please try again.";
+          ? CHAT_FALLBACKS.thinkingOnly
+          : CHAT_FALLBACKS.regenerateSectionRetry;
         finalResponseType = 'other';
+        finalClarification = '';
       }
 
       const metadataPayload: Record<string, any> = {
@@ -2833,6 +2870,9 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       };
       if (productLinks.length > 0) {
         metadataPayload.productLinks = productLinks;
+      }
+      if (finalResponseType === 'clarification' && finalClarification) {
+        metadataPayload.clarification = finalClarification;
       }
       const metadataToSave = Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
 
@@ -3906,17 +3946,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           // For artifact-only responses, generate UI content now (before final UI update)
           let displayContent = finalContent;
           if (!displayContent && createdArtifacts.length > 0) {
-            const kindLabels: Record<string, string> = {
-              'calendar': 'calendar',
-              'email_copy': 'email copy',
-              'email_brief': 'email brief',
-              'code': 'code snippet',
-              'document': 'document',
-            };
-            const artifactDescriptions = createdArtifacts.map(a => 
-              `${kindLabels[a.kind] || a.kind} "${a.title}"`
-            );
-            displayContent = `I've created ${artifactDescriptions.join(' and ')} for you. You can view and edit it in the sidebar.`;
+            displayContent = buildArtifactCreatedFallback(createdArtifacts);
           }
 
           // Final update with cleanly separated content and metadata
@@ -4055,17 +4085,7 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // For artifact-only responses, generate a descriptive message
       if (!finalContent && createdArtifacts.length > 0) {
         logger.log('[Stream] Artifact-only response detected, generating message content');
-        const artifactDescriptions = createdArtifacts.map(a => {
-          const kindLabels: Record<string, string> = {
-            'calendar': 'calendar',
-            'email_copy': 'email copy',
-            'email_brief': 'email brief',
-            'code': 'code snippet',
-            'document': 'document',
-          };
-          return `${kindLabels[a.kind] || a.kind} "${a.title}"`;
-        });
-        finalContent = `I've created ${artifactDescriptions.join(' and ')} for you. You can view and edit it in the sidebar.`;
+        finalContent = buildArtifactCreatedFallback(createdArtifacts);
         finalResponseType = 'other';
       }
 
@@ -4074,8 +4094,8 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
       // human-readable so the user never sees a blank assistant bubble.
       if (!finalContent?.trim()) {
         finalContent = finalThinking?.trim()
-          ? "I thought through your request but didn't produce a final response. Please try again or rephrase."
-          : "I wasn't able to generate a response. Please try again.";
+          ? CHAT_FALLBACKS.thinkingOnly
+          : CHAT_FALLBACKS.sendRetry;
         finalResponseType = 'other';
       }
 

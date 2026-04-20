@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown';
 import { stripCampaignTags } from '@/lib/campaign-parser';
 import { logger } from '@/lib/logger';
 import { cleanMessageContent } from '@/lib/chat-utils';
+import { CHAT_FALLBACKS } from '@/lib/chat/fallbacks';
 import { cn } from '@/lib/utils';
 import { CopyIcon, RefreshCwIcon, ThumbsUpIcon, ThumbsDownIcon, CheckIcon, MessageSquareIcon, ChevronLeftIcon, ChevronRightIcon, Quote, FileTextIcon, Sparkles } from 'lucide-react';
 import { useOptionalArtifactContext, ArtifactSuggestion } from '@/contexts/ArtifactContext';
@@ -483,7 +484,7 @@ const ChatMessageModern = memo(function ChatMessageModern({
 
   // Render content with inline highlights
   const renderContent = () => {
-    const content = stripCampaignTags(messageContent || "I wasn't able to generate a response. Please try again.");
+    const content = stripCampaignTags(messageContent || CHAT_FALLBACKS.emptyMessageDisplay);
     
     // If we have highlights, wrap them
     if (inlineHighlights.length > 0) {

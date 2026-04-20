@@ -15,6 +15,7 @@ import { stripCampaignTags } from '@/lib/campaign-parser';
 import { hasFlowMarkers, FlowPlan } from '@/lib/flow-ui-parser';
 import { hasEmailVersionMarkers } from '@/lib/email-version-parser';
 import { logger } from '@/lib/logger';
+import { CHAT_FALLBACKS } from '@/lib/chat/fallbacks';
 import { visit } from 'unist-util-visit';
 import { useOptionalArtifactContext, ArtifactSuggestion } from '@/contexts/ArtifactContext';
 import { Sparkles, RefreshCwIcon } from 'lucide-react';
@@ -1061,7 +1062,7 @@ const ChatMessage = memo(function ChatMessage({
                           remarkPlugins={remarkPlugins}
                           components={markdownComponents}
                         >
-                          {stripCampaignTags(messageContent || "I wasn't able to generate a response. Please try again.")}
+                          {stripCampaignTags(messageContent || CHAT_FALLBACKS.emptyMessageDisplay)}
                         </ReactMarkdown>
                       </div>
                     )}
