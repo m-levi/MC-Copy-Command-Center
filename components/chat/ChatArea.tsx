@@ -17,13 +17,7 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
+import { CompactTool } from "./CompactTool";
 import {
   Sources,
   SourcesTrigger,
@@ -48,7 +42,9 @@ import { ChatHeader } from "./ChatHeader";
 import { PromptBar } from "./PromptBar";
 import { QueuedPrompts } from "./QueuedPrompts";
 import { EmailVariants, type EmailVariantData } from "./EmailVariants";
+import { CopyArtifact } from "./CopyArtifact";
 import { usePromptQueue } from "@/hooks/usePromptQueue";
+import { parseCopySegments } from "@/lib/workflows/copy-artifact";
 import type { SkillOption } from "./SkillPicker";
 
 interface PartLike {
@@ -90,7 +86,18 @@ export function ChatArea({
   const [lockedSkill, setLockedSkill] = useState<string | null>(initialSkillSlug);
   const [modelId, setModelId] = useState<string>(initialModelId);
   const [input, setInput] = useState("");
+  const [showThinking, setShowThinking] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const saved = window.localStorage.getItem("chat.showThinking");
+    return saved === null ? true : saved === "true";
+  });
   const queueApi = usePromptQueue();
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("chat.showThinking", String(showThinking));
+    }
+  }, [showThinking]);
 
   const transport = useMemo(() => {
     // `@supermemory/tools` bundles its own copy of `ai`, so the branded
@@ -160,6 +167,8 @@ export function ChatArea({
         lockedSkill={lockedSkill}
         skills={skills}
         onSkillChange={setLockedSkill}
+        showThinking={showThinking}
+        onShowThinkingChange={setShowThinking}
       />
 
       <Conversation className="relative flex-1">
@@ -198,6 +207,7 @@ export function ChatArea({
                 key={m.id}
                 message={m}
                 isStreaming={chat.status === "streaming"}
+                showThinking={showThinking}
               />
             ))
           )}
@@ -250,7 +260,15 @@ export function ChatArea({
   );
 }
 
-function MessageRow({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
+function MessageRow({
+  message,
+  isStreaming,
+  showThinking,
+}: {
+  message: UIMessage;
+  isStreaming: boolean;
+  showThinking: boolean;
+}) {
   const parts = (message.parts ?? []) as PartLike[];
   const isAssistant = message.role === "assistant";
   const assistantText = useMemo(
@@ -274,7 +292,7 @@ function MessageRow({ message, isStreaming }: { message: UIMessage; isStreaming:
             : "!p-0"
         }
       >
-        {parts.map((part, idx) => renderPart(part, idx, isStreaming))}
+        {parts.map((part, idx) => renderPart(part, idx, isStreaming, showThinking))}
         {isAssistant && assistantText.length > 120 ? (
           <div className="mt-2 flex items-center gap-1.5">
             <CopyButton text={assistantText} />
@@ -327,17 +345,54 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function renderPart(part: PartLike, idx: number, isStreaming: boolean) {
+let copyBlockCounter = 0;
+
+function renderPart(
+  part: PartLike,
+  idx: number,
+  isStreaming: boolean,
+  showThinking: boolean,
+) {
   if (part.type === "text") {
     const text = String(part.text ?? "");
+    const segments = parseCopySegments(text);
+    // If no copy tags, render as plain prose — same as before.
+    if (segments.length === 1 && segments[0].kind === "prose") {
+      return (
+        <div key={idx} className="prose prose-sm max-w-none">
+          <Streamdown>{text}</Streamdown>
+        </div>
+      );
+    }
+    // Reset counter per part so variants A/B/C number as 1/2/3 each turn.
+    copyBlockCounter = 0;
     return (
-      <div key={idx} className="prose prose-sm max-w-none">
-        <Streamdown>{text}</Streamdown>
+      <div key={idx} className="flex flex-col gap-2">
+        {segments.map((seg, si) => {
+          if (seg.kind === "prose") {
+            if (!seg.content.trim()) return null;
+            return (
+              <div key={si} className="prose prose-sm max-w-none">
+                <Streamdown>{seg.content}</Streamdown>
+              </div>
+            );
+          }
+          const n = copyBlockCounter++;
+          return (
+            <CopyArtifact
+              key={si}
+              content={seg.content}
+              streaming={seg.streaming}
+              index={n}
+            />
+          );
+        })}
       </div>
     );
   }
 
   if (part.type === "reasoning") {
+    if (!showThinking) return null;
     const text = String(part.text ?? "");
     return (
       <Reasoning key={idx} isStreaming={isStreaming} className="my-1">
@@ -402,21 +457,13 @@ function renderGenericTool(part: PartLike, idx: number) {
     | "output-available"
     | "output-error";
   return (
-    <Tool key={idx} defaultOpen={false}>
-      <ToolHeader title={`Using ${name}`} type={part.type as `tool-${string}`} state={state} />
-      <ToolContent>
-        {part.input !== undefined && part.input !== null ? (
-          <ToolInput input={part.input} />
-        ) : null}
-        {part.output !== undefined || part.errorText ? (
-          <ToolOutput
-            output={
-              part.output !== undefined ? JSON.stringify(part.output, null, 2) : null
-            }
-            errorText={part.errorText}
-          />
-        ) : null}
-      </ToolContent>
-    </Tool>
+    <CompactTool
+      key={idx}
+      name={name}
+      state={state}
+      input={part.input}
+      output={part.output}
+      errorText={part.errorText}
+    />
   );
 }

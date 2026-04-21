@@ -6,6 +6,7 @@ import { loadBuiltinSkills, mergeSkills } from '@/lib/skills/registry';
 import type { Skill } from '@/lib/skills/types';
 import { runSkill } from '@/lib/workflows/run-skill';
 import { emptyStandardScope, interpolate } from '@/lib/workflows/template-engine';
+import { COPY_ARTIFACT_INSTRUCTION } from '@/lib/workflows/copy-artifact';
 import type { ToolContext } from '@/lib/tools/types';
 import { searchRelevantDocuments, buildRAGContext } from '@/lib/rag-service';
 import { searchMemories, isSupermemoryConfigured } from '@/lib/supermemory';
@@ -188,6 +189,7 @@ export async function POST(req: Request) {
     brandVoice ? `<brand_voice>\n${brandVoice}\n</brand_voice>` : '',
     ragContext,
     memoryContext,
+    COPY_ARTIFACT_INSTRUCTION,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -206,7 +208,7 @@ export async function POST(req: Request) {
     },
   };
 
-  const modelIdResolved = normalizeModelId(modelId ?? 'anthropic/claude-sonnet-4.5');
+  const modelIdResolved = normalizeModelId(modelId);
   const model = gateway(modelIdResolved);
 
   const skillVariablesWithBrief =
@@ -217,6 +219,7 @@ export async function POST(req: Request) {
   try {
     const result = runSkill({
       model,
+      modelId: modelIdResolved,
       systemBase,
       messages: await convertToModelMessages(messages),
       skills,

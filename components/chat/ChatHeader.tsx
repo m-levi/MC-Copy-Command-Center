@@ -1,9 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronRight, Share2, MoreHorizontal } from "lucide-react";
+import { Brain, ChevronRight, Share2, MoreHorizontal } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { ModelSelectorButton } from "./ModelSelectorButton";
 import { SkillPicker, type SkillOption } from "./SkillPicker";
 
@@ -16,6 +23,8 @@ export function ChatHeader({
   lockedSkill,
   skills,
   onSkillChange,
+  showThinking,
+  onShowThinkingChange,
 }: {
   brandId: string;
   brandName: string;
@@ -25,6 +34,8 @@ export function ChatHeader({
   lockedSkill: string | null;
   skills: SkillOption[];
   onSkillChange: (slug: string | null) => void;
+  showThinking: boolean;
+  onShowThinkingChange: (v: boolean) => void;
 }) {
   return (
     <header className="bg-background/80 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10 flex h-14 items-center gap-2 border-b px-3 backdrop-blur">
@@ -49,6 +60,28 @@ export function ChatHeader({
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <SkillPicker locked={lockedSkill} skills={skills} onChange={onSkillChange} />
         <ModelSelectorButton value={model} onChange={onModelChange} />
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "size-8",
+                  showThinking && "text-primary",
+                )}
+                onClick={() => onShowThinkingChange(!showThinking)}
+                aria-label={showThinking ? "Hide thinking" : "Show thinking"}
+                aria-pressed={showThinking}
+              >
+                <Brain className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {showThinking ? "Hide thinking" : "Show thinking"}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <Button
           variant="ghost"
           size="icon"
