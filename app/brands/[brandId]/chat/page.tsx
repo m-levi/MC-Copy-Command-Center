@@ -2208,84 +2208,75 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         throw new Error(errorMessage);
       }
 
-      // Read streaming response
+      // Read streaming response.
+      // The /api/chat endpoint emits newline-delimited JSON objects
+      // (e.g. {"type":"text","content":"..."}). The previous implementation
+      // parsed it as legacy [STATUS:...] plain text, which left regenerated
+      // messages blank (rendered as "No content") because the real text
+      // arrived inside JSON envelopes that never got extracted.
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let rawStreamContent = '';
       let streamingContent = '';
-      let finalEmailCopy = '';
-      let finalClarification = '';
       let finalThinking = '';
-      let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'other';
+      let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'email_copy';
       let finalContent = '';
       let productLinks: ProductLink[] = [];
 
       if (reader) {
+        let buffer = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          rawStreamContent += chunk;
-          
-          // Parse status markers
-          const statusMatch = chunk.match(/\[STATUS:(\w+)\]/g);
-          if (statusMatch) {
-            statusMatch.forEach((match) => {
-              const status = match.replace('[STATUS:', '').replace(']', '') as AIStatus;
-              setAiStatus(status);
-            });
-          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-          // Clean control markers for streaming display
-          let cleanChunk = chunk
-            .replace(/\[STATUS:\w+\]/g, '')
-            .replace(/\[TOOL:\w+:(START|END)\]/g, '')
-            .replace(/\[THINKING:START\]/g, '')
-            .replace(/\[THINKING:END\]/g, '')
-            .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
-            .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
-            .replace(/\[REMEMBER:[^\]]+\]/g, '');
-
-          if (cleanChunk) {
-            streamingContent += cleanChunk;
-
-          // Update message in real-time
-          setMessages((prev) =>
-            prev.map((msg, idx) =>
-              idx === messageIndex
-                  ? { ...msg, content: streamingContent }
-                : msg
-            )
-          );
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const message = JSON.parse(line);
+              switch (message.type) {
+                case 'status':
+                  setAiStatus(message.status as AIStatus);
+                  break;
+                case 'text':
+                  streamingContent += message.content || '';
+                  setMessages((prev) =>
+                    prev.map((msg, idx) =>
+                      idx === messageIndex
+                        ? { ...msg, content: streamingContent }
+                        : msg
+                    )
+                  );
+                  break;
+                case 'thinking':
+                  finalThinking += message.content || '';
+                  break;
+                case 'products':
+                  productLinks = message.products || [];
+                  break;
+              }
+            } catch {
+              // Partial JSON line — will be completed by the next chunk
+            }
           }
         }
       }
 
-      const parsed = parseStreamedContent(rawStreamContent);
-      finalEmailCopy = parsed.emailCopy;
-      finalClarification = parsed.clarification;
-      const finalOtherContent = parsed.otherContent;
-      finalThinking = parsed.thoughtContent;
-      finalResponseType = parsed.responseType;
-      productLinks = parsed.productLinks;
-
-      finalContent =
-        finalResponseType === 'clarification'
-          ? finalClarification
-          : finalResponseType === 'other'
-            ? finalOtherContent
-            : finalEmailCopy || parsed.clarification || streamingContent.trim();
-      finalContent = stripControlMarkers(finalContent);
+      finalContent = stripControlMarkers(streamingContent.trim());
+      if (!finalContent) {
+        finalContent = finalThinking.trim()
+          ? "I thought through your request but didn't produce a final response. Please try again or rephrase."
+          : "I wasn't able to generate a response. Please try again.";
+        finalResponseType = 'other';
+      }
 
       const metadataPayload: Record<string, any> = {
         responseType: finalResponseType,
       };
       if (productLinks.length > 0) {
         metadataPayload.productLinks = productLinks;
-      }
-      if (finalResponseType === 'clarification' && finalClarification) {
-        metadataPayload.clarification = finalClarification;
       }
       const metadataToSave = Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
 
@@ -2389,80 +2380,71 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
         throw new Error(errorMessage);
       }
 
+      // The /api/chat endpoint emits newline-delimited JSON; see the comment
+      // in handleRegenerateMessage. Parse the same way here.
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let rawStreamContent = '';
       let streamingContent = '';
-      let finalEmailCopy = '';
-      let finalClarification = '';
       let finalThinking = '';
-      let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'other';
+      let finalResponseType: 'email_copy' | 'clarification' | 'other' = 'email_copy';
       let finalContent = '';
       let productLinks: ProductLink[] = [];
 
       if (reader) {
+        let buffer = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          rawStreamContent += chunk;
-          
-          const statusMatch = chunk.match(/\[STATUS:(\w+)\]/g);
-          if (statusMatch) {
-            statusMatch.forEach((match) => {
-              const status = match.replace('[STATUS:', '').replace(']', '') as AIStatus;
-              setAiStatus(status);
-            });
-          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-          let cleanChunk = chunk
-            .replace(/\[STATUS:\w+\]/g, '')
-            .replace(/\[TOOL:\w+:(START|END)\]/g, '')
-            .replace(/\[THINKING:START\]/g, '')
-            .replace(/\[THINKING:END\]/g, '')
-            .replace(/\[THINKING:CHUNK\][\s\S]*?(?=\[|$)/g, '')
-            .replace(/\[PRODUCTS:[\s\S]*?\]/g, '')
-            .replace(/\[REMEMBER:[^\]]+\]/g, '');
-
-          if (cleanChunk) {
-            streamingContent += cleanChunk;
-
-          setMessages((prev) =>
-            prev.map((msg, idx) =>
-              idx === lastAIMessageIndex
-                  ? { ...msg, content: streamingContent }
-                : msg
-            )
-          );
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const message = JSON.parse(line);
+              switch (message.type) {
+                case 'status':
+                  setAiStatus(message.status as AIStatus);
+                  break;
+                case 'text':
+                  streamingContent += message.content || '';
+                  setMessages((prev) =>
+                    prev.map((msg, idx) =>
+                      idx === lastAIMessageIndex
+                        ? { ...msg, content: streamingContent }
+                        : msg
+                    )
+                  );
+                  break;
+                case 'thinking':
+                  finalThinking += message.content || '';
+                  break;
+                case 'products':
+                  productLinks = message.products || [];
+                  break;
+              }
+            } catch {
+              // Partial JSON line — will be completed by the next chunk
+            }
           }
         }
       }
 
-      const parsed = parseStreamedContent(rawStreamContent);
-      finalEmailCopy = parsed.emailCopy;
-      finalClarification = parsed.clarification;
-      const finalOtherContent = parsed.otherContent;
-      finalThinking = parsed.thoughtContent;
-      finalResponseType = parsed.responseType;
-      productLinks = parsed.productLinks;
-
-      finalContent =
-        finalResponseType === 'clarification'
-          ? finalClarification
-          : finalResponseType === 'other'
-            ? finalOtherContent
-            : finalEmailCopy || parsed.clarification || streamingContent.trim();
-      finalContent = stripControlMarkers(finalContent);
+      finalContent = stripControlMarkers(streamingContent.trim());
+      if (!finalContent) {
+        finalContent = finalThinking.trim()
+          ? "I thought through your request but didn't produce a final response. Please try again or rephrase."
+          : "I wasn't able to regenerate this section. Please try again.";
+        finalResponseType = 'other';
+      }
 
       const metadataPayload: Record<string, any> = {
         responseType: finalResponseType,
       };
       if (productLinks.length > 0) {
         metadataPayload.productLinks = productLinks;
-      }
-      if (finalResponseType === 'clarification' && finalClarification) {
-        metadataPayload.clarification = finalClarification;
       }
       const metadataToSave = Object.keys(metadataPayload).length > 0 ? metadataPayload : null;
 
@@ -2915,11 +2897,13 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
                   case 'thinking':
                     // Accumulate thinking content
                     allThinkingContent += message.content;
-                    // Update message to show thinking in real-time
+                    // Preserve any text content that has already streamed — reasoning
+                    // deltas can interleave with text on some providers, and blanking
+                    // content here caused "No content" to display mid-stream.
                     setMessages((prev) =>
                       prev.map((msg) =>
                         msg.id === aiMessageId
-                          ? { ...msg, thinking: allThinkingContent, content: '' }
+                          ? { ...msg, thinking: allThinkingContent, content: allStreamedContent }
                           : msg
                       )
                     );
@@ -3245,6 +3229,16 @@ export default function ChatPage({ params }: { params: Promise<{ brandId: string
           length: trimmedContent.length,
           responseType: finalResponseType
         });
+      }
+
+      // Last-resort guard: if we reached this point with empty text (because the
+      // "has thinking" branch was taken), still save something human-readable so
+      // the user never sees a blank assistant bubble rendering as "No content".
+      if (!finalContent?.trim()) {
+        finalContent = hasThinking
+          ? "I thought through your request but didn't produce a final response. Please try again or rephrase."
+          : "I wasn't able to generate a response. Please try again.";
+        finalResponseType = 'other';
       }
 
       // Sanitize content before saving to database (XSS protection)

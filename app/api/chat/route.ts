@@ -441,6 +441,17 @@ ${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
 
           logger.log('[Chat API] fullStream iteration complete, fullText length:', fullText.length);
 
+          // Safety net: if the model finished without emitting any visible text
+          // (e.g. it only called tools, or extended thinking timed out), send a
+          // human-readable fallback so the message isn't saved blank — which
+          // was rendering as "No content" in the chat.
+          if (!fullText.trim()) {
+            const fallbackText = "I wasn't able to generate a response this time. Please try rephrasing your request or send it again.";
+            fullText = fallbackText;
+            sendMessage('text', { content: fallbackText });
+            logger.warn('[Chat API] Emitted fallback text (stream produced no visible content)');
+          }
+
           // Extract product links from the response
           if (fullText) {
             try {
