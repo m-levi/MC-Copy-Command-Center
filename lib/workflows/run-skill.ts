@@ -35,13 +35,11 @@ export interface RunSkillArgs {
  * the web, pull brand docs, and recall/save memory. Skills can declare
  * the same names in their `tools:` frontmatter to take stronger control.
  *
- * NOTE: Anthropic's native `webSearch_20250305` provider-defined tool is
- * NOT routable through the AI Gateway today (AI SDK v6 raises
- * "Unsupported tool type: provider-defined" for provider tools coming
- * back through the gateway). We use the cross-provider `web_search`
- * tool (see /lib/tools/web-search.ts) instead; when a search backend
- * isn't configured it returns a structured error and the model falls
- * back to reasoning from context.
+ * Web search is the generic `web_search` tool from /lib/tools/web-search.ts,
+ * which runs Anthropic's native webSearch_20250305 via a one-shot direct
+ * call to the Anthropic API (not through the AI Gateway — the gateway
+ * doesn't forward provider-defined tool shapes, so we can't wire the
+ * native tool into the main streamText call). Requires ANTHROPIC_API_KEY.
  */
 const BASELINE_TOOL_INSTRUCTIONS = `## Tools always available
 
@@ -83,10 +81,9 @@ export function runSkill(args: RunSkillArgs) {
   const providerOptions = getProviderOptions(modelId, 10_000);
 
   // Baseline tools are available in every mode so the model knows it can
-  // research before writing. We use the generic `web_search` tool rather
-  // than Anthropic's provider-defined `webSearch_20250305` because the
-  // Vercel AI Gateway does not forward provider-defined tool shapes and
-  // AI SDK v6 raises "Unsupported tool type: provider-defined".
+  // research before writing. `web_search` is the generic wrapper that
+  // internally dispatches to Anthropic's native webSearch_20250305 via a
+  // one-shot direct call (see /lib/tools/web-search.ts).
   const baseline: ToolBundle = {
     ...buildAutoBaselineTools(ctx),
     ...buildSkillTools(ctx, [
