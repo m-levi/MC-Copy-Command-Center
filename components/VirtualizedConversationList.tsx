@@ -1,13 +1,12 @@
 'use client';
 
 import { ConversationWithStatus, ConversationQuickAction } from '@/types';
-import { useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import { useEffect, useRef, useMemo, useCallback } from 'react';
 import ConversationListItem from './ConversationListItem';
 
 interface VirtualizedConversationListProps {
   conversations: ConversationWithStatus[];
   currentConversationId: string | null;
-  currentUserId?: string;
   pinnedConversationIds: string[];
   editingId: string | null;
   editingTitle: string;
@@ -35,13 +34,9 @@ interface GroupedConversations {
   older: ConversationWithStatus[];
 }
 
-// Empty set for default value - created once to avoid new Set() on every render
-const EMPTY_SET = new Set<string>();
-
-function VirtualizedConversationList({
+export default function VirtualizedConversationList({
   conversations,
   currentConversationId,
-  currentUserId,
   pinnedConversationIds,
   editingId,
   editingTitle,
@@ -56,7 +51,7 @@ function VirtualizedConversationList({
   setEditingTitle,
   height,
   bulkSelectMode = false,
-  selectedConversationIds = EMPTY_SET,
+  selectedConversationIds = new Set(),
   onToggleSelect
 }: VirtualizedConversationListProps) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -130,7 +125,7 @@ function VirtualizedConversationList({
   const renderConversation = (conversation: ConversationWithStatus) => (
     <div 
       key={conversation.id} 
-      className="pl-2 pr-1"
+      className="pl-2 pr-1 py-0.5"
       data-conversation-id={conversation.id}
     >
       <ConversationListItem
@@ -138,7 +133,6 @@ function VirtualizedConversationList({
         isActive={conversation.id === currentConversationId}
         isPinned={pinnedSet.has(conversation.id)}
         currentConversationId={currentConversationId}
-        currentUserId={currentUserId}
         onSelect={() => onSelect(conversation.id)}
         onSelectChild={onSelectChild}
         onAction={(action) => handleQuickAction(conversation.id, action)}
@@ -209,5 +203,3 @@ function VirtualizedConversationList({
     </div>
   );
 }
-
-export default memo(VirtualizedConversationList);

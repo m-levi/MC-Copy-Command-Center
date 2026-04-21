@@ -31,9 +31,7 @@ export async function GET() {
           sidebar_width: 398,
           default_filter: 'all',
           pinned_conversations: [],
-          archived_conversations: [],
-          enabled_models: null,
-          default_model: null
+          archived_conversations: []
         });
       }
       throw error;
@@ -72,8 +70,7 @@ export async function POST(request: Request) {
       'default_filter_person_id',
       'pinned_conversations',
       'archived_conversations',
-      'enabled_models',
-      'default_model'
+      'email_notifications'
     ];
 
     const updates: any = {

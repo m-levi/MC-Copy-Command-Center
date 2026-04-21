@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { logger } from '@/lib/logger';
 import LoadingDots from './LoadingDots';
@@ -14,20 +14,6 @@ interface ShareModalProps {
 export default function ShareModal({ conversationId, isOpen, onClose }: ShareModalProps) {
   const [publicLink, setPublicLink] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-
-  // Handle escape key to close modal
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isGenerating) {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isGenerating, onClose]);
 
   const handleCopyTeamLink = async () => {
     const teamLink = `${window.location.origin}${window.location.pathname}?conversation=${conversationId}`;
@@ -77,19 +63,19 @@ export default function ShareModal({ conversationId, isOpen, onClose }: ShareMod
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-0 sm:p-4"
+    <div 
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" 
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white dark:bg-gray-800 w-full h-full sm:h-auto sm:rounded-xl p-6 sm:max-w-md shadow-xl safe-area-bottom">
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-md shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Share Conversation</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors touch-target touch-feedback"
+          <button 
+            onClick={onClose} 
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
           >
-            <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -106,9 +92,9 @@ export default function ShareModal({ conversationId, isOpen, onClose }: ShareMod
               <p className="text-sm text-gray-600 dark:text-gray-400">Anyone in your organization can view this conversation</p>
             </div>
           </div>
-          <button
-            onClick={handleCopyTeamLink}
-            className="w-full bg-blue-600 text-white px-4 py-3 sm:py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium touch-feedback"
+          <button 
+            onClick={handleCopyTeamLink} 
+            className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium"
           >
             Copy Team Link
           </button>
@@ -125,10 +111,10 @@ export default function ShareModal({ conversationId, isOpen, onClose }: ShareMod
               <p className="text-sm text-gray-600 dark:text-gray-400">Anyone with the link can view (no login required)</p>
             </div>
           </div>
-          <button
-            onClick={handleGeneratePublicLink}
-            disabled={isGenerating}
-            className="w-full bg-purple-600 text-white px-4 py-3 sm:py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium touch-feedback"
+          <button 
+            onClick={handleGeneratePublicLink} 
+            disabled={isGenerating} 
+            className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
           >
             {isGenerating ? (
               <span className="flex items-center justify-center gap-2">

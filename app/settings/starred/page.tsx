@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import { Brand, BrandDocument } from '@/types';
-import { getErrorMessage } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,9 +58,9 @@ export default function StarredEmailsPage() {
 
       if (error) throw error;
       setStarredEmails(data || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading starred emails:', error);
-      toast.error(getErrorMessage(error));
+      toast.error('Failed to load starred emails');
     } finally {
       setLoadingStarred(false);
     }
@@ -78,9 +77,9 @@ export default function StarredEmailsPage() {
 
       setStarredEmails(prev => prev.filter(e => e.id !== emailId));
       toast.success('Email removed from starred');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error removing starred email:', error);
-      toast.error(getErrorMessage(error));
+      toast.error('Failed to remove email');
     }
   };
 
@@ -132,9 +131,9 @@ export default function StarredEmailsPage() {
       setEmailToStar('');
       setShowStarDialog(false);
       await loadStarredEmails();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error starring email:', error);
-      toast.error(getErrorMessage(error));
+      toast.error('Failed to star email');
     } finally {
       setStarringEmail(false);
     }
@@ -358,42 +357,6 @@ export default function StarredEmailsPage() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

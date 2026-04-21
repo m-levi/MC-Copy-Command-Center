@@ -2,53 +2,34 @@ import { AIModelOption } from '@/types';
 import { MODELS } from './ai-constants';
 
 export const AI_MODELS: AIModelOption[] = [
-  // Primary Anthropic models (newest first)
-  {
-    id: MODELS.CLAUDE_OPUS_4_7,
-    name: 'Claude Opus 4.7',
-    provider: 'anthropic',
-  },
-  {
-    id: MODELS.CLAUDE_OPUS_4_6,
-    name: 'Claude Opus 4.6',
-    provider: 'anthropic',
-  },
-  {
-    id: MODELS.CLAUDE_SONNET_4_6,
-    name: 'Claude Sonnet 4.6',
-    provider: 'anthropic',
-  },
+  // Primary models shown in model picker
   {
     id: MODELS.CLAUDE_SONNET,
-    name: 'Claude Sonnet 4.5',
+    name: 'Sonnet 4.5',
     provider: 'anthropic',
+  },
+  {
+    id: MODELS.GEMINI_3,
+    name: 'Gemini 3',
+    provider: 'google',
   },
   {
     id: MODELS.CLAUDE_OPUS,
-    name: 'Claude Opus 4.5',
+    name: 'Opus 4.5',
     provider: 'anthropic',
-  },
-  {
-    id: MODELS.CLAUDE_HAIKU,
-    name: 'Claude Haiku 4.5',
-    provider: 'anthropic',
-  },
-  // OpenAI models (newest first)
-  {
-    id: MODELS.GPT_5_4,
-    name: 'GPT 5.4',
-    provider: 'openai',
-  },
-  {
-    id: MODELS.GPT_5_4_INSTANT,
-    name: 'GPT 5.4 Instant',
-    provider: 'openai',
   },
   {
     id: MODELS.GPT_5_1,
     name: 'GPT 5.1',
     provider: 'openai',
   },
+  // Additional Anthropic models
+  {
+    id: MODELS.CLAUDE_HAIKU,
+    name: 'Claude Haiku 4.5',
+    provider: 'anthropic',
+  },
+  // Additional OpenAI models
   {
     id: MODELS.GPT_5_1_INSTANT,
     name: 'GPT 5.1 Instant',
@@ -56,55 +37,10 @@ export const AI_MODELS: AIModelOption[] = [
   },
   {
     id: MODELS.GPT_5_1_MINI,
-    name: 'GPT 5 Mini',
+    name: 'GPT 5 mini',
     provider: 'openai',
   },
-  {
-    id: MODELS.GPT_5,
-    name: 'GPT 5',
-    provider: 'openai',
-  },
-  {
-    id: MODELS.O1,
-    name: 'O1',
-    provider: 'openai',
-  },
-  {
-    id: MODELS.O3,
-    name: 'O3',
-    provider: 'openai',
-  },
-  {
-    id: MODELS.O3_MINI,
-    name: 'O3 Mini',
-    provider: 'openai',
-  },
-  {
-    id: MODELS.O4_MINI,
-    name: 'O4 Mini',
-    provider: 'openai',
-  },
-  // Google models (newest first)
-  {
-    id: MODELS.GEMINI_3_1,
-    name: 'Gemini 3.1 Pro',
-    provider: 'google',
-  },
-  {
-    id: MODELS.GEMINI_3_1_FLASH,
-    name: 'Gemini 3.1 Flash',
-    provider: 'google',
-  },
-  {
-    id: MODELS.GEMINI_3,
-    name: 'Gemini 3 Pro',
-    provider: 'google',
-  },
-  {
-    id: MODELS.GEMINI_3_FLASH,
-    name: 'Gemini 3 Flash',
-    provider: 'google',
-  },
+  // Additional Google models
   {
     id: MODELS.GEMINI_PRO,
     name: 'Gemini 2.5 Pro',
@@ -139,13 +75,6 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'claude-opus-4.5': MODELS.CLAUDE_OPUS,
   'claude-haiku-4.5': MODELS.CLAUDE_HAIKU,
   'anthropic/claude-opus-4': MODELS.CLAUDE_OPUS,  // Map old opus-4 to new opus-4.5
-  // Newer Claude 4.6/4.7 — accept common naming variants
-  'claude-opus-4.6': MODELS.CLAUDE_OPUS_4_6,
-  'claude-opus-4-6': MODELS.CLAUDE_OPUS_4_6,
-  'claude-opus-4.7': MODELS.CLAUDE_OPUS_4_7,
-  'claude-opus-4-7': MODELS.CLAUDE_OPUS_4_7,
-  'claude-sonnet-4.6': MODELS.CLAUDE_SONNET_4_6,
-  'claude-sonnet-4-6': MODELS.CLAUDE_SONNET_4_6,
   // Old OpenAI models
   'gpt-4o': MODELS.GPT_5_1,
   'gpt-4o-mini': MODELS.GPT_5_1_MINI,
@@ -159,7 +88,6 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'gemini-1.5-flash': MODELS.GEMINI_FLASH,
   'google/gemini-2.5-pro': MODELS.GEMINI_3,  // Map old gemini-2.5 to new gemini-3
   'google/gemini-3-pro-preview': MODELS.GEMINI_3,  // Map preview to stable
-  'google/gemini-3.1-pro-preview': MODELS.GEMINI_3_1,
 };
 
 /**

@@ -317,7 +317,8 @@ a:hover,
 
 /* Focus visible optimization (keyboard navigation) */
 :focus-visible {
-  outline: none;
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
   
   /* Don't trigger layout on focus */
   contain: layout;
