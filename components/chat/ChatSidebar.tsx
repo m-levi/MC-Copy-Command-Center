@@ -9,8 +9,6 @@ import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
 } from "@/components/ui/sidebar";
 import { BrandSwitcher, type BrandOption } from "./BrandSwitcher";
 import { NewClientButton } from "./NewClientButton";
@@ -78,7 +76,7 @@ export function ChatSidebar({
         {currentBrand ? (
           <SidebarGroup className="mt-2">
             <SidebarGroupLabel>Brand</SidebarGroupLabel>
-            <SidebarMenu>
+            <div className="flex flex-col gap-0.5">
               <Link
                 href={`/brands/${currentBrand.id}`}
                 className="hover:bg-sidebar-accent hover:text-sidebar-accent-foreground flex h-8 items-center gap-2 rounded-md px-2 text-sm transition-colors"
@@ -93,7 +91,7 @@ export function ChatSidebar({
                 <Settings2 className="size-4" />
                 <span>Memories</span>
               </Link>
-            </SidebarMenu>
+            </div>
           </SidebarGroup>
         ) : null}
       </SidebarContent>

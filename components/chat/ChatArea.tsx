@@ -26,7 +26,7 @@ import {
 import { Loader } from "@/components/ai-elements/loader";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 import { Streamdown } from "streamdown";
-import { Sparkles } from "lucide-react";
+import { AlertCircle, Sparkles } from "lucide-react";
 import { ChatHeader } from "./ChatHeader";
 import { PromptBar } from "./PromptBar";
 import type { SkillOption } from "./SkillPicker";
@@ -117,7 +117,7 @@ export function ChatArea({
   const showEmpty = chat.messages.length === 0;
 
   return (
-    <div className="flex h-dvh min-w-0 flex-1 flex-col">
+    <div className="flex h-full min-h-dvh min-w-0 flex-1 flex-col">
       <ChatHeader
         brandId={brandId}
         brandName={brandName}
@@ -132,7 +132,7 @@ export function ChatArea({
       <Conversation className="relative flex-1">
         <ConversationContent className="mx-auto max-w-3xl">
           {showEmpty ? (
-            <div className="hero-glow flex w-full flex-col items-center gap-7 py-16">
+            <div className="hero-glow mx-auto flex min-h-[60vh] w-full flex-col items-center justify-center gap-7 py-14">
               <ConversationEmptyState
                 icon={
                   <span className="bg-primary/10 text-primary inline-flex size-12 items-center justify-center rounded-xl">
@@ -181,6 +181,21 @@ export function ChatArea({
             <div className="mt-2 flex items-center gap-2 px-1 text-muted-foreground">
               <Loader />
               <span className="text-xs">Thinking…</span>
+            </div>
+          ) : null}
+          {chat.error ? (
+            <div className="border-destructive/40 bg-destructive/5 text-destructive flex items-start gap-2 rounded-md border px-3 py-2 text-xs">
+              <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+              <div className="flex-1">
+                <div className="font-medium">Something went wrong</div>
+                <div className="opacity-80">{chat.error.message}</div>
+              </div>
+              <button
+                onClick={() => chat.regenerate()}
+                className="border-destructive/40 hover:bg-destructive/10 rounded border px-2 py-0.5 text-[11px] font-medium"
+              >
+                Retry
+              </button>
             </div>
           ) : null}
         </ConversationContent>
