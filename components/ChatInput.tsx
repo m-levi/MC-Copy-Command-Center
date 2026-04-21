@@ -1,27 +1,12 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useMemo } from 'react';
+import { useState, useRef, KeyboardEvent, useEffect, useCallback, DragEvent, forwardRef, useImperativeHandle } from 'react';
 import { QUICK_ACTION_PROMPTS } from '@/lib/prompt-templates';
-import { ConversationMode, EmailType } from '@/types';
-import { useEnabledModels } from '@/hooks/useEnabledModels';
+import { ConversationMode, EmailType, AIModel } from '@/types';
+import { AI_MODELS } from '@/lib/ai-models';
 import { SpeechButton } from './chat/SpeechButton';
-import { InlineModelPicker } from './ModelPicker';
-import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, Upload, Quote, ChevronDown, Check, MailOpen, ArrowUp, Square } from 'lucide-react';
+import { LayoutTemplate, Mail, GitMerge, PaperclipIcon, XIcon, FileTextIcon, ImageIcon, Upload, Quote, ChevronDown, Pencil, Lightbulb, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SaveIndicator, type SaveStatus } from '@/components/ui/save-indicator';
-import EmailReferencePicker, { EmailReference } from './chat/EmailReferencePicker';
-import InlineModePicker from './modes/InlineModePicker';
-import { 
-  SmartInputProvider, 
-  useSmartInput, 
-  SlashCommandMenu,
-  TipTapEditor,
-  type TipTapEditorHandle,
-  filterCommands,
-  findCommand as baseFindCommand,
-  type SlashCommand 
-} from './smart-input';
-import { useShortcutCommands } from '@/hooks/useShortcutCommands';
 
 interface ChatInputProps {
   onSend: (message: string, files?: File[]) => void | Promise<void>;
@@ -29,7 +14,6 @@ interface ChatInputProps {
   disabled?: boolean;
   isGenerating?: boolean;
   conversationId?: string | null;
-  brandId?: string | null;
   mode?: ConversationMode;
   draftContent?: string;
   onDraftChange?: (content: string) => void;
@@ -37,40 +21,33 @@ interface ChatInputProps {
   selectedModel?: string;
   onModelChange?: (model: string) => void;
   emailType?: EmailType;
+  // Async callback that returns true if flow creation was handled (to skip onStartFlow)
   onEmailTypeChange?: (type: EmailType) => void | Promise<boolean>;
   hasMessages?: boolean;
   autoFocus?: boolean;
+  // Flow-specific callback - called when user selects Flow to start the conversation
   onStartFlow?: () => void;
+  // Quoted text reference from email copy
   quotedText?: string;
   onClearQuote?: () => void;
-  placeholder?: string;
-  isSimpleMode?: boolean;
-  /** Enable markdown preview while typing */
-  showMarkdownPreview?: boolean;
 }
 
+// Expose methods to parent components via ref
 export interface ChatInputHandle {
   addFiles: (files: File[]) => void;
   focus: () => void;
 }
 
-/**
- * Enhanced ChatInput using SmartInput primitives
- * Provides live markdown preview, smart slash commands, and all existing functionality
- */
 const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ 
   onSend, 
   onStop, 
   disabled, 
   isGenerating, 
   conversationId,
-  brandId,
   mode = 'email_copy',
   draftContent = '',
   onDraftChange,
   onModeChange,
-  placeholder: customPlaceholder,
-  isSimpleMode = false,
   selectedModel = 'anthropic/claude-sonnet-4.5',
   onModelChange,
   emailType = 'design',
@@ -80,120 +57,58 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   onStartFlow,
   quotedText,
   onClearQuote,
-  showMarkdownPreview = true,
 }, ref) {
-  return (
-    <SmartInputProvider initialValue={draftContent} onValueChange={onDraftChange}>
-      <ChatInputInternal
-        ref={ref}
-        onSend={onSend}
-        onStop={onStop}
-        disabled={disabled}
-        isGenerating={isGenerating}
-        conversationId={conversationId}
-        brandId={brandId}
-        mode={mode}
-        draftContent={draftContent}
-        onDraftChange={onDraftChange}
-        onModeChange={onModeChange}
-        placeholder={customPlaceholder}
-        isSimpleMode={isSimpleMode}
-        selectedModel={selectedModel}
-        onModelChange={onModelChange}
-        emailType={emailType}
-        onEmailTypeChange={onEmailTypeChange}
-        hasMessages={hasMessages}
-        autoFocus={autoFocus}
-        onStartFlow={onStartFlow}
-        quotedText={quotedText}
-        onClearQuote={onClearQuote}
-        showMarkdownPreview={showMarkdownPreview}
-      />
-    </SmartInputProvider>
-  );
-});
-
-/**
- * Internal ChatInput that uses SmartInput context
- */
-const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInputInternal({ 
-  onSend, 
-  onStop, 
-  disabled, 
-  isGenerating, 
-  conversationId,
-  brandId,
-  mode = 'email_copy',
-  draftContent = '',
-  onDraftChange,
-  onModeChange,
-  placeholder: customPlaceholder,
-  isSimpleMode = false,
-  selectedModel = 'anthropic/claude-sonnet-4.5',
-  onModelChange,
-  emailType = 'design',
-  onEmailTypeChange,
-  hasMessages = false,
-  autoFocus = false,
-  quotedText,
-  onClearQuote,
-  showMarkdownPreview = true,
-}, ref) {
-  const {
-    value: message,
-    setValue: setMessage,
-    files,
-    addFiles,
-    removeFile,
-    clearFiles,
-    showCommands: showSlashCommands,
-    setShowCommands: setShowSlashCommands,
-    commandQuery,
-    setCommandQuery,
-    selectedCommandIndex,
-    setSelectedCommandIndex,
-    clear,
-  } = useSmartInput();
-  
-  const editorRef = useRef<TipTapEditorHandle>(null);
-
-  // Determine if email type picker should be shown
-  // Only show for regular email_copy mode (custom modes don't have email format settings)
-  const shouldShowEmailTypePicker = useMemo(() => {
-    return mode === 'email_copy';
-  }, [mode]);
-
-  const [emailReferences, setEmailReferences] = useState<EmailReference[]>([]);
-  const [showEmailPicker, setShowEmailPicker] = useState(false);
-  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [message, setMessage] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [showSlashCommands, setShowSlashCommands] = useState(false);
+  const [filteredCommands, setFilteredCommands] = useState<string[]>([]);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [showModePicker, setShowModePicker] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [showEmailTypePicker, setShowEmailTypePicker] = useState(false);
+  const [selectedModeIndex, setSelectedModeIndex] = useState(0);
+  const [selectedModelIndex, setSelectedModelIndex] = useState(0);
   const [selectedEmailTypeIndex, setSelectedEmailTypeIndex] = useState(0);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [interimVoiceText, setInterimVoiceText] = useState('');
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [lastSavedTimestamp, setLastSavedTimestamp] = useState<number | null>(null);
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const modePickerRef = useRef<HTMLDivElement>(null);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
   const emailTypePickerRef = useRef<HTMLDivElement>(null);
-  const attachmentMenuRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const onDraftChangeRef = useRef(onDraftChange);
   const justSentRef = useRef(false);
-  const dragCounter = useRef(0);
 
-  // Expose methods to parent
+  // Expose addFiles method to parent components via ref
   useImperativeHandle(ref, () => ({
-    addFiles: (newFiles: File[]) => addFiles(newFiles),
-    focus: () => editorRef.current?.focus(),
-  }), [addFiles]);
+    addFiles: (newFiles: File[]) => {
+      setFiles(prev => [...prev, ...newFiles]);
+    },
+    focus: () => {
+      textareaRef.current?.focus();
+    },
+  }), []);
 
-  // Use user's enabled AI models (respects settings preferences)
-  const { models: enabledModels, defaultModel } = useEnabledModels();
-  // Use ALL enabled models (no artificial limit)
+  const slashCommands = [
+    { command: '/shorten', label: 'Make it shorter', icon: '📏' },
+    { command: '/urgent', label: 'Add urgency', icon: '⚡' },
+    { command: '/casual', label: 'More casual tone', icon: '😊' },
+    { command: '/professional', label: 'More professional', icon: '💼' },
+    { command: '/proof', label: 'Add social proof', icon: '⭐' },
+    { command: '/cta', label: 'Improve CTAs', icon: '🎯' },
+  ];
 
-  // Get user's custom shortcuts as slash commands
-  const { shortcutCommands, filterCommands: filterAllCommands, findCommand } = useShortcutCommands({ mode });
+  // Use the first 4 primary models from the centralized AI_MODELS list
+  const models = AI_MODELS.slice(0, 4);
+
+  const modes = [
+    { id: 'planning' as const, name: 'Chat', description: 'Ask questions & explore ideas', icon: Lightbulb },
+    { id: 'email_copy' as const, name: 'Write', description: 'Generate email copy', icon: Pencil },
+  ];
 
   const emailTypes = [
     { id: 'design' as const, name: 'Design', description: 'Full structured marketing email', icon: LayoutTemplate },
@@ -201,25 +116,62 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
     { id: 'flow' as const, name: 'Flow', description: 'Multi-email automation', icon: GitMerge },
   ];
 
+  // Note: Flow filtering is temporarily removed since flow type is hidden
+  // When flow is re-enabled, add back: if (hasMessages && type.id === 'flow' && emailType !== 'flow') return false;
   const availableEmailTypes = emailTypes;
+
+  const getModeName = (modeId: string) => {
+    return modes.find(m => m.id === modeId)?.name || 'Write';
+  };
+
+  const getModelName = (modelId: string) => {
+    return models.find(m => m.id === modelId)?.name || 'Sonnet 4.5';
+  };
 
   const getEmailTypeName = (type: string) => {
     return emailTypes.find(t => t.id === type)?.name || 'Design';
   };
-
-  // Sync draftContent with message
-  useEffect(() => {
-    if (draftContent !== message) {
-      setMessage(draftContent);
-    }
-  }, [draftContent]);
 
   useEffect(() => {
     onDraftChangeRef.current = onDraftChange;
   }, [onDraftChange]);
 
 
-  // Close pickers on outside click
+  useEffect(() => {
+    setMessage(draftContent);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  }, [draftContent]);
+
+  // Close mode picker on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modePickerRef.current && !modePickerRef.current.contains(event.target as Node)) {
+        setShowModePicker(false);
+      }
+    };
+    if (showModePicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showModePicker]);
+
+  // Close model picker on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(event.target as Node)) {
+        setShowModelPicker(false);
+      }
+    };
+    if (showModelPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showModelPicker]);
+
+  // Close email type picker on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (emailTypePickerRef.current && !emailTypePickerRef.current.contains(event.target as Node)) {
@@ -232,21 +184,54 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
     }
   }, [showEmailTypePicker]);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(event.target as Node)) {
-        setShowAttachmentMenu(false);
-      }
-    };
-    if (showAttachmentMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [showAttachmentMenu]);
-
-  // Keyboard navigation for email type picker
+  // Keyboard navigation for dropdowns
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      // Mode picker keyboard nav
+      if (showModePicker) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedModeIndex(prev => {
+            if (e.key === 'ArrowDown') return prev < modes.length - 1 ? prev + 1 : 0;
+            return prev > 0 ? prev - 1 : modes.length - 1;
+          });
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const selected = modes[selectedModeIndex];
+          if (selected) {
+            onModeChange?.(selected.id);
+            setShowModePicker(false);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setShowModePicker(false);
+        }
+        return;
+      }
+      
+      // Model picker keyboard nav
+      if (showModelPicker) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedModelIndex(prev => {
+            if (e.key === 'ArrowDown') return prev < models.length - 1 ? prev + 1 : 0;
+            return prev > 0 ? prev - 1 : models.length - 1;
+          });
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const selected = models[selectedModelIndex];
+          if (selected) {
+            onModelChange?.(selected.id);
+            setShowModelPicker(false);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setShowModelPicker(false);
+        }
+        return;
+      }
+      
+      // Email type picker keyboard nav
       if (showEmailTypePicker) {
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
@@ -258,6 +243,8 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
           e.preventDefault();
           const selected = availableEmailTypes[selectedEmailTypeIndex];
           if (selected) {
+            // Note: Flow-specific handling temporarily removed since flow type is hidden
+            // When flow is re-enabled, add back onStartFlow logic
             onEmailTypeChange?.(selected.id);
             setShowEmailTypePicker(false);
           }
@@ -269,13 +256,27 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
       }
     };
 
-    if (showEmailTypePicker) {
+    if (showModePicker || showModelPicker || showEmailTypePicker) {
       document.addEventListener('keydown', handleKeyDown);
       return () => document.removeEventListener('keydown', handleKeyDown);
     }
-  }, [showEmailTypePicker, selectedEmailTypeIndex, availableEmailTypes, onEmailTypeChange]);
+  }, [showModePicker, showModelPicker, showEmailTypePicker, selectedModeIndex, selectedModelIndex, selectedEmailTypeIndex, modes, models, availableEmailTypes, onModeChange, onModelChange, onEmailTypeChange, onStartFlow]);
 
-  // Reset selected index when opening email type picker
+  // Reset selected index when opening dropdowns
+  useEffect(() => {
+    if (showModePicker) {
+      const currentIndex = modes.findIndex(m => m.id === mode);
+      setSelectedModeIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+  }, [showModePicker, mode, modes]);
+
+  useEffect(() => {
+    if (showModelPicker) {
+      const currentIndex = models.findIndex(m => m.id === selectedModel);
+      setSelectedModelIndex(currentIndex >= 0 ? currentIndex : 0);
+    }
+  }, [showModelPicker, selectedModel, models]);
+
   useEffect(() => {
     if (showEmailTypePicker) {
       const currentIndex = availableEmailTypes.findIndex(t => t.id === emailType);
@@ -283,20 +284,21 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
     }
   }, [showEmailTypePicker, emailType, availableEmailTypes]);
 
-  // Get filtered commands for current query (includes user shortcuts)
-  const filteredCommands = useMemo(() => {
-    return filterAllCommands(commandQuery);
-  }, [commandQuery, filterAllCommands]);
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      addFiles(Array.from(e.target.files));
+      setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   // Drag and drop handlers
-  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const dragCounter = useRef(0);
+
+  const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     dragCounter.current++;
@@ -305,7 +307,7 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
     }
   }, []);
 
-  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     dragCounter.current--;
@@ -314,44 +316,37 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
     }
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
     dragCounter.current = 0;
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      addFiles(Array.from(e.dataTransfer.files));
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      setFiles(prev => [...prev, ...droppedFiles]);
       e.dataTransfer.clearData();
     }
-  }, [addFiles]);
+  }, []);
 
-  const handleSend = useCallback(() => {
-    if ((message.trim() || files.length > 0 || quotedText || emailReferences.length > 0) && !disabled) {
+  const handleSend = () => {
+    if ((message.trim() || files.length > 0 || quotedText) && !disabled) {
       const trimmed = message.trim();
       let finalMessage = trimmed;
 
-      // Check for slash commands
       if (trimmed.startsWith('/')) {
-        const commandStr = trimmed.split(' ')[0].toLowerCase();
-        const command = findCommand(commandStr);
-        
-        if (command?.prompt) {
-          finalMessage = command.prompt;
-        } else {
-          // Legacy command support
-          if (commandStr === '/shorten') finalMessage = QUICK_ACTION_PROMPTS.make_shorter;
-          else if (commandStr === '/urgent') finalMessage = QUICK_ACTION_PROMPTS.add_urgency;
-          else if (commandStr === '/casual') finalMessage = QUICK_ACTION_PROMPTS.change_tone_casual;
-          else if (commandStr === '/professional') finalMessage = QUICK_ACTION_PROMPTS.change_tone_professional;
-          else if (commandStr === '/proof') finalMessage = QUICK_ACTION_PROMPTS.add_social_proof;
-          else if (commandStr === '/cta') finalMessage = QUICK_ACTION_PROMPTS.improve_cta;
-        }
+        const command = trimmed.toLowerCase();
+        if (command === '/shorten') finalMessage = QUICK_ACTION_PROMPTS.make_shorter;
+        else if (command === '/urgent') finalMessage = QUICK_ACTION_PROMPTS.add_urgency;
+        else if (command === '/casual') finalMessage = QUICK_ACTION_PROMPTS.change_tone_casual;
+        else if (command === '/professional') finalMessage = QUICK_ACTION_PROMPTS.change_tone_professional;
+        else if (command === '/proof') finalMessage = QUICK_ACTION_PROMPTS.add_social_proof;
+        else if (command === '/cta') finalMessage = QUICK_ACTION_PROMPTS.improve_cta;
       }
 
       // Prepend quoted text if present
@@ -361,14 +356,6 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
         onClearQuote?.();
       }
 
-      // Prepend email references if present
-      if (emailReferences.length > 0) {
-        const refBlocks = emailReferences.map((ref, idx) => {
-          return `---\nReferenced Email ${idx + 1} (from "${ref.conversationTitle}"):\n${ref.content}\n---`;
-        }).join('\n\n');
-        finalMessage = `${refBlocks}\n\n${finalMessage}`;
-      }
-
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
@@ -376,162 +363,151 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
 
       justSentRef.current = true;
       setMessage('');
-      editorRef.current?.clear(); // Clear TipTap editor
-
-      if (onDraftChange) onDraftChange('');
-      setSaveStatus('idle');
-      setLastSavedTimestamp(null);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
       
-      onSend(finalMessage, files.length > 0 ? files.map(f => f.file) : undefined);
-      clearFiles();
-      setEmailReferences([]);
+      if (onDraftChange) onDraftChange('');
+      setLastSavedTime(null);
+      
+      onSend(finalMessage, files);
+      setFiles([]);
       
       setTimeout(() => {
         justSentRef.current = false;
       }, 100);
     }
-  }, [message, files, quotedText, emailReferences, disabled, onClearQuote, onDraftChange, onSend, setMessage, clearFiles]);
+  };
 
   const debouncedSave = useCallback((value: string) => {
     if (justSentRef.current) return;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
     if (value.trim()) {
-      setSaveStatus('saving');
       saveTimeoutRef.current = setTimeout(() => {
         if (!justSentRef.current && onDraftChangeRef.current) {
           onDraftChangeRef.current(value);
-          setLastSavedTimestamp(Date.now());
-          setSaveStatus('saved');
-        } else {
-          setSaveStatus('idle');
+          const now = new Date();
+          setLastSavedTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
       }, 1000);
-    } else {
-      setSaveStatus('idle');
-      setLastSavedTimestamp(null);
     }
   }, []);
 
-  // Detect slash commands in input
-  const detectSlashCommand = useCallback((text: string) => {
-    // Check if the last word (or whole text) starts with /
-    const words = text.split(/[\s\n]/);
-    const lastWord = words[words.length - 1] || '';
-    
-    if (lastWord.startsWith('/')) {
-      setShowSlashCommands(true);
-      setCommandQuery(lastWord);
-    } else {
-      setShowSlashCommands(false);
-      setCommandQuery('');
-    }
-  }, [setShowSlashCommands, setCommandQuery]);
-
-  const handleInput = (newValue: string) => {
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
     setMessage(newValue);
     debouncedSave(newValue);
-    detectSlashCommand(newValue);
+    
+    requestAnimationFrame(() => {
+      e.target.style.height = 'auto';
+      e.target.style.height = e.target.scrollHeight + 'px';
+    });
+
+    // Check for slash commands
+    const lastWord = newValue.split(' ').pop() || '';
+    if (lastWord.startsWith('/')) {
+      const matches = slashCommands.filter(cmd => 
+        cmd.command.startsWith(lastWord.toLowerCase())
+      );
+      if (matches.length > 0) {
+        setFilteredCommands(matches.map(m => m.command));
+        setShowSlashCommands(true);
+        setSelectedCommandIndex(0);
+      } else {
+        setShowSlashCommands(false);
+      }
+    } else {
+      setShowSlashCommands(false);
+    }
   };
 
-  // Handle command selection
-  const handleCommandSelect = useCallback((command: SlashCommand) => {
-    // Find where the slash command starts in the message
-    const lastSlashIndex = message.lastIndexOf('/');
-    const beforeSlash = lastSlashIndex >= 0 ? message.slice(0, lastSlashIndex) : message;
-    
-    if (command.isFormatting && command.syntax) {
-      // For formatting commands, replace the /command with the syntax
-      const newValue = beforeSlash + command.syntax;
-      setMessage(newValue);
-      editorRef.current?.setContent(newValue);
-    } else {
-      // For action commands, replace with the command (user will press enter to execute)
-      const newValue = beforeSlash + command.command + ' ';
-      setMessage(newValue);
-      editorRef.current?.setContent(newValue);
-    }
-    
-    // Focus back on editor
-    setTimeout(() => editorRef.current?.focus(), 0);
-    
-    setShowSlashCommands(false);
-    setCommandQuery('');
-    setSelectedCommandIndex(0);
-  }, [message, setMessage, setShowSlashCommands, setCommandQuery, setSelectedCommandIndex]);
-
-  // Handle keyboard events from TipTap editor
-  const handleEditorKeyDown = useCallback((e: KeyboardEvent): boolean | void => {
-    // Don't interfere with Shift+Enter (handled by TipTap for list continuation)
-    if (e.key === 'Enter' && e.shiftKey) {
-      return false; // Let TipTap handle it
-    }
-    
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Slash command navigation
-    if (showSlashCommands && filteredCommands.length > 0) {
+    if (showSlashCommands) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedCommandIndex((prev: number) => Math.min(prev + 1, filteredCommands.length - 1));
-        return true;
+        setSelectedCommandIndex(prev => prev < filteredCommands.length - 1 ? prev + 1 : prev);
+        return;
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setSelectedCommandIndex((prev: number) => Math.max(prev - 1, 0));
-        return true;
+        setSelectedCommandIndex(prev => prev > 0 ? prev - 1 : 0);
+        return;
       } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
         e.preventDefault();
         const selectedCommand = filteredCommands[selectedCommandIndex];
         if (selectedCommand) {
-          handleCommandSelect(selectedCommand);
+          const words = message.split(' ');
+          words[words.length - 1] = selectedCommand + ' ';
+          setMessage(words.join(' '));
+          setShowSlashCommands(false);
         }
-        return true;
+        return;
       } else if (e.key === 'Escape') {
         e.preventDefault();
         setShowSlashCommands(false);
-        setCommandQuery('');
-        return true;
+        return;
       }
     }
 
-    // Submit on Enter (without Shift)
     if (e.key === 'Enter' && !e.shiftKey) {
-      // Get current content directly from editor to avoid stale state
-      const currentContent = editorRef.current?.getMarkdown() || message;
-      if (!isGenerating && currentContent.trim()) {
-        e.preventDefault();
-        handleSend();
-        return true; // Prevent TipTap default behavior
-      }
+      e.preventDefault();
+      handleSend();
     }
-    
-    return false;
-  }, [showSlashCommands, filteredCommands, selectedCommandIndex, isGenerating, message, handleCommandSelect, handleSend, setSelectedCommandIndex, setShowSlashCommands, setCommandQuery]);
+  };
 
   const getPlaceholder = () => {
-    if (customPlaceholder) return customPlaceholder;
     if (mode === 'planning') return "Ask a question, explore ideas, or plan a campaign...";
     if (mode === 'flow') return "Describe the automation flow you want to create...";
-    return "Describe the email you'd like to create... (type / for commands)";
+    return "Describe the email you'd like to create...";
   };
 
   return (
-    <div className="relative px-4 sm:px-6 lg:px-8 pt-0 pb-4 sm:pb-6 bg-transparent">
+    <div className="relative px-4 sm:px-6 lg:px-8 pt-0 pb-4 sm:pb-5 bg-transparent">
       <div className="max-w-5xl mx-auto relative">
         
-        {/* Slash Command Menu */}
-        {showSlashCommands && filteredCommands.length > 0 && (
-          <SlashCommandMenu 
-            onSelectCommand={handleCommandSelect} 
-            additionalCommands={shortcutCommands}
-          />
+        {/* Slash Command Suggestions */}
+        {showSlashCommands && (
+          <div className="mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2">
+            <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+              <p className="text-xs font-semibold text-gray-600 dark:text-gray-400">QUICK COMMANDS</p>
+            </div>
+            {slashCommands
+              .filter(cmd => filteredCommands.includes(cmd.command))
+              .map((cmd, index) => (
+                <button
+                  key={cmd.command}
+                  onClick={() => {
+                    const words = message.split(' ');
+                    words[words.length - 1] = cmd.command + ' ';
+                    setMessage(words.join(' '));
+                    setShowSlashCommands(false);
+                    textareaRef.current?.focus();
+                  }}
+                  className={cn(
+                    "w-full px-4 py-2.5 text-left text-sm flex items-center gap-3 transition-all duration-150",
+                    index === selectedCommandIndex 
+                      ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-l-2 border-blue-500' 
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border-l-2 border-transparent'
+                  )}
+                >
+                  <span className="text-lg">{cmd.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-mono font-semibold text-sm">{cmd.command}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{cmd.label}</div>
+                  </div>
+                </button>
+              ))}
+          </div>
         )}
 
         {/* Main Input Card */}
         <div 
           className={cn(
-            "relative bg-white dark:bg-gray-900 border rounded-xl transition-all duration-150 min-h-[98px] flex flex-col",
+            "relative bg-white dark:bg-gray-800 border rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/50",
             isDragging 
-              ? "border-gray-400 dark:border-gray-500 border-dashed bg-gray-50 dark:bg-gray-800/50" 
-              : "border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-700 focus-within:border-gray-300 dark:focus-within:border-gray-700 focus-within:shadow-md"
+              ? "border-blue-500 border-2 border-dashed bg-blue-50/50 dark:bg-blue-950/20" 
+              : "border-gray-200 dark:border-gray-700"
           )}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
@@ -540,9 +516,9 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
         >
           {/* Drag Overlay */}
           {isDragging && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm">
-              <div className="flex flex-col items-center gap-2 text-gray-500 dark:text-gray-400">
-                <Upload className="w-6 h-6" />
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-blue-50/90 dark:bg-blue-950/90 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-2 text-blue-600 dark:text-blue-400">
+                <Upload className="w-8 h-8 animate-bounce" />
                 <span className="text-sm font-medium">Drop files here</span>
               </div>
             </div>
@@ -551,47 +527,51 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
           {/* Quoted Text Reference */}
           {quotedText && (
             <div className="mx-3 mt-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
-              <div className="flex items-start gap-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 rounded-lg">
-                <Quote className="w-4 h-4 text-gray-400 dark:text-gray-500 mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] text-gray-600 dark:text-gray-300 leading-relaxed line-clamp-2">
-                    "{quotedText}"
-                  </p>
+              <div className="relative group">
+                {/* Subtle glow effect */}
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-indigo-500/5 rounded-xl blur-sm"></div>
+                
+                <div className="relative flex items-start gap-3 px-4 py-3 bg-gradient-to-br from-blue-50/80 to-indigo-50/50 dark:from-blue-950/40 dark:to-indigo-950/30 border border-blue-200/60 dark:border-blue-800/40 rounded-xl backdrop-blur-sm">
+                  {/* Quote icon with gradient background */}
+                  <div className="flex-shrink-0 mt-0.5">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
+                      <Quote className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  </div>
+                  
+                  {/* Quote content */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600/80 dark:text-blue-400/80 mb-1">
+                      Referencing copy
+                    </p>
+                    <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed line-clamp-3 italic">
+                      "{quotedText}"
+                    </p>
+                  </div>
+                  
+                  {/* Close button */}
+                  <button
+                    onClick={onClearQuote}
+                    className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60 transition-all duration-150 opacity-60 group-hover:opacity-100"
+                    title="Remove quote"
+                  >
+                    <XIcon className="w-4 h-4" />
+                  </button>
                 </div>
-                <button
-                  onClick={onClearQuote}
-                  className="flex-shrink-0 p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                >
-                  <XIcon className="w-3.5 h-3.5" />
-                </button>
               </div>
             </div>
           )}
 
-          {/* File & Email Reference Previews */}
-          {(files.length > 0 || emailReferences.length > 0) && (
-            <div className="px-3 pt-3 flex flex-wrap gap-1.5">
-              {files.map((file) => (
-                <div key={file.id} className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md text-xs group">
-                  {file.type === 'image' ? <ImageIcon className="w-3 h-3 text-gray-500" /> : <FileTextIcon className="w-3 h-3 text-gray-500" />}
-                  <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{file.file.name}</span>
+          {/* File Previews */}
+          {files.length > 0 && (
+            <div className="px-4 pt-4 flex flex-wrap gap-2">
+              {files.map((file, index) => (
+                <div key={index} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700/50 px-3 py-1.5 rounded-lg text-xs group">
+                  {file.type.startsWith('image/') ? <ImageIcon className="w-3.5 h-3.5 text-blue-500" /> : <FileTextIcon className="w-3.5 h-3.5 text-gray-500" />}
+                  <span className="max-w-[150px] truncate">{file.name}</span>
                   <button 
-                    onClick={() => removeFile(file.id)}
-                    className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                  >
-                    <XIcon className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-              {emailReferences.map((ref, index) => (
-                <div key={`ref-${index}`} className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md text-xs group">
-                  <MailOpen className="w-3 h-3 text-gray-500" />
-                  <span className="max-w-[140px] truncate text-gray-600 dark:text-gray-300" title={ref.conversationTitle}>
-                    {ref.preview.slice(0, 30)}...
-                  </span>
-                  <button 
-                    onClick={() => setEmailReferences(prev => prev.filter((_, i) => i !== index))}
-                    className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    onClick={() => removeFile(index)}
+                    className="ml-1 p-0.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-gray-600"
                   >
                     <XIcon className="w-3 h-3" />
                   </button>
@@ -600,27 +580,24 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
             </div>
           )}
 
-          <div className="px-4 pt-3 pb-2">
-            <TipTapEditor
-              ref={editorRef}
+          <div className="px-4 sm:px-6 pt-4 pb-2">
+            <textarea
+              ref={textareaRef}
               value={message + (interimVoiceText ? (message ? ' ' : '') + interimVoiceText : '')}
-              onChange={(val) => {
-                if (!interimVoiceText) {
-                  handleInput(val);
-                }
-              }}
-              onKeyDown={handleEditorKeyDown}
-              placeholder={isGenerating ? "Type your next message..." : getPlaceholder()}
-              disabled={disabled}
-              minHeight="24px"
-              maxHeight="200px"
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              placeholder={getPlaceholder()}
+              disabled={disabled || isGenerating}
+              rows={1}
+              className="w-full text-[15px] sm:text-base leading-relaxed bg-transparent border-none text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 focus:border-none outline-none resize-none max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ border: 'none', outline: 'none', boxShadow: 'none' }}
             />
           </div>
           
           {/* Bottom Controls Bar */}
-          <div className="flex items-center justify-between px-2 sm:px-3 pb-2 mt-auto">
-            {/* Left: Attachments & Options */}
-            <div className="flex items-center">
+          <div className="flex items-center justify-between px-3 sm:px-4 pb-3">
+            {/* Left: Attachments & Options Pill */}
+            <div className="flex items-center gap-2">
               <input 
                 type="file" 
                 ref={fileInputRef} 
@@ -628,99 +605,162 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
                 multiple 
                 onChange={handleFileSelect}
               />
-              
-              {/* Attachment Button */}
-              <div className="relative" ref={attachmentMenuRef}>
-                <button
-                  onClick={() => {
-                    if (!brandId) {
-                      fileInputRef.current?.click();
-                    } else {
-                      setShowAttachmentMenu(!showAttachmentMenu);
-                    }
-                  }}
-                  className={cn(
-                    "p-1.5 rounded-md transition-colors",
-                    showAttachmentMenu
-                      ? "text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800"
-                      : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                  )}
-                  title="Attach"
-                >
-                  <PaperclipIcon className="w-4 h-4" />
-                </button>
-                
-                {showAttachmentMenu && (
-                  <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-lg min-w-[180px] z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom-left">
-                    <div className="p-1">
-                      <button
-                        onClick={() => {
-                          fileInputRef.current?.click();
-                          setShowAttachmentMenu(false);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                      >
-                        <Upload className="w-4 h-4 text-gray-500" />
-                        <span className="text-sm text-gray-700 dark:text-gray-200">Upload file</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowEmailPicker(true);
-                          setShowAttachmentMenu(false);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                      >
-                        <MailOpen className="w-4 h-4 text-gray-500" />
-                        <span className="text-sm text-gray-700 dark:text-gray-200">Reference email</span>
-                      </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-md cursor-pointer"
+                title="Attach files"
+              >
+                <PaperclipIcon className="w-4 h-4" />
+              </button>
+
+              {/* Options Pill Container */}
+              <div className="flex items-center bg-gray-50 dark:bg-gray-800/60 rounded-full px-1 py-0.5 border border-gray-100 dark:border-gray-700/50">
+                {/* Mode Dropdown (Plan/Write) */}
+                <div className="relative" ref={modePickerRef}>
+                  <button
+                    onClick={() => !hasMessages && setShowModePicker(!showModePicker)}
+                    disabled={hasMessages}
+                    className={cn(
+                      "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium select-none",
+                      hasMessages
+                        ? "text-gray-400 dark:text-gray-500 cursor-not-allowed"
+                        : "cursor-pointer",
+                      !hasMessages && showModePicker
+                        ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                        : !hasMessages && "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    )}
+                  >
+                    <span>{getModeName(mode)}</span>
+                    <ChevronDown className={cn("w-3 h-3", showModePicker && "rotate-180")} />
+                  </button>
+                  
+                  {showModePicker && (
+                    <div 
+                      className="absolute bottom-full left-0 mb-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg min-w-[90px] z-50 p-1 outline-none animate-in fade-in zoom-in-95 duration-75 origin-bottom-left"
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setSelectedModeIndex(prev => prev < modes.length - 1 ? prev + 1 : 0);
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setSelectedModeIndex(prev => prev > 0 ? prev - 1 : modes.length - 1);
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault();
+                          onModeChange?.(modes[selectedModeIndex].id);
+                          setShowModePicker(false);
+                        } else if (e.key === 'Escape') {
+                          setShowModePicker(false);
+                        }
+                      }}
+                      tabIndex={0}
+                      ref={(el) => el?.focus()}
+                    >
+                      {modes.map((m, index) => (
+                        <button
+                          key={m.id}
+                          onClick={() => {
+                            onModeChange?.(m.id);
+                            setShowModePicker(false);
+                          }}
+                          onMouseEnter={() => setSelectedModeIndex(index)}
+                          className={cn(
+                            "w-full px-2.5 py-1.5 text-left text-[11px] font-medium rounded-md cursor-pointer select-none",
+                            index === selectedModeIndex 
+                              ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" 
+                              : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          )}
+                        >
+                          {m.name}
+                        </button>
+                      ))}
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
 
-              {/* Divider */}
-              {!isSimpleMode && <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />}
-
-              {/* Options - Clean inline style */}
-              {!isSimpleMode && (
-              <div className="flex items-center">
-                {/* Model Picker - Uses all enabled models with search */}
-                {enabledModels.length > 1 && (
+                <span className="text-gray-300 dark:text-gray-600 text-[8px] mx-0.5">•</span>
+                
+                {/* Model Dropdown */}
+                {models.length > 1 && (
                   <>
-                    <InlineModelPicker
-                      models={enabledModels}
-                      selectedModel={selectedModel}
-                      onModelChange={(modelId) => onModelChange?.(modelId)}
-                    />
-                    <span className="text-gray-300 dark:text-gray-700 text-xs mx-0.5">/</span>
+                    <div className="relative" ref={modelPickerRef}>
+                      <button
+                        onClick={() => setShowModelPicker(!showModelPicker)}
+                        className={cn(
+                          "flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium cursor-pointer select-none transition-colors",
+                          showModelPicker
+                            ? "bg-blue-500 dark:bg-blue-600 text-white"
+                            : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        )}
+                      >
+                        <span>{getModelName(selectedModel)}</span>
+                        <ChevronDown className={cn("w-3 h-3", showModelPicker && "rotate-180")} />
+                      </button>
+                      
+                      {showModelPicker && (
+                        <div 
+                          className="absolute bottom-full left-0 mb-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg min-w-[120px] z-50 p-1 outline-none animate-in fade-in zoom-in-95 duration-75 origin-bottom-left"
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setSelectedModelIndex(prev => prev < models.length - 1 ? prev + 1 : 0);
+                            } else if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setSelectedModelIndex(prev => prev > 0 ? prev - 1 : models.length - 1);
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault();
+                              onModelChange?.(models[selectedModelIndex].id);
+                              setShowModelPicker(false);
+                            } else if (e.key === 'Escape') {
+                              setShowModelPicker(false);
+                            }
+                          }}
+                          tabIndex={0}
+                          ref={(el) => el?.focus()}
+                        >
+                          {models.map((model, index) => (
+                            <button
+                              key={model.id}
+                              onClick={() => {
+                                onModelChange?.(model.id);
+                                setShowModelPicker(false);
+                              }}
+                              onMouseEnter={() => setSelectedModelIndex(index)}
+                              className={cn(
+                                "w-full px-2.5 py-1.5 text-left text-[11px] font-medium rounded-md cursor-pointer select-none",
+                                index === selectedModelIndex 
+                                  ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" 
+                                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                              )}
+                            >
+                              {model.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-gray-300 dark:text-gray-600 text-[8px] mx-0.5">•</span>
                   </>
                 )}
 
-                {/* Mode Dropdown with Custom Modes Support - Second */}
-                <InlineModePicker
-                  value={mode}
-                  onChange={(newMode) => onModeChange?.(newMode)}
-                  disabled={hasMessages}
-                  compact={false}
-                  minimal={true}
-                />
-                
-                <span className="text-gray-300 dark:text-gray-700 text-xs mx-0.5">/</span>
-
-                {/* Email Type Dropdown - Show for email_copy or custom modes with email_format='any' */}
-                {shouldShowEmailTypePicker && (
+                {/* Email Type Dropdown */}
+                {mode === 'email_copy' && (
                   <div className="relative" ref={emailTypePickerRef}>
                     <button
                       onClick={() => setShowEmailTypePicker(!showEmailTypePicker)}
-                      className="flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium cursor-pointer select-none",
+                        showEmailTypePicker
+                          ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                          : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      )}
                     >
                       <span>{getEmailTypeName(emailType)}</span>
-                      <ChevronDown className={cn("w-3 h-3 opacity-50", showEmailTypePicker && "rotate-180")} />
+                      <ChevronDown className={cn("w-3 h-3", showEmailTypePicker && "rotate-180")} />
                     </button>
                     
                     {showEmailTypePicker && (
                       <div 
-                        className="absolute bottom-full left-0 mb-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-lg min-w-[120px] z-50 p-1 animate-in fade-in zoom-in-95 duration-100 origin-bottom-left"
+                        className="absolute bottom-full left-0 mb-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg min-w-[90px] z-50 p-1 outline-none animate-in fade-in zoom-in-95 duration-75 origin-bottom-left"
                         onKeyDown={async (e) => {
                           if (e.key === 'ArrowDown') {
                             e.preventDefault();
@@ -731,6 +771,7 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
                           } else if (e.key === 'Enter') {
                             e.preventDefault();
                             const selected = availableEmailTypes[selectedEmailTypeIndex];
+                            // Note: Flow-specific handling temporarily removed since flow type is hidden
                             onEmailTypeChange?.(selected.id);
                             setShowEmailTypePicker(false);
                           } else if (e.key === 'Escape') {
@@ -740,111 +781,89 @@ const ChatInputInternal = forwardRef<ChatInputHandle, ChatInputProps>(function C
                         tabIndex={0}
                         ref={(el) => el?.focus()}
                       >
-                        {availableEmailTypes.map((type, index) => {
-                          const Icon = type.icon;
-                          return (
-                            <button
-                              key={type.id}
-                              onClick={() => {
-                                onEmailTypeChange?.(type.id);
-                                setShowEmailTypePicker(false);
-                              }}
-                              onMouseEnter={() => setSelectedEmailTypeIndex(index)}
-                              className={cn(
-                                "w-full px-2.5 py-1.5 text-left text-xs font-medium rounded-md flex items-center gap-2 transition-colors",
-                                emailType === type.id && "text-gray-900 dark:text-white",
-                                index === selectedEmailTypeIndex 
-                                  ? "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white" 
-                                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                              )}
-                            >
-                              <Icon className="w-3.5 h-3.5 opacity-60" />
-                              {type.name}
-                              {emailType === type.id && <Check className="w-3 h-3 ml-auto opacity-60" />}
-                            </button>
-                          );
-                        })}
+                        {availableEmailTypes.map((type, index) => (
+                          <button
+                            key={type.id}
+                            onClick={() => {
+                              // Note: Flow-specific handling temporarily removed since flow type is hidden
+                              onEmailTypeChange?.(type.id);
+                              setShowEmailTypePicker(false);
+                            }}
+                            onMouseEnter={() => setSelectedEmailTypeIndex(index)}
+                            className={cn(
+                              "w-full px-2.5 py-1.5 text-left text-[11px] font-medium rounded-md cursor-pointer select-none",
+                              index === selectedEmailTypeIndex 
+                                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" 
+                                : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                            )}
+                          >
+                            {type.name}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
                 )}
               </div>
-              )}
             </div>
 
             {/* Right: Voice & Send */}
             <div className="flex items-center gap-1">
-              {!isGenerating && message.length > 0 && (
-                <SaveIndicator
-                  status={saveStatus}
-                  lastSaved={lastSavedTimestamp}
-                  className="hidden sm:flex mr-1.5"
-                  size="sm"
+              {lastSavedTime && !isGenerating && message.length > 0 && (
+                <span className="text-[10px] text-gray-400 hidden sm:inline mr-1">
+                  Saved {lastSavedTime}
+                </span>
+              )}
+              
+              {!isGenerating && (
+                <SpeechButton
+                  onTranscript={(text, isFinal) => {
+                    if (isFinal) {
+                      const newMessage = message ? `${message} ${text}` : text;
+                      setMessage(newMessage);
+                      setInterimVoiceText('');
+                      debouncedSave(newMessage);
+                    } else {
+                      setInterimVoiceText(text);
+                    }
+                  }}
+                  disabled={disabled}
+                  onStateChange={setIsRecordingVoice}
                 />
               )}
               
-              <SpeechButton
-                onTranscript={(text, isFinal) => {
-                  if (isFinal) {
-                    const newMessage = message ? `${message} ${text}` : text;
-                    setMessage(newMessage);
-                    setInterimVoiceText('');
-                    debouncedSave(newMessage);
-                  } else {
-                    setInterimVoiceText(text);
-                  }
-                }}
-                disabled={disabled}
-                onStateChange={setIsRecordingVoice}
-              />
-              
               {!isRecordingVoice && (
-                <>
-                  {/* Stop button - shows during generation */}
-                  {isGenerating && onStop && (
-                    <button
-                      onClick={onStop}
-                      className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-150"
-                      title="Stop generating"
-                    >
-                      <Square className="w-3 h-3 fill-current" />
-                    </button>
-                  )}
-                  
-                  {/* Send button - hidden during generation */}
-                  {!isGenerating && (
-                    <button
-                      onClick={handleSend}
-                      disabled={(!message.trim() && files.length === 0 && !quotedText && emailReferences.length === 0) || disabled}
-                      className={cn(
-                        "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150",
-                        (!message.trim() && files.length === 0 && !quotedText && emailReferences.length === 0) || disabled
-                          ? "bg-gray-100 dark:bg-gray-800 text-gray-300 dark:text-gray-600 cursor-not-allowed"
-                          : "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 hover:scale-105 active:scale-95 shadow-sm hover:shadow"
-                      )}
-                    >
-                      <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
-                    </button>
-                  )}
-                </>
+                isGenerating && onStop ? (
+                  <button
+                    onClick={onStop}
+                    className="flex items-center justify-center w-7 h-7 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer"
+                    title="Stop generating"
+                  >
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={(!message.trim() && files.length === 0 && !quotedText) || disabled}
+                    className={cn(
+                      "flex items-center justify-center w-7 h-7 rounded-full",
+                      (!message.trim() && files.length === 0 && !quotedText) || disabled
+                        ? "text-gray-300 dark:text-gray-600 cursor-not-allowed"
+                        : "text-white bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 cursor-pointer"
+                    )}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75" />
+                    </svg>
+                  </button>
+                )
               )}
             </div>
           </div>
         </div>
       </div>
-      
-      {/* Email Reference Picker Modal */}
-      {brandId && (
-        <EmailReferencePicker
-          open={showEmailPicker}
-          onOpenChange={setShowEmailPicker}
-          brandId={brandId}
-          currentConversationId={conversationId}
-          onSelect={(reference) => {
-            setEmailReferences(prev => [...prev, reference]);
-          }}
-        />
-      )}
     </div>
   );
 });

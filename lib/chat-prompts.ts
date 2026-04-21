@@ -11,7 +11,6 @@ import {
 } from './prompts/standard-email.prompt';
 import { buildDesignEmailV2Prompt } from './prompts/design-email-v2.prompt';
 import { SECTION_REGENERATION_PROMPTS } from './prompts/section-regeneration.prompt';
-import { composeSystemPrompt } from './prompts/root-system-prompt';
 import { BrandVoiceData } from '@/types';
 
 export interface PromptContext {
@@ -357,57 +356,6 @@ export function buildSectionRegenerationPrompt(
 }
 
 /**
- * Build prompt for custom modes
- * Uses the new layered architecture: Root System Prompt + Mode Extension + Brand Context
- */
-export function buildCustomModePrompt(
-  systemPrompt: string,
-  brandContext: any,
-  options: {
-    conversationContext?: any;
-    memoryContext?: string;
-    userMessage?: string;
-    allowedArtifactKinds?: string[];
-  } = {}
-): string {
-  // Build brand context string
-  const brandInfo = buildBrandInfo(brandContext);
-  const contextInfo = buildContextInfo(options.conversationContext);
-  const hostname = getHostnameFromUrl(brandContext?.website_url);
-  const websiteHint = hostname ? ` (including ${hostname})` : '';
-
-  // Process the mode-specific prompt with variable substitution
-  let processedModePrompt = systemPrompt
-    .replace(/\{\{BRAND_INFO\}\}/g, brandInfo)
-    .replace(/\{\{BRAND_NAME\}\}/g, brandContext?.name || '')
-    .replace(/\{\{WEBSITE_URL\}\}/g, brandContext?.website_url || '')
-    .replace(/\{\{WEBSITE_HINT\}\}/g, websiteHint)
-    .replace(/\{\{COPY_BRIEF\}\}/g, options.userMessage || '')
-    .replace(/\{\{USER_MESSAGE\}\}/g, options.userMessage || '')
-    .replace(/\{\{CONTEXT_INFO\}\}/g, contextInfo)
-    .replace(/\{\{MEMORY_CONTEXT\}\}/g, options.memoryContext || '')
-    .replace(/\{\{PRODUCTS\}\}/g, '') // Product context populated by product_search tool if enabled
-    .replace(/\{\{RAG_CONTEXT\}\}/g, ''); // RAG disabled
-
-  // Add artifact kind restrictions if specified
-  if (options.allowedArtifactKinds && options.allowedArtifactKinds.length > 0) {
-    const kindsStr = options.allowedArtifactKinds.join(', ');
-    processedModePrompt += `\n\n## Artifact Restrictions
-IMPORTANT: When creating artifacts, you may ONLY use these artifact kinds: ${kindsStr}.
-Do NOT create email artifacts or other artifact types not in this list.
-If you need to provide content that doesn't fit these artifact types, include it directly in your response text instead.`;
-  }
-
-  // Compose the full prompt using the layered system
-  return composeSystemPrompt({
-    modePrompt: processedModePrompt,
-    brandContext: brandInfo,
-    memoryContext: options.memoryContext,
-    additionalContext: contextInfo || undefined,
-  });
-}
-
-/**
  * Main system prompt builder - routes to appropriate prompt
  */
 export function buildSystemPrompt(
@@ -419,7 +367,6 @@ export function buildSystemPrompt(
     conversationMode?: string;
     memoryContext?: string;
     emailType?: string;
-    customModePrompt?: string; // For custom modes
   } = {}
 ): string {
   const brandInfo = buildBrandInfo(brandContext);
@@ -441,14 +388,6 @@ export function buildSystemPrompt(
       options.regenerateSection.title,
       context
     );
-  }
-
-  // Custom mode - use the provided custom prompt
-  if (options.customModePrompt) {
-    return buildCustomModePrompt(options.customModePrompt, brandContext, {
-      conversationContext: options.conversationContext,
-      memoryContext: options.memoryContext,
-    });
   }
 
   // Planning mode

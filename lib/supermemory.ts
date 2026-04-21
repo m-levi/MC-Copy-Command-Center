@@ -9,7 +9,6 @@
  */
 
 import { logger } from '@/lib/logger';
-import { withCircuitBreaker, CIRCUIT_NAMES } from '@/lib/circuit-breaker';
 
 // Types for Supermemory responses
 export interface SupermemoryMemory {
@@ -57,50 +56,34 @@ function getApiKey(): string {
 
 /**
  * Base fetch helper for Supermemory API calls
- * Wrapped with circuit breaker for fault tolerance
  */
 async function supermemoryFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  return withCircuitBreaker(
-    async () => {
-      const apiKey = getApiKey();
-      const baseUrl = 'https://api.supermemory.ai/v3';
+  const apiKey = getApiKey();
+  const baseUrl = 'https://api.supermemory.ai/v3';
 
-      const response = await fetch(`${baseUrl}${endpoint}`, {
-        ...options,
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-        // Add timeout to prevent hanging requests
-        signal: AbortSignal.timeout(10000), // 10 second timeout
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        // Only log as error for non-404 responses (404 usually means empty/new user)
-        if (response.status !== 404) {
-          logger.error('[Supermemory] API error:', {
-            status: response.status,
-            statusText: response.statusText,
-            error: errorText,
-          });
-        }
-        throw new Error(`Supermemory API error: ${response.status} ${response.statusText}`);
-      }
-
-      return response.json();
+  const response = await fetch(`${baseUrl}${endpoint}`, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
     },
-    {
-      name: CIRCUIT_NAMES.SUPERMEMORY,
-      failureThreshold: 3, // Open circuit after 3 failures
-      resetTimeout: 60000, // Try again after 1 minute
-      successThreshold: 2, // Need 2 successes to close circuit
-    }
-  );
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error('[Supermemory] API error:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText,
+    });
+    throw new Error(`Supermemory API error: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
 }
 
 /**
@@ -165,7 +148,7 @@ export async function searchMemories(
     method: 'POST',
     body: JSON.stringify({
       userId: compositeUserId,
-      q: query,  // Supermemory API expects 'q' parameter
+      query,
       limit,
     }),
   });
@@ -246,26 +229,6 @@ export async function getUserProfile(
 export function isSupermemoryConfigured(): boolean {
   return !!process.env.SUPERMEMORY_API_KEY;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
