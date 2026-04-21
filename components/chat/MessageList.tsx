@@ -2,8 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import type { UIMessage } from "ai";
-import { Sparkles, User } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
 type PartLike = { type: string } & Record<string, unknown>;
@@ -25,9 +23,9 @@ export function MessageList({
 
   return (
     <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
+      <div className="mx-auto flex max-w-3xl flex-col gap-8 px-4 py-8">
         {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
+          <Row key={m.id} message={m} />
         ))}
         {status === "submitted" || status === "streaming" ? <TypingIndicator /> : null}
       </div>
@@ -35,27 +33,20 @@ export function MessageList({
   );
 }
 
-function MessageBubble({ message }: { message: UIMessage }) {
+/**
+ * User messages: right-aligned violet pill, no avatar.
+ * Assistant messages: left-aligned plain prose, no border, no background,
+ * no avatar — the content itself is the message.
+ */
+function Row({ message }: { message: UIMessage }) {
   const isUser = message.role === "user";
-  return (
-    <div className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}>
-      {!isUser ? (
-        <Avatar className="mt-0.5 size-8 shrink-0">
-          <AvatarFallback className="bg-primary/10 text-primary">
-            <Sparkles className="size-4" />
-          </AvatarFallback>
-        </Avatar>
-      ) : null}
-      <div
-        className={cn(
-          "min-w-0 max-w-[calc(100%-3rem)] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
-          isUser
-            ? "bg-primary text-primary-foreground rounded-br-md"
-            : "bg-card text-card-foreground rounded-bl-md border",
-        )}
-      >
-        <div className="prose prose-sm">
-          {(message.parts ?? []).map((part: PartLike, idx: number) => {
+  const parts = (message.parts ?? []) as PartLike[];
+
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="bg-primary text-primary-foreground max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed">
+          {parts.map((part, idx) => {
             if (part.type === "text") {
               return (
                 <span key={idx} className="whitespace-pre-wrap">
@@ -63,56 +54,89 @@ function MessageBubble({ message }: { message: UIMessage }) {
                 </span>
               );
             }
-            if (part.type === "reasoning") {
-              const text = String((part as { text?: string }).text ?? "");
-              return (
-                <details key={idx} className="text-muted-foreground my-2 text-xs">
-                  <summary className="cursor-pointer select-none font-medium">
-                    Reasoning
-                  </summary>
-                  <div className="mt-1 whitespace-pre-wrap">{text}</div>
-                </details>
-              );
-            }
-            if (part.type?.startsWith("tool-")) {
-              const name = part.type.replace(/^tool-/, "");
-              return (
-                <div
-                  key={idx}
-                  className="bg-muted text-muted-foreground my-2 rounded-md border px-2 py-1 text-xs"
-                >
-                  <span className="font-mono">{name}</span>
-                </div>
-              );
-            }
             return null;
           })}
         </div>
       </div>
-      {isUser ? (
-        <Avatar className="mt-0.5 size-8 shrink-0">
-          <AvatarFallback className="bg-muted">
-            <User className="size-4" />
-          </AvatarFallback>
-        </Avatar>
-      ) : null}
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="prose prose-sm text-foreground max-w-none">
+        {parts.map((part, idx) => {
+          if (part.type === "text") {
+            return (
+              <TextPart
+                key={idx}
+                text={String((part as { text?: string }).text ?? "")}
+              />
+            );
+          }
+          if (part.type === "reasoning") {
+            const text = String((part as { text?: string }).text ?? "");
+            return (
+              <details
+                key={idx}
+                className="text-muted-foreground my-3 rounded-lg border border-dashed px-3 py-1.5 text-xs open:pb-3"
+              >
+                <summary className="cursor-pointer select-none py-1 font-medium">
+                  Thinking
+                </summary>
+                <div className="mt-1 whitespace-pre-wrap text-xs leading-relaxed">
+                  {text}
+                </div>
+              </details>
+            );
+          }
+          if (part.type?.startsWith("tool-")) {
+            const name = part.type.replace(/^tool-/, "");
+            return <ToolChip key={idx} name={name} />;
+          }
+          return null;
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Renders a single text part. We split on blank lines so the prose CSS
+ * applies between paragraphs instead of every chunk collapsing into one
+ * giant <span>.
+ */
+function TextPart({ text }: { text: string }) {
+  const paragraphs = text.split(/\n{2,}/);
+  return (
+    <>
+      {paragraphs.map((para, i) => (
+        <p key={i} className="whitespace-pre-wrap">
+          {para}
+        </p>
+      ))}
+    </>
+  );
+}
+
+function ToolChip({ name }: { name: string }) {
+  return (
+    <div
+      className={cn(
+        "text-muted-foreground my-2 inline-flex items-center gap-1.5 rounded-md bg-muted/70 px-2 py-0.5 text-[11px]",
+      )}
+    >
+      <span className="size-1.5 rounded-full bg-primary/70" />
+      <span className="font-mono">{name}</span>
     </div>
   );
 }
 
 function TypingIndicator() {
   return (
-    <div className="flex gap-3">
-      <Avatar className="mt-0.5 size-8 shrink-0">
-        <AvatarFallback className="bg-primary/10 text-primary">
-          <Sparkles className="size-4" />
-        </AvatarFallback>
-      </Avatar>
-      <div className="bg-card flex items-center gap-1.5 rounded-2xl rounded-bl-md border px-4 py-3">
-        <Dot delay="0ms" />
-        <Dot delay="150ms" />
-        <Dot delay="300ms" />
-      </div>
+    <div className="flex items-center gap-1.5 py-1">
+      <Dot delay="0ms" />
+      <Dot delay="150ms" />
+      <Dot delay="300ms" />
     </div>
   );
 }
@@ -120,7 +144,7 @@ function TypingIndicator() {
 function Dot({ delay }: { delay: string }) {
   return (
     <span
-      className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full"
+      className="bg-muted-foreground/60 size-1.5 animate-bounce rounded-full"
       style={{ animationDelay: delay }}
     />
   );

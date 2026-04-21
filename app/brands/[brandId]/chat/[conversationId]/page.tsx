@@ -1,4 +1,4 @@
-import { redirect, notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loadBuiltinSkills } from "@/lib/skills/registry";
 import { MODELS } from "@/lib/ai-constants";
@@ -17,10 +17,11 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
- * Deep-link a specific conversation. Loads the conversation row + its
- * skill lock (if any) + sidebar + skill list. Previous messages are not
- * yet hydrated into the chat (v1 persistence is stream-only); the UI
- * opens a blank thread with the skill and model remembered.
+ * Deep-link to a specific conversation. Robust to partial schema: if
+ * the row doesn't exist yet (race with the first-message upsert) we
+ * render an empty chat scoped to that id instead of 404-ing. If the
+ * row exists but on a different brand, we redirect to that brand's
+ * page so the URL can't silently lie about which client you're in.
  */
 export default async function ConversationPage({
   params,
@@ -33,13 +34,20 @@ export default async function ConversationPage({
   const user = userRes?.user;
   if (!user) redirect("/login");
 
+  // `select('*')` is intentional — skill_slug/model/mode may or may not
+  // exist depending on how far migrations are applied.
   const convRes = await supabase
     .from("conversations")
-    .select("id, title, brand_id, skill_slug, model")
+    .select("*")
     .eq("id", conversationId)
     .maybeSingle();
-  if (!convRes.data || convRes.data.brand_id !== brandId) notFound();
-  const conversation = convRes.data;
+  const conversation = convRes.data as
+    | (Record<string, unknown> & { brand_id?: string; title?: string })
+    | null;
+
+  if (conversation?.brand_id && conversation.brand_id !== brandId) {
+    redirect(`/brands/${conversation.brand_id}/chat/${conversationId}`);
+  }
 
   const sidebar = await loadSidebarData(supabase, brandId);
   const skills = await loadScopedSkills(supabase, user.id, brandId);
@@ -57,6 +65,11 @@ export default async function ConversationPage({
   }));
   const allSkills: SkillOption[] = [...builtinSkills, ...skills];
 
+  const skillSlug = (conversation?.skill_slug as string | null | undefined) ?? null;
+  const modelId =
+    (conversation?.model as string | null | undefined) ?? MODELS.CLAUDE_SONNET;
+  const title = (conversation?.title as string | null | undefined) ?? undefined;
+
   return (
     <ChatShell
       sidebar={
@@ -72,9 +85,9 @@ export default async function ConversationPage({
         brandId={brandId}
         brandName={currentBrand?.name ?? "Client"}
         conversationId={conversationId}
-        conversationTitle={conversation.title ?? undefined}
-        initialSkillSlug={conversation.skill_slug ?? null}
-        initialModelId={conversation.model ?? MODELS.CLAUDE_SONNET}
+        conversationTitle={title}
+        initialSkillSlug={skillSlug}
+        initialModelId={modelId}
         skills={allSkills}
       />
     </ChatShell>

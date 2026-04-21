@@ -24,6 +24,67 @@ interface Body {
   skillVariables?: Record<string, unknown>;
 }
 
+/**
+ * Derive a short human-readable title from the first user message.
+ * Trims and clamps to ~60 characters so the sidebar stays tidy.
+ */
+function deriveTitle(messages: UIMessage[]): string | null {
+  const firstUser = messages.find((m) => m.role === 'user');
+  if (!firstUser) return null;
+  const text = (firstUser.parts ?? [])
+    .filter((p) => p.type === 'text')
+    .map((p) => (p as { text?: string }).text ?? '')
+    .join(' ')
+    .trim();
+  if (!text) return null;
+  const firstLine = text.split(/\r?\n/)[0].trim();
+  return firstLine.length > 60 ? firstLine.slice(0, 58).trimEnd() + '…' : firstLine;
+}
+
+/**
+ * Persist (or refresh) the conversation row. Idempotent upsert keyed on
+ * the client-generated conversation id. We only touch columns that are
+ * guaranteed to exist on any deployed schema; optional columns are
+ * written on a best-effort basis and errors are swallowed so a partial
+ * schema never breaks a chat.
+ */
+async function upsertConversation(params: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any;
+  conversationId: string;
+  brandId: string;
+  userId: string;
+  title: string | null;
+  skillSlug: string | null;
+  modelId: string | null;
+}) {
+  const base: Record<string, unknown> = {
+    id: params.conversationId,
+    brand_id: params.brandId,
+    user_id: params.userId,
+    updated_at: new Date().toISOString(),
+  };
+  if (params.title) base.title = params.title;
+
+  try {
+    await params.supabase.from('conversations').upsert(base, { onConflict: 'id' });
+  } catch (err) {
+    logger.warn('[chat] conversation base upsert failed:', err);
+  }
+
+  // Optional columns — try once; if the column doesn't exist, ignore.
+  try {
+    const extra: Record<string, unknown> = {};
+    if (params.skillSlug !== undefined) extra.skill_slug = params.skillSlug;
+    if (params.modelId) extra.model = params.modelId;
+    if (Object.keys(extra).length > 0) {
+      await params.supabase.from('conversations').update(extra).eq('id', params.conversationId);
+    }
+  } catch (err) {
+    logger.warn('[chat] conversation optional-column update skipped:', err);
+  }
+}
+
 export async function POST(req: Request) {
   let body: Body;
   try {
@@ -31,7 +92,7 @@ export async function POST(req: Request) {
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }
-  const { messages, modelId, brandId, skillSlug, skillVariables = {} } = body;
+  const { messages, modelId, brandId, skillSlug, skillVariables = {}, conversationId } = body;
 
   if (!messages?.length) return new Response('Missing messages', { status: 400 });
   if (!brandId) return new Response('Missing brandId', { status: 400 });
@@ -91,7 +152,23 @@ export async function POST(req: Request) {
     hasStyleGuide: Boolean(brand.copywriting_style_guide),
     skillSlug: skillSlug ?? '(auto)',
     modelId: modelId ?? '(default)',
+    conversationId: conversationId ?? '(none)',
   });
+
+  // Persist the conversation row so the sidebar can list it immediately.
+  // Fire-and-forget — a DB hiccup shouldn't block the stream.
+  if (conversationId) {
+    const title = deriveTitle(messages);
+    upsertConversation({
+      supabase,
+      conversationId,
+      brandId: brand.id,
+      userId: user.id,
+      title,
+      skillSlug: skillSlug ?? null,
+      modelId: modelId ?? null,
+    }).catch((err) => logger.warn('[chat] conversation upsert async error:', err));
+  }
 
   const standardScope = {
     ...emptyStandardScope(),
