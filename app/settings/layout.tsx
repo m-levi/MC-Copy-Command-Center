@@ -60,7 +60,7 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
             <div className="flex">
               <div className="flex-shrink-0 flex items-center">
                 <Link href="/" className="text-xl font-bold text-gray-900 dark:text-white">
-                  Command Center
+                  Scribe
                 </Link>
               </div>
             </div>

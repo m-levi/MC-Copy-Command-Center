@@ -3,8 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 import GlobalKeyboardShortcuts from "@/components/GlobalKeyboardShortcuts";
-import DebugPanel from "@/components/DebugPanel";
-import DebugPromptSelector from "@/components/DebugPromptSelector";
 import PageTransition from "@/components/PageTransition";
 
 const geistSans = Geist({
@@ -18,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Email Copywriter AI",
-  description: "AI-powered email copywriting tool for e-commerce brands",
+  title: "Scribe",
+  description: "Skills-first copy assistant for e-commerce brands.",
 };
 
 export default function RootLayout({
@@ -37,8 +35,6 @@ export default function RootLayout({
             {children}
           </PageTransition>
           <GlobalKeyboardShortcuts />
-          <DebugPanel />
-          <DebugPromptSelector />
         </ThemeProvider>
       </body>
     </html>

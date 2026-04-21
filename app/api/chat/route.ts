@@ -1,504 +1,326 @@
-import { streamText, CoreMessage, LanguageModel } from 'ai';
-import { gateway, getToolsForModel, getProviderOptionsWithWebSearch, MODELS } from '@/lib/ai-providers';
-import { getModelById, normalizeModelId } from '@/lib/ai-models';
-import { Message, FlowType } from '@/types';
-import { extractConversationContext } from '@/lib/conversation-memory';
-import { buildFlowOutlinePrompt, buildConversationalFlowPrompt } from '@/lib/flow-prompts';
-import { buildSystemPrompt, buildBrandInfo, buildContextInfo } from '@/lib/chat-prompts';
-import { buildDesignEmailV2Prompt } from '@/lib/prompts/design-email-v2.prompt';
-import { getActiveDebugPromptFast, determinePromptType } from '@/lib/debug-prompts';
-import { messageQueue } from '@/lib/queue/message-queue';
-import { createEdgeClient } from '@/lib/supabase/edge';
+import { convertToModelMessages, type UIMessage } from 'ai';
+import { gateway } from '@/lib/ai-providers';
+import { normalizeModelId } from '@/lib/ai-models';
+import { createClient } from '@/lib/supabase/server';
+import { loadBuiltinSkills, mergeSkills } from '@/lib/skills/registry';
+import type { Skill } from '@/lib/skills/types';
+import { runSkill } from '@/lib/workflows/run-skill';
+import { emptyStandardScope, interpolate } from '@/lib/workflows/template-engine';
+import { COPY_ARTIFACT_INSTRUCTION } from '@/lib/workflows/copy-artifact';
+import type { ToolContext } from '@/lib/tools/types';
+import { searchRelevantDocuments, buildRAGContext } from '@/lib/rag-service';
+import { searchMemories, isSupermemoryConfigured } from '@/lib/supermemory';
+import { formatBrandVoiceForPrompt } from '@/lib/chat-prompts';
+import { loadBrandVoiceMarkdown, inferSlug } from '@/lib/brand-voice';
+import { localMemorySearch } from '@/lib/memory-local';
 import { logger } from '@/lib/logger';
-import { smartExtractProductLinks } from '@/lib/url-extractor';
-import { withSupermemory } from '@supermemory/tools/ai-sdk';
-import { getSupermemoryUserId, isSupermemoryConfigured } from '@/lib/supermemory';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
+export const maxDuration = 300;
 
-export async function POST(req: Request) {
+interface Body {
+  messages: UIMessage[];
+  modelId?: string;
+  brandId: string;
+  conversationId?: string;
+  skillSlug?: string | null;
+  skillVariables?: Record<string, unknown>;
+}
+
+/**
+ * Derive a short human-readable title from the first user message.
+ * Trims and clamps to ~60 characters so the sidebar stays tidy.
+ */
+function deriveTitle(messages: UIMessage[]): string | null {
+  const firstUser = messages.find((m) => m.role === 'user');
+  if (!firstUser) return null;
+  const text = (firstUser.parts ?? [])
+    .filter((p) => p.type === 'text')
+    .map((p) => (p as { text?: string }).text ?? '')
+    .join(' ')
+    .trim();
+  if (!text) return null;
+  const firstLine = text.split(/\r?\n/)[0].trim();
+  return firstLine.length > 60 ? firstLine.slice(0, 58).trimEnd() + '…' : firstLine;
+}
+
+/**
+ * Persist (or refresh) the conversation row. Idempotent upsert keyed on
+ * the client-generated conversation id. We only touch columns that are
+ * guaranteed to exist on any deployed schema; optional columns are
+ * written on a best-effort basis and errors are swallowed so a partial
+ * schema never breaks a chat.
+ */
+async function upsertConversation(params: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any;
+  conversationId: string;
+  brandId: string;
+  userId: string;
+  title: string | null;
+  skillSlug: string | null;
+  modelId: string | null;
+}) {
+  const base: Record<string, unknown> = {
+    id: params.conversationId,
+    brand_id: params.brandId,
+    user_id: params.userId,
+    updated_at: new Date().toISOString(),
+  };
+  if (params.title) base.title = params.title;
+
   try {
-    logger.log('[Chat API] Received request');
-    const { messages, modelId: rawModelId, brandContext, regenerateSection, conversationId, conversationMode, emailType, isFlowMode, flowType, attachments } = await req.json();
-    
-    // Normalize legacy model IDs to AI Gateway format
-    const modelId = normalizeModelId(rawModelId);
-    
-    logger.log('[Chat API] Request params:', { 
-      rawModelId,
-      modelId, 
-      conversationId, 
-      conversationMode,
-      emailType,
-      isFlowMode,
-      flowType,
-      hasMessages: !!messages,
-      hasBrandContext: !!brandContext,
-      hasAttachments: !!(attachments && attachments.length > 0),
-      attachmentCount: attachments?.length || 0
-    });
+    await params.supabase.from('conversations').upsert(base, { onConflict: 'id' });
+  } catch (err) {
+    logger.warn('[chat] conversation base upsert failed:', err);
+  }
 
-    const model = getModelById(modelId);
-    if (!model) {
-      logger.error('[Chat API] Invalid model:', modelId);
-      return new Response('Invalid model', { status: 400 });
+  // Optional columns — try once; if the column doesn't exist, ignore.
+  try {
+    const extra: Record<string, unknown> = {};
+    if (params.skillSlug !== undefined) extra.skill_slug = params.skillSlug;
+    if (params.modelId) extra.model = params.modelId;
+    if (Object.keys(extra).length > 0) {
+      await params.supabase.from('conversations').update(extra).eq('id', params.conversationId);
     }
-    
-    logger.log('[Chat API] Using model:', model.name, 'Provider:', model.provider);
-
-    // Extract conversation context (fast, synchronous)
-    const conversationContext = extractConversationContext(messages);
-
-    // Create ONE Supabase client to reuse (Edge runtime compatible)
-    const supabase = createEdgeClient();
-
-    // PERFORMANCE: Run ALL async operations in parallel
-    // This includes: user auth and debug prompts
-    // NOTE: Memory is now handled by Supermemory (external service)
-    const effectiveEmailType = emailType || 'design';
-    const promptType = determinePromptType(effectiveEmailType as 'design' | 'letter', isFlowMode);
-    
-    const [
-      userResult,
-      debugPromptResult
-    ] = await Promise.all([
-      // User authentication (needed for debug prompts, queue mode, and Supermemory)
-      supabase.auth.getUser(),
-      
-      // Debug prompts - uses optimized single-query function
-      getActiveDebugPromptFast(supabase, promptType),
-    ]);
-    
-    // Extract user from result
-    const user = userResult.data?.user;
-
-    // Build system prompt with brand context, RAG, and memory
-    let systemPrompt: string;
-    let processedMessages = messages;
-    
-    // Build brand info string for prompts
-    const brandInfo = `
-Brand Name: ${brandContext?.name || 'N/A'}
-Brand Details: ${brandContext?.brand_details || 'N/A'}
-Brand Guidelines: ${brandContext?.brand_guidelines || 'N/A'}
-Copywriting Style Guide: ${brandContext?.copywriting_style_guide || 'N/A'}
-${brandContext?.website_url ? `Website: ${brandContext.website_url}` : ''}
-    `.trim();
-
-    // Flow mode: Use conversational flow prompt for guided flow creation
-    if (conversationMode === 'flow') {
-      logger.log('[Chat API] Using conversational flow prompt');
-      systemPrompt = buildConversationalFlowPrompt(brandInfo);
-    } else if (isFlowMode && flowType) {
-      // Legacy flow mode with specific flow type (used by flow outline generation)
-      systemPrompt = buildFlowOutlinePrompt(flowType as FlowType, brandInfo);
-    } else if (emailType === 'design' && conversationMode === 'email_copy' && !regenerateSection) {
-      const userMessages = messages.filter((m: Message) => m.role === 'user');
-      const isFirstMessage = userMessages.length === 1;
-      
-      if (isFirstMessage) {
-        logger.log('[Chat API] ★★★ Using Design Email V2 prompt (3 versions: A, B, C) ★★★');
-        
-        // Build brand info for the prompt
-        const brandInfoForPrompt = buildBrandInfo(brandContext);
-        const brandVoiceGuidelines = brandContext?.copywriting_style_guide || '';
-        const copyBrief = userMessages[0]?.content || '';
-        
-        logger.log('[Chat API] Building Design Email V2 prompt with:', {
-          hasBrandInfo: !!brandInfoForPrompt,
-          hasBrandVoice: !!brandVoiceGuidelines,
-          copyBriefLength: copyBrief.length,
-        });
-        
-        // Use the new Design Email V2 prompt that returns 3 versions
-        const { systemPrompt: designSystemPrompt, userPrompt: designUserPrompt } = buildDesignEmailV2Prompt({
-          brandInfo: brandInfoForPrompt,
-          brandVoiceGuidelines,
-          websiteUrl: brandContext?.website_url,
-          brandName: brandContext?.name,
-          copyBrief,
-        });
-        
-        logger.log('[Chat API] Design Email V2 prompt built, system prompt length:', designSystemPrompt.length);
-        
-        systemPrompt = designSystemPrompt;
-        processedMessages = [{ ...userMessages[0], content: designUserPrompt }];
-      } else {
-        systemPrompt = buildSystemPrompt(brandContext, '', {
-          regenerateSection,
-          conversationContext,
-          conversationMode,
-          emailType
-        });
-        processedMessages = messages;
-      }
-    } else {
-      systemPrompt = buildSystemPrompt(brandContext, '', {
-        regenerateSection,
-        conversationContext,
-        conversationMode,
-        emailType
-      });
-    }
-
-    const websiteUrl = brandContext?.website_url;
-
-    // DEBUG MODE: Apply custom system prompt if pre-fetched
-    // debugPromptResult was fetched in parallel with other async operations above
-    if (debugPromptResult && debugPromptResult.system_prompt) {
-      logger.log(`[Chat API] DEBUG MODE: Using custom prompt: ${debugPromptResult.name}`);
-      
-      // IMPORTANT: Reset processedMessages to original messages when using custom debug prompt.
-      // The default flow (e.g., Design Email V2) may have transformed processedMessages with its
-      // own template. Using a custom debug prompt should bypass that transformation entirely,
-      // pairing the custom system prompt with the user's original messages.
-      processedMessages = messages;
-      
-      // Get user's message for the COPY_BRIEF variable
-      const userMessages = messages.filter((m: Message) => m.role === 'user');
-      const copyBrief = userMessages[userMessages.length - 1]?.content || '';
-      
-      // Build variable values
-      const brandInfoLocal = buildBrandInfo(brandContext);
-      const contextInfo = buildContextInfo(conversationContext);
-      const brandVoiceGuidelines = brandContext?.copywriting_style_guide || '';
-      const brandName = brandContext?.name || 'Unknown Brand';
-      
-      // Replace template variables in the system prompt
-      // Includes deprecated variables for backward compatibility with existing prompts
-      systemPrompt = debugPromptResult.system_prompt
-        // Current variables
-        .replace(/{{BRAND_NAME}}/g, brandName)
-        .replace(/{{BRAND_INFO}}/g, brandInfoLocal)
-        .replace(/{{BRAND_VOICE_GUIDELINES}}/g, brandVoiceGuidelines)
-        .replace(/{{WEBSITE_URL}}/g, websiteUrl || '')
-        .replace(/{{COPY_BRIEF}}/g, copyBrief || '')
-        .replace(/{{CONTEXT_INFO}}/g, contextInfo)
-        // Deprecated variables - replaced with safe fallbacks for backward compatibility
-        .replace(/{{RAG_CONTEXT}}/g, '') // RAG disabled, empty string
-        .replace(/{{MEMORY_CONTEXT}}/g, '') // Memory now handled by Supermemory
-        .replace(/{{EMAIL_BRIEF}}/g, copyBrief || '') // Alias for COPY_BRIEF
-        .replace(/{{USER_MESSAGE}}/g, copyBrief || '') // Alias for COPY_BRIEF
-        .replace(/{{BRAND_DETAILS}}/g, '') // Deprecated, use BRAND_INFO
-        .replace(/{{BRAND_GUIDELINES}}/g, '') // Deprecated, use BRAND_INFO
-        .replace(/{{COPYWRITING_STYLE_GUIDE}}/g, brandVoiceGuidelines); // Alias for BRAND_VOICE_GUIDELINES
-      
-      logger.log(`[Chat API] DEBUG MODE: System prompt processed, length: ${systemPrompt.length}`);
-    }
-
-    // Background queue mode
-    if (process.env.ENABLE_MESSAGE_QUEUE === 'true' && user && conversationId) {
-      logger.log('[Chat API] Background queue mode enabled');
-      
-      try {
-        const { data: newMessage, error: msgError } = await supabase
-          .from('messages')
-          .insert({
-            conversation_id: conversationId,
-            role: 'assistant',
-            content: '',
-            status: 'queued',
-            queued_at: new Date().toISOString(),
-          })
-          .select()
-          .single();
-
-        if (msgError || !newMessage) {
-          throw new Error('Failed to create message');
-        }
-
-        const jobId = await messageQueue.enqueue({
-          messageId: newMessage.id,
-          conversationId,
-          userId: user.id,
-          priority: 0,
-          payload: {
-            messages: processedMessages,
-            modelId,
-            brandContext,
-            conversationId,
-            systemPrompt,
-            provider: model.provider,
-            websiteUrl,
-          },
-        });
-
-        return new Response(JSON.stringify({
-          queued: true,
-          jobId,
-          messageId: newMessage.id,
-          streamUrl: `/api/messages/${newMessage.id}/stream`,
-        }), {
-          status: 202,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch (queueError) {
-        logger.error('[Chat API] Queue error:', queueError);
-      }
-    }
-
-    // Format messages for AI SDK, including attachments for the last user message
-    // Supports: images (type: 'image'), PDFs/documents (type: 'file'), and text (type: 'text')
-    const formattedMessages: CoreMessage[] = processedMessages.map((msg: Message, index: number) => {
-      const isLastUserMessage = msg.role === 'user' && index === processedMessages.length - 1;
-      
-      // If this is the last user message and we have attachments, format as multi-modal
-      if (isLastUserMessage && attachments && attachments.length > 0) {
-        // AI SDK UserContent supports: TextPart | ImagePart | FilePart
-        // Note: AI SDK uses 'mediaType' not 'mimeType' for IANA media types
-        const contentParts: Array<
-          | { type: 'text'; text: string }
-          | { type: 'image'; image: string; mediaType?: string }
-          | { type: 'file'; data: string; mediaType: string; filename?: string }
-        > = [];
-        
-        // Add text content first (required - AI needs some text context)
-        const textContent = msg.content?.trim() || 'Please analyze the attached file(s).';
-        contentParts.push({ type: 'text', text: textContent });
-        
-        // Add attachments based on their type
-        for (const attachment of attachments) {
-          // Validate attachment has required fields
-          if (!attachment.data || !attachment.mimeType) {
-            logger.warn('[Chat API] Skipping invalid attachment:', { 
-              name: attachment.name,
-              hasData: !!attachment.data,
-              hasMimeType: !!attachment.mimeType 
-            });
-            continue;
-          }
-          
-          // Convert raw base64 to data URL format for AI SDK compatibility
-          const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`;
-          
-          if (attachment.type === 'image') {
-            // Images use 'image' part type with data URL
-            contentParts.push({
-              type: 'image',
-              image: dataUrl,
-              mediaType: attachment.mimeType,
-            });
-            logger.log('[Chat API] Added image attachment:', { 
-              name: attachment.name, 
-              mediaType: attachment.mimeType,
-              dataLength: attachment.data?.length || 0 
-            });
-          } else {
-            // PDFs, text files, Word docs, etc. use 'file' part type
-            // The AI SDK and models (Claude, GPT-4o, Gemini) can read these directly
-            contentParts.push({
-              type: 'file',
-              data: dataUrl,
-              mediaType: attachment.mimeType,
-              filename: attachment.name,
-            });
-            logger.log('[Chat API] Added file attachment:', { 
-              name: attachment.name, 
-              mediaType: attachment.mimeType,
-              dataLength: attachment.data?.length || 0 
-            });
-          }
-        }
-        
-        logger.log('[Chat API] Final content parts count:', contentParts.length);
-        
-        return {
-          role: msg.role as 'user' | 'assistant',
-          content: contentParts,
-        };
-      }
-      
-      return {
-        role: msg.role as 'user' | 'assistant',
-        content: msg.content,
-      };
-    });
-
-    // Use AI Gateway with the model ID directly (format: provider/model-name)
-    // The gateway handles routing to the correct provider
-    let aiModel: LanguageModel = gateway.languageModel(modelId);
-
-    // Wrap model with Supermemory for persistent brand+user memory
-    // This automatically injects memory context into every LLM call
-    if (isSupermemoryConfigured() && brandContext?.id && user?.id) {
-      const supermemoryUserId = getSupermemoryUserId(brandContext.id, user.id);
-      logger.log('[Chat API] Wrapping model with Supermemory:', { supermemoryUserId });
-      
-      aiModel = withSupermemory(aiModel, supermemoryUserId, {
-        mode: 'full', // Combines profile + query-based search for comprehensive context
-      });
-    }
-
-    // Build tools based on provider
-    // - Anthropic: Uses explicit web_search tool
-    // - OpenAI/Google: Web search configured via provider options
-    const tools = getToolsForModel(modelId, websiteUrl);
-
-    logger.log(`[Chat API] Starting stream with ${model.provider} model`);
-    logger.log(`[Chat API] System prompt length: ${systemPrompt.length}`);
-    logger.log(`[Chat API] Messages count: ${formattedMessages.length}`);
-    logger.log(`[Chat API] Web search enabled: ${model.provider === 'anthropic' ? 'via tool' : 'via provider options'}`);
-    logger.log(`[Chat API] Supermemory enabled: ${isSupermemoryConfigured() && brandContext?.id && user?.id}`);
-    
-    // Log attachment details for debugging
-    if (attachments && attachments.length > 0) {
-      logger.log('[Chat API] Attachments being sent:', attachments.map((a: { type: string; name: string; mimeType: string }) => ({
-        type: a.type,
-        name: a.name,
-        mimeType: a.mimeType,
-      })));
-    }
-
-    // Use Vercel AI SDK streamText with AI Gateway
-    let result;
-    try {
-      result = await streamText({
-        model: aiModel,
-        system: systemPrompt,
-        messages: formattedMessages,
-        tools,
-        maxRetries: 2,
-        // Extended thinking/reasoning + web search for all supported providers
-        providerOptions: getProviderOptionsWithWebSearch(modelId, 10000, websiteUrl),
-      });
-      logger.log('[Chat API] streamText result received successfully');
-    } catch (streamError) {
-      logger.error('[Chat API] streamText failed:', streamError);
-      throw streamError;
-    }
-
-    // Create custom streaming response with our JSON format for client compatibility
-    const encoder = new TextEncoder();
-    let fullText = '';
-    let fullReasoning = '';
-    
-    const readable = new ReadableStream({
-      async start(controller) {
-        const sendMessage = (type: string, data: Record<string, unknown>) => {
-          const message = JSON.stringify({ type, ...data }) + '\n';
-          controller.enqueue(encoder.encode(message));
-        };
-
-        // Send initial status
-        sendMessage('status', { status: 'analyzing_brand' });
-
-        try {
-          logger.log('[Chat API] Starting to iterate fullStream');
-          
-          // Iterate over the stream
-          for await (const part of result.fullStream) {
-            logger.log('[Chat API] Received stream part:', part.type);
-            
-            switch (part.type) {
-              case 'text-delta':
-                fullText += part.text;
-                sendMessage('text', { content: part.text });
-                break;
-                
-              case 'reasoning-delta':
-                // AI SDK uses 'text' property for reasoning-delta content
-                const reasoningText = 'text' in part ? (part as { text: string }).text : '';
-                fullReasoning += reasoningText;
-                sendMessage('thinking', { content: reasoningText });
-                break;
-                
-              case 'tool-call':
-                sendMessage('tool_use', { tool: part.toolName, status: 'start' });
-                if (part.toolName === 'web_search') {
-                  sendMessage('status', { status: 'searching_web' });
-                }
-                break;
-                
-              case 'tool-result':
-                sendMessage('tool_use', { tool: part.toolName, status: 'end' });
-                sendMessage('status', { status: 'analyzing_brand' });
-                break;
-                
-              case 'reasoning-start':
-                sendMessage('thinking_start', {});
-                sendMessage('status', { status: 'thinking' });
-                break;
-                
-              case 'reasoning-end':
-                if (fullReasoning) {
-                  sendMessage('thinking_end', {});
-                }
-                break;
-                
-              case 'finish':
-                logger.log('[Chat API] Stream finished', { 
-                  textLength: fullText.length,
-                  reasoningLength: fullReasoning.length 
-                });
-                break;
-                
-              case 'error':
-                logger.error('[Chat API] Stream error:', part.error);
-                sendMessage('error', { error: String(part.error) });
-                break;
-            }
-          }
-
-          logger.log('[Chat API] fullStream iteration complete, fullText length:', fullText.length);
-
-          // Safety net: if the model finished without emitting any visible text
-          // (e.g. it only called tools, or extended thinking timed out), send a
-          // human-readable fallback so the message isn't saved blank — which
-          // was rendering as "No content" in the chat.
-          if (!fullText.trim()) {
-            const fallbackText = "I wasn't able to generate a response this time. Please try rephrasing your request or send it again.";
-            fullText = fallbackText;
-            sendMessage('text', { content: fallbackText });
-            logger.warn('[Chat API] Emitted fallback text (stream produced no visible content)');
-          }
-
-          // Extract product links from the response
-          if (fullText) {
-            try {
-              const userMessageTexts = messages
-                .filter((m: Message) => m.role === 'user')
-                .map((m: Message) => m.content);
-              
-              const productLinks = smartExtractProductLinks(
-                fullText + '\n\n' + fullReasoning,
-                userMessageTexts,
-                websiteUrl
-              );
-              
-              if (productLinks.length > 0) {
-                sendMessage('products', { products: productLinks });
-              }
-            } catch (error) {
-              logger.error('[Chat API] Product link extraction error:', error);
-            }
-          }
-
-          controller.close();
-        } catch (error) {
-          logger.error('[Chat API] Stream processing error:', error);
-          sendMessage('error', { error: error instanceof Error ? error.message : 'Unknown error' });
-          controller.close();
-        }
-      },
-    });
-
-    return new Response(readable, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
-
-  } catch (error) {
-    logger.error('[Chat API] Error:', error);
-    
-    return new Response(JSON.stringify({ 
-      error: 'Failed to generate response. Please try again.',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    }), { 
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+  } catch (err) {
+    logger.warn('[chat] conversation optional-column update skipped:', err);
   }
 }
+
+export async function POST(req: Request) {
+  let body: Body;
+  try {
+    body = (await req.json()) as Body;
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
+  const { messages, modelId, brandId, skillSlug, skillVariables = {}, conversationId } = body;
+
+  if (!messages?.length) return new Response('Missing messages', { status: 400 });
+  if (!brandId) return new Response('Missing brandId', { status: 400 });
+
+  const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user;
+  if (!user) return new Response('Unauthorized', { status: 401 });
+
+  const [brandRes, customSkillsRes] = await Promise.all([
+    supabase.from('brands').select('*').eq('id', brandId).single(),
+    supabase
+      .from('skills')
+      .select('*')
+      .or(`user_id.eq.${user.id},brand_id.eq.${brandId},scope.eq.global`),
+  ]);
+
+  if (brandRes.error || !brandRes.data) {
+    return new Response('Brand not found', { status: 404 });
+  }
+  const brand = brandRes.data;
+
+  const customRows: Skill[] = (customSkillsRes.data ?? []).map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    scope: row.scope,
+    orgId: row.org_id,
+    brandId: row.brand_id,
+    userId: row.user_id,
+    frontmatter: { name: row.slug, description: row.description, ...row.frontmatter },
+    body: row.body,
+    sourcePath: null,
+    isBuiltin: false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+
+  const skills = mergeSkills(loadBuiltinSkills(), customRows);
+
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+  const userText = lastUser ? uiMessageText(lastUser) : '';
+
+  const [ragContext, memoryContext] = await Promise.all([
+    buildRagContextFor(brand.id, userText),
+    buildMemoryContextFor(brand.id, user.id, userText),
+  ]);
+
+  const brandInfo = buildBrandInfoBlock(brand);
+  // Prefer the new brand.md source of truth. Falls back to the legacy
+  // brand_voice JSON (via formatBrandVoiceForPrompt) if no brand.md is
+  // set yet, so nothing breaks for accounts still on the old schema.
+  const brandMd = loadBrandVoiceMarkdown({
+    brand_md: brand.brand_md ?? null,
+    brand_slug: brand.brand_slug ?? inferSlug(brand.name ?? ''),
+    name: brand.name,
+  });
+  const brandVoice =
+    brandMd.trim().length > 0
+      ? brandMd
+      : brand.brand_voice
+        ? formatBrandVoiceForPrompt(brand.brand_voice)
+        : '';
+  const websiteUrl = brand.website_url ?? '';
+
+  logger.log('[chat] request scope', {
+    brandId,
+    brandName: brand.name,
+    brandVoiceLength: brandVoice.length,
+    hasVoiceJson: Boolean(brand.brand_voice),
+    hasStyleGuide: Boolean(brand.copywriting_style_guide),
+    skillSlug: skillSlug ?? '(auto)',
+    modelId: modelId ?? '(default)',
+    conversationId: conversationId ?? '(none)',
+  });
+
+  // Persist the conversation row so the sidebar can list it immediately.
+  // Fire-and-forget — a DB hiccup shouldn't block the stream.
+  if (conversationId) {
+    const title = deriveTitle(messages);
+    upsertConversation({
+      supabase,
+      conversationId,
+      brandId: brand.id,
+      userId: user.id,
+      title,
+      skillSlug: skillSlug ?? null,
+      modelId: modelId ?? null,
+    }).catch((err) => logger.warn('[chat] conversation upsert async error:', err));
+  }
+
+  const standardScope = {
+    ...emptyStandardScope(),
+    brand: {
+      name: brand.name ?? '',
+      info: brandInfo,
+      voice: brandVoice,
+      websiteUrl: websiteUrl ? `Website: ${websiteUrl}` : '',
+    },
+    rag: ragContext,
+    memory: memoryContext,
+  };
+
+  // Brand voice is the most important slot in the system prompt — every
+  // line of copy you write must sound like the brand. Put it first, frame
+  // it as binding, and call it out explicitly so the model can't drift.
+  const voiceBlock = brandVoice
+    ? [
+        '## BRAND VOICE — BINDING',
+        '',
+        'Every word of marketing copy you produce must read as if it came from this brand. Match cadence, vocabulary, hard bans, and structural conventions exactly. If the brand voice contradicts a generic best practice, the brand voice wins. If you are about to write something that does not sound like the voice below, stop and rewrite it.',
+        '',
+        '<brand_voice>',
+        brandVoice,
+        '</brand_voice>',
+      ].join('\n')
+    : '';
+  const systemBase = [
+    'You are a marketing expert writing for a specific brand. Follow the brand voice below exactly — it overrides every default.',
+    voiceBlock,
+    brandInfo ? `<brand_info>\n${brandInfo}\n</brand_info>` : '',
+    ragContext,
+    memoryContext,
+    COPY_ARTIFACT_INSTRUCTION,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const ctx: ToolContext = {
+    userId: user.id,
+    brandId: brand.id,
+    orgId: brand.organization_id ?? null,
+    brandName: brand.name,
+    brandWebsiteUrl: websiteUrl,
+    standardScope,
+    skills,
+    dynamic: {
+      enabledSkillTools: new Set<string>(),
+      activatedSkillSlug: skillSlug ?? null,
+    },
+  };
+
+  const modelIdResolved = normalizeModelId(modelId);
+  const model = gateway(modelIdResolved);
+
+  const skillVariablesWithBrief =
+    userText && !('copyBrief' in skillVariables) && !('emailBrief' in skillVariables)
+      ? { copyBrief: userText, emailBrief: userText, userInput: userText, ...skillVariables }
+      : skillVariables;
+
+  try {
+    const result = runSkill({
+      model,
+      modelId: modelIdResolved,
+      systemBase,
+      messages: await convertToModelMessages(messages),
+      skills,
+      lockedSkillSlug: skillSlug ?? null,
+      lockedSkillVariables: skillVariablesWithBrief,
+      ctx,
+      standardScope,
+    });
+    return result.toUIMessageStreamResponse();
+  } catch (err) {
+    logger.error('[chat] runSkill failed:', err);
+    return new Response((err as Error).message ?? 'Internal error', { status: 500 });
+  }
+}
+
+function uiMessageText(m: UIMessage): string {
+  const parts: string[] = [];
+  for (const p of m.parts ?? []) {
+    if (p.type === 'text') parts.push(p.text);
+  }
+  return parts.join('\n');
+}
+
+function buildBrandInfoBlock(brand: Record<string, unknown>): string {
+  const lines: string[] = [];
+  if (brand.name) lines.push(`Brand Name: ${brand.name}`);
+  if (brand.brand_details) lines.push(`Brand Details: ${brand.brand_details}`);
+  if (brand.brand_guidelines) lines.push(`Brand Guidelines: ${brand.brand_guidelines}`);
+  if (brand.copywriting_style_guide)
+    lines.push(`Style Guide: ${brand.copywriting_style_guide}`);
+  return lines.join('\n');
+}
+
+async function buildRagContextFor(brandId: string, query: string): Promise<string> {
+  if (!query) return '';
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return '';
+  try {
+    const docs = await searchRelevantDocuments(brandId, query, apiKey, 3);
+    return docs.length ? buildRAGContext(docs) : '';
+  } catch (err) {
+    logger.warn('[chat] rag failed:', err);
+    return '';
+  }
+}
+
+async function buildMemoryContextFor(brandId: string, userId: string, query: string): Promise<string> {
+  if (!query) return '';
+  let hits: Array<{ content: string }> = [];
+  if (isSupermemoryConfigured()) {
+    try {
+      hits = await searchMemories(brandId, userId, query, 5);
+    } catch (err) {
+      logger.warn('[chat] supermemory search failed, using local:', err);
+    }
+  }
+  if (hits.length === 0) {
+    try {
+      const rows = await localMemorySearch(userId, brandId, query, 5);
+      hits = rows.map((r) => ({ content: r.content }));
+    } catch (err) {
+      logger.warn('[chat] local memory search failed:', err);
+    }
+  }
+  if (hits.length === 0) return '';
+  const lines = hits
+    .slice(0, 5)
+    .map((r) => `- ${r.content.slice(0, 300)}${r.content.length > 300 ? '…' : ''}`);
+  return `<memory_context>\nPreviously saved notes relevant to this brand/user:\n${lines.join(
+    '\n',
+  )}\n</memory_context>`;
+}
+
+// Suppress unused import warning while interpolate is available for future use
+void interpolate;

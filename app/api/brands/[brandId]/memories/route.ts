@@ -1,168 +1,84 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { logger } from '@/lib/logger';
-import { 
-  listMemories, 
-  addMemory, 
-  isSupermemoryConfigured 
-} from '@/lib/supermemory';
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
 
-export const dynamic = 'force-dynamic';
+export const runtime = "nodejs";
 
-// GET - Fetch all memories for a brand (for current user)
+const MEMORY_CATEGORIES = [
+  "user_preference",
+  "brand_context",
+  "campaign_info",
+  "product_details",
+  "decision",
+  "fact",
+] as const;
+
+const createSchema = z.object({
+  content: z.string().min(1).max(4000),
+  category: z.enum(MEMORY_CATEGORIES),
+  title: z.string().max(120).optional(),
+});
+
+/**
+ * GET — every memory_notes row for this brand owned by the caller.
+ * POST — append a memory scoped to (caller, brand). The same rows are
+ * what `memory_recall` reads during chat, so anything saved here is
+ * immediately visible to the model.
+ */
 export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ brandId: string }> }
+  _req: Request,
+  { params }: { params: Promise<{ brandId: string }> },
 ) {
-  try {
-    const supabase = await createClient();
-    const { brandId } = await params;
-
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    // Verify user has access to this brand
-    const { data: brand, error: brandError } = await supabase
-      .from('brands')
-      .select('id')
-      .eq('id', brandId)
-      .single();
-
-    if (brandError || !brand) {
-      return NextResponse.json(
-        { error: 'Brand not found or access denied' },
-        { status: 404 }
-      );
-    }
-
-    // Check if Supermemory is configured
-    if (!isSupermemoryConfigured()) {
-      logger.warn('[Brand Memories API] Supermemory not configured, returning empty list');
-      return NextResponse.json({ memories: [] });
-    }
-
-    // Fetch memories from Supermemory (with graceful fallback)
-    try {
-      const supermemoryMemories = await listMemories(brandId, user.id);
-
-      // Transform to match the expected format
-      // Note: Content is stored as "title: content" format, so we need to extract the original content
-      const memories = supermemoryMemories.map(mem => {
-        const title = (mem.metadata?.title as string) || 'Untitled';
-        // Extract original content by removing the "title: " prefix if present
-        let content = mem.content;
-        const titlePrefix = `${title}: `;
-        if (content.startsWith(titlePrefix)) {
-          content = content.slice(titlePrefix.length);
-        }
-        
-        return {
-          id: mem.id,
-          brand_id: brandId,
-          title,
-          content,
-          category: (mem.metadata?.category as string) || 'general',
-          created_at: mem.createdAt,
-          updated_at: mem.updatedAt || mem.createdAt,
-        };
-      });
-
-      return NextResponse.json({ memories });
-    } catch (supermemoryError) {
-      // Log the error but return empty list instead of failing
-      logger.warn('[Brand Memories API] Supermemory fetch failed, returning empty list:', supermemoryError);
-      return NextResponse.json({ memories: [] });
-    }
-  } catch (error) {
-    logger.error('Error fetching brand memories:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch memories' },
-      { status: 500 }
-    );
+  const { brandId } = await params;
+  const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  if (!userRes?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const { data, error } = await supabase
+    .from("memory_notes")
+    .select("id, content, category, title, created_at")
+    .eq("brand_id", brandId)
+    .eq("user_id", userRes.user.id)
+    .order("created_at", { ascending: false });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ memories: data ?? [] });
 }
 
-// POST - Create a new memory
 export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ brandId: string }> }
+  req: Request,
+  { params }: { params: Promise<{ brandId: string }> },
 ) {
+  const { brandId } = await params;
+  const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  if (!userRes?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  let raw: unknown;
   try {
-    const supabase = await createClient();
-    const { brandId } = await params;
-    const body = await request.json();
-    const { title, content, category = 'general' } = body;
-
-    if (!title || !content) {
-      return NextResponse.json(
-        { error: 'Title and content are required' },
-        { status: 400 }
-      );
-    }
-
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    // Verify user has access to this brand
-    const { data: brand, error: brandError } = await supabase
-      .from('brands')
-      .select('id')
-      .eq('id', brandId)
-      .single();
-
-    if (brandError || !brand) {
-      return NextResponse.json(
-        { error: 'Brand not found or access denied' },
-        { status: 404 }
-      );
-    }
-
-    // Check if Supermemory is configured
-    if (!isSupermemoryConfigured()) {
-      return NextResponse.json(
-        { error: 'Memory service not configured' },
-        { status: 503 }
-      );
-    }
-
-    // Format content with title for better context
-    const formattedContent = `${title}: ${content}`;
-
-    // Add memory to Supermemory
-    const result = await addMemory(brandId, user.id, formattedContent, {
-      title,
-      category,
-    });
-
-    // Return in expected format
-    const memory = {
-      id: result.id,
-      brand_id: brandId,
-      title,
-      content,
-      category,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    return NextResponse.json({ memory }, { status: 201 });
-  } catch (error) {
-    logger.error('Error creating brand memory:', error);
+    raw = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const parsed = createSchema.safeParse(raw);
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: 'Failed to create memory' },
-      { status: 500 }
+      { error: "Validation failed", issues: parsed.error.issues },
+      { status: 422 },
     );
   }
+  const { data, error } = await supabase
+    .from("memory_notes")
+    .insert({
+      user_id: userRes.user.id,
+      brand_id: brandId,
+      content: parsed.data.content,
+      category: parsed.data.category,
+      title: parsed.data.title ?? null,
+    })
+    .select("id, content, category, title, created_at")
+    .single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ memory: data }, { status: 201 });
 }

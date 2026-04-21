@@ -286,9 +286,10 @@ export type QuickAction =
 
 // AI Models - Using AI Gateway model identifiers (format: provider/model-name)
 // See: https://sdk.vercel.ai/docs/ai-sdk-core/ai-gateway
-export type AIModel = 
+export type AIModel =
   // Anthropic models
   | 'anthropic/claude-sonnet-4.5'
+  | 'anthropic/claude-opus-4.6'
   | 'anthropic/claude-opus-4.5'
   | 'anthropic/claude-haiku-4.5'
   // OpenAI models - '-thinking' variants stream reasoning

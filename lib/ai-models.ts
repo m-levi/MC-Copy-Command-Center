@@ -4,6 +4,11 @@ import { MODELS } from './ai-constants';
 export const AI_MODELS: AIModelOption[] = [
   // Primary models shown in model picker
   {
+    id: MODELS.CLAUDE_OPUS_46,
+    name: 'Opus 4.6',
+    provider: 'anthropic',
+  },
+  {
     id: MODELS.CLAUDE_SONNET,
     name: 'Sonnet 4.5',
     provider: 'anthropic',
@@ -94,7 +99,7 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
  * Normalizes legacy model IDs to new AI Gateway format
  */
 export function normalizeModelId(id: string | null | undefined): string {
-  if (!id) return MODELS.CLAUDE_SONNET;
+  if (!id) return MODELS.CLAUDE_OPUS_46;
   return LEGACY_MODEL_MAP[id] || id;
 }
 

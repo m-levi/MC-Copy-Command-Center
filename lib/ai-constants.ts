@@ -9,6 +9,7 @@
 export const MODELS = {
   // Anthropic models (all support thinking via extended thinking)
   CLAUDE_SONNET: 'anthropic/claude-sonnet-4.5',
+  CLAUDE_OPUS_46: 'anthropic/claude-opus-4.6',
   CLAUDE_OPUS: 'anthropic/claude-opus-4.5',
   CLAUDE_HAIKU: 'anthropic/claude-haiku-4.5',
   
