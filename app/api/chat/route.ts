@@ -83,6 +83,16 @@ export async function POST(req: Request) {
   const brandVoice = brand.brand_voice ? formatBrandVoiceForPrompt(brand.brand_voice) : '';
   const websiteUrl = brand.website_url ?? '';
 
+  logger.log('[chat] request scope', {
+    brandId,
+    brandName: brand.name,
+    brandVoiceLength: brandVoice.length,
+    hasVoiceJson: Boolean(brand.brand_voice),
+    hasStyleGuide: Boolean(brand.copywriting_style_guide),
+    skillSlug: skillSlug ?? '(auto)',
+    modelId: modelId ?? '(default)',
+  });
+
   const standardScope = {
     ...emptyStandardScope(),
     brand: {
@@ -111,6 +121,7 @@ export async function POST(req: Request) {
     orgId: brand.organization_id ?? null,
     brandName: brand.name,
     brandWebsiteUrl: websiteUrl,
+    standardScope,
     skills,
     dynamic: {
       enabledSkillTools: new Set<string>(),

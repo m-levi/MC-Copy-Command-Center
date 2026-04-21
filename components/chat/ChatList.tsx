@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { MessageSquare, Pin } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Pin } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { formatDistanceToNow } from "@/lib/date";
 
 export interface ChatListItem {
   id: string;
@@ -14,11 +14,6 @@ export interface ChatListItem {
   updatedAt: string;
 }
 
-/**
- * Flat chat list: pinned first, then recents. No filters, no bulk
- * selection, no tags — if you need more, open the conversation. Matches
- * the "sharp v1" scope.
- */
 export function ChatList({ items }: { items: ChatListItem[] }) {
   const pathname = usePathname();
   const pinned = items.filter((i) => i.pinned);
@@ -26,29 +21,31 @@ export function ChatList({ items }: { items: ChatListItem[] }) {
 
   if (items.length === 0) {
     return (
-      <div className="px-3 py-6 text-sm text-muted-foreground">
-        No chats yet. Start one from the message box →
+      <div className="text-muted-foreground px-3 py-6 text-center text-xs">
+        No chats yet.
+        <br />
+        Start one from the message box →
       </div>
     );
   }
 
   return (
-    <ScrollArea className="h-full px-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-2">
       {pinned.length > 0 ? (
         <Section label="Pinned" icon={<Pin className="size-3" />}>
           {pinned.map((i) => (
-            <Row key={i.id} item={i} active={pathname.includes(i.id)} />
+            <Row key={i.id} item={i} active={pathname?.includes(i.id) ?? false} />
           ))}
         </Section>
       ) : null}
       {recent.length > 0 ? (
-        <Section label="Recent" icon={<MessageSquare className="size-3" />}>
+        <Section label="Recent">
           {recent.map((i) => (
-            <Row key={i.id} item={i} active={pathname.includes(i.id)} />
+            <Row key={i.id} item={i} active={pathname?.includes(i.id) ?? false} />
           ))}
         </Section>
       ) : null}
-    </ScrollArea>
+    </div>
   );
 }
 
@@ -58,16 +55,16 @@ function Section({
   children,
 }: {
   label: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-3">
-      <div className="mb-1 flex items-center gap-1.5 px-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+    <div>
+      <div className="text-muted-foreground mb-1 flex items-center gap-1.5 px-3 text-[10px] font-medium uppercase tracking-wider">
         {icon}
         {label}
       </div>
-      <div className="flex flex-col gap-0.5">{children}</div>
+      <div className="flex flex-col">{children}</div>
     </div>
   );
 }
@@ -77,12 +74,23 @@ function Row({ item, active }: { item: ChatListItem; active: boolean }) {
     <Link
       href={`/brands/${item.brandId}/chat/${item.id}`}
       className={cn(
-        'mx-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
-        'hover:bg-accent hover:text-accent-foreground',
-        active ? 'bg-accent text-accent-foreground' : 'text-foreground/80',
+        "group mx-1 flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        active
+          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+          : "text-sidebar-foreground/80",
       )}
     >
-      <span className="truncate">{item.title || 'Untitled'}</span>
+      <span className="truncate">{item.title || "Untitled"}</span>
+      <span
+        className={cn(
+          "text-muted-foreground shrink-0 text-[10px] opacity-0 transition-opacity",
+          "group-hover:opacity-100",
+          active && "opacity-60",
+        )}
+      >
+        {formatDistanceToNow(item.updatedAt)}
+      </span>
     </Link>
   );
 }

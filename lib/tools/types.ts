@@ -1,4 +1,5 @@
 import type { Skill } from '@/lib/skills/types';
+import type { StandardScope } from '@/lib/workflows/template-engine';
 
 export interface ToolContext {
   userId: string;
@@ -6,6 +7,11 @@ export interface ToolContext {
   orgId: string | null;
   brandName?: string;
   brandWebsiteUrl?: string;
+  /**
+   * Full template scope (brand info/voice, rag, memory) used when the
+   * load_skill tool interpolates a skill body on Auto activation.
+   */
+  standardScope: StandardScope;
   /**
    * All skills visible to this request (builtins + scope-merged DB rows).
    * Used by load_skill + read_skill_resource tools.

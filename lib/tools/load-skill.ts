@@ -37,10 +37,7 @@ export function buildLoadSkillTool(ctx: ToolContext) {
         });
         const { interpolate } = await import('@/lib/workflows/template-engine');
         const body = interpolate(skill.body, {
-          brand: {
-            name: ctx.brandName ?? '',
-            websiteUrl: ctx.brandWebsiteUrl ?? '',
-          },
+          ...ctx.standardScope,
           ...resolved,
         });
         ctx.dynamic.activatedSkillSlug = skill.slug;

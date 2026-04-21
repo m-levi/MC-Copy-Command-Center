@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loadBuiltinSkills } from "@/lib/skills/registry";
 import { MODELS } from "@/lib/ai-constants";
@@ -6,8 +6,8 @@ import { ChatShell } from "@/components/chat/ChatShell";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatArea } from "@/components/chat/ChatArea";
 import type { SkillOption } from "@/components/chat/SkillPicker";
-import type { BrandOption } from "@/components/chat/BrandSwitcher";
 import type { ChatListItem } from "@/components/chat/ChatList";
+import type { BrandOption } from "@/components/chat/BrandSwitcher";
 import {
   loadSidebarData,
   loadScopedSkills,
@@ -17,24 +17,32 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
- * Empty chat — Auto skill, default model, fresh thread. Server component:
- * loads sidebar data + skill registry + brand in one pass and hands it
- * off to the client components.
+ * Deep-link a specific conversation. Loads the conversation row + its
+ * skill lock (if any) + sidebar + skill list. Previous messages are not
+ * yet hydrated into the chat (v1 persistence is stream-only); the UI
+ * opens a blank thread with the skill and model remembered.
  */
-export default async function ChatPage({
+export default async function ConversationPage({
   params,
 }: {
-  params: Promise<{ brandId: string }>;
+  params: Promise<{ brandId: string; conversationId: string }>;
 }) {
-  const { brandId } = await params;
+  const { brandId, conversationId } = await params;
   const supabase = await createClient();
   const { data: userRes } = await supabase.auth.getUser();
   const user = userRes?.user;
   if (!user) redirect("/login");
 
+  const convRes = await supabase
+    .from("conversations")
+    .select("id, title, brand_id, skill_slug, model")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (!convRes.data || convRes.data.brand_id !== brandId) notFound();
+  const conversation = convRes.data;
+
   const sidebar = await loadSidebarData(supabase, brandId);
   const skills = await loadScopedSkills(supabase, user.id, brandId);
-
   const currentBrand: BrandOption | null =
     sidebar.currentBrand ?? fallbackBrandFromId(brandId);
   const brands: BrandOption[] = sidebar.brands;
@@ -63,8 +71,10 @@ export default async function ChatPage({
       <ChatArea
         brandId={brandId}
         brandName={currentBrand?.name ?? "Client"}
-        initialSkillSlug={null}
-        initialModelId={MODELS.CLAUDE_SONNET}
+        conversationId={conversationId}
+        conversationTitle={conversation.title ?? undefined}
+        initialSkillSlug={conversation.skill_slug ?? null}
+        initialModelId={conversation.model ?? MODELS.CLAUDE_SONNET}
         skills={allSkills}
       />
     </ChatShell>

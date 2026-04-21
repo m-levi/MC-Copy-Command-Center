@@ -1,14 +1,23 @@
-import type { ReactNode } from 'react';
+"use client";
+
+import type { ReactNode } from "react";
+import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 
 /**
- * Outer two-pane shell: sidebar | main. Kept intentionally trivial so the
- * chat page is just `<ChatShell sidebar={...}>{area}</ChatShell>`.
+ * App shell for every page that has a chat-style sidebar. Wraps in the
+ * shadcn Sidebar context so SidebarTrigger in the header works.
  */
-export function ChatShell({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
+export function ChatShell({
+  sidebar,
+  children,
+}: {
+  sidebar: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-background">
+    <SidebarProvider defaultOpen>
       {sidebar}
-      <main className="flex min-w-0 flex-1 flex-col">{children}</main>
-    </div>
+      <SidebarInset>{children}</SidebarInset>
+    </SidebarProvider>
   );
 }

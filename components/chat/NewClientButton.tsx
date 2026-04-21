@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -12,41 +12,54 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 /**
- * One-click new-client button. Single required field — name. Everything
- * else (voice, documents, style guide) can be filled in from inside the
- * chat. The goal is zero friction to start a new brand conversation.
+ * Prominent new-client button. Used in:
+ *   - Sidebar top-most slot
+ *   - Brands grid empty state
+ *   - Brands grid primary CTA
+ * Single required field; lands the user straight in the new brand's Auto chat.
  */
-export function NewClientButton({ variant = 'default' }: { variant?: 'default' | 'ghost' }) {
+export function NewClientButton({
+  variant = "default",
+  size = "default",
+  className,
+  label = "New client",
+}: {
+  variant?: "default" | "outline" | "ghost" | "secondary";
+  size?: "default" | "sm" | "lg" | "icon";
+  className?: string;
+  label?: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
+  const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function submit() {
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('Give the client a name to continue.');
+      setError("Give the client a name to continue.");
       return;
     }
     setError(null);
     startTransition(async () => {
-      const res = await fetch('/api/brands', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/brands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmed }),
       });
       if (!res.ok) {
-        const { error: msg } = await res.json().catch(() => ({ error: 'Create failed' }));
-        setError(msg ?? 'Create failed');
+        const { error: msg } = await res.json().catch(() => ({ error: "Create failed" }));
+        setError(msg ?? "Create failed");
         return;
       }
       const { brand } = await res.json();
-      setName('');
+      setName("");
       setOpen(false);
       router.push(`/brands/${brand.id}/chat`);
       router.refresh();
@@ -56,20 +69,16 @@ export function NewClientButton({ variant = 'default' }: { variant?: 'default' |
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button
-          variant={variant}
-          className="w-full justify-start gap-2"
-          aria-label="Add a new client"
-        >
+        <Button variant={variant} size={size} className={className}>
           <Plus className="size-4" />
-          New client
+          {label}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New client</DialogTitle>
           <DialogDescription>
-            Just the name — everything else can be filled in later from the chat.
+            Just the name to start. Voice, docs, and settings can be added from the chat later.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -79,21 +88,24 @@ export function NewClientButton({ variant = 'default' }: { variant?: 'default' |
           }}
           className="space-y-3"
         >
-          <Input
-            autoFocus
-            placeholder="Acme Supply Co."
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            disabled={isPending}
-            aria-label="Client name"
-          />
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <div className="space-y-1.5">
+            <Label htmlFor="new-client-name">Client name</Label>
+            <Input
+              id="new-client-name"
+              autoFocus
+              placeholder="e.g. Acme Supply Co."
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={isPending}
+            />
+          </div>
+          {error ? <p className="text-destructive text-sm">{error}</p> : null}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={isPending}>
               Cancel
             </Button>
             <Button type="submit" disabled={isPending}>
-              {isPending ? 'Creating…' : 'Create & open chat'}
+              {isPending ? "Creating…" : "Create & open chat"}
             </Button>
           </DialogFooter>
         </form>
