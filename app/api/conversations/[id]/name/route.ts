@@ -5,10 +5,11 @@ import { gateway, MODELS } from '@/lib/ai-providers';
 export const runtime = 'edge';
 
 /**
- * Auto-generate conversation title using a low-cost AI model
- * Uses GPT-5 mini (OpenAI) or Claude Haiku (Anthropic) for cost efficiency
- * 
- * This runs asynchronously in the background after the first message is sent.
+ * Auto-generate conversation title using the cheapest available model.
+ * Primary: Gemini 2.5 Flash (lowest cost per token on the gateway).
+ * Fallback: Claude Haiku (if Gemini is rate-limited or errors).
+ *
+ * Runs asynchronously in the background after the first message is sent.
  */
 export async function POST(
   req: Request,
@@ -43,13 +44,12 @@ export async function POST(
       );
     }
 
-    // Generate title using low-cost model via AI Gateway
+    // Generate title using the cheapest model on the gateway.
     let title: string;
 
-    // Try GPT-5 mini first (very cheap and fast)
     try {
       const { text } = await generateText({
-        model: gateway.languageModel(MODELS.GPT_5_MINI),
+        model: gateway.languageModel(MODELS.GEMINI_FLASH),
         system: `You are a title generator. Output ONLY a short title, nothing else.
 Rules:
 - Exactly 4-5 words maximum
@@ -60,10 +60,9 @@ Rules:
       });
 
       title = sanitizeTitle(text);
-      console.log('[Title Generation] Generated with GPT-5 mini:', { id, title });
+      console.log('[Title Generation] Generated with Gemini 2.5 Flash:', { id, title });
     } catch (error) {
-      console.error('[Title Generation] GPT-5 mini failed, trying Claude Haiku:', error);
-      // Fallback to Claude Haiku
+      console.error('[Title Generation] Gemini Flash failed, trying Claude Haiku:', error);
       title = await generateWithAnthropic(userMessage);
     }
 

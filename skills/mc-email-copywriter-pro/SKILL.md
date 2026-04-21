@@ -200,10 +200,17 @@ These patterns make copy sound like AI wrote it. Avoid all of them.
 
 ## Output Format
 
+**Formatting rule (strict):** every labeled line — `Subject Line`, `Alt Subject 1`, `Alt Subject 2`, `Preview Text`, `Angle`, and every field inside a block (`Headline`, `Sub-Head`, `Body`, `Button`, `Bullets`, `Products`) — goes on its **own line with a blank line between it and the next field**. Markdown renderers collapse single newlines into spaces, which turns the copy into a single run-on paragraph. Double-newline between every field so each one visually stands alone.
+
+Block name (`[HERO]`, `[TEXT]`, `[CTA]`, etc.) is always on its own line with a blank line before the first field inside the block.
+
 ```
 **Subject Line:** ...
+
 **Alt Subject 1:** ...
+
 **Alt Subject 2:** ...
+
 **Preview Text:** (40-90 characters. Extends the subject, never repeats it.)
 
 ---
@@ -213,18 +220,27 @@ These patterns make copy sound like AI wrote it. Avoid all of them.
 ---
 
 [HERO]
+
 Headline: ...
+
 Sub-Head: ...
+
 Button: ...
 
 [BLOCK NAME]
+
 Headline: ...
+
 Sub-Head: ...
+
 Button: ... (if needed)
 
 [CTA]
+
 Headline: ...
+
 Sub-Head: ...
+
 Button: ...
 ```
 
@@ -242,8 +258,11 @@ If anything was missing from the brief, flag it:
 **Brief:** "Summer sale email. 25% off sitewide. Ends Sunday."
 
 **Subject Line:** 25% off. This weekend only.
+
 **Alt Subject 1:** Your summer wardrobe just got cheaper.
+
 **Alt Subject 2:** This Sunday it's gone.
+
 **Preview Text:** Sitewide sale, no code needed.
 
 ---
@@ -253,18 +272,27 @@ If anything was missing from the brief, flag it:
 ---
 
 [HERO]
+
 Headline: 25% Off Everything
+
 Sub-Head: No code. No minimum. Just pick what you want before Sunday at midnight.
+
 Button: Shop the Sale
 
 [BESTSELLERS]
+
 Headline: Start Here
+
 Sub-Head: Our five most-grabbed pieces this month. They're going to sell out first.
+
 Button: See the Bestsellers
 
 [CTA]
+
 Headline: Ends Sunday
+
 Sub-Head: 25% off sitewide. Midnight ET. That's it.
+
 Button: Shop the Sale
 
 > Want a different angle? I can try: (1) "Summer starter pack," a curated edit of seasonal pieces at 25% off. (2) "The stuff that sells out," scarcity angle leading with bestsellers and the discount as a bonus.

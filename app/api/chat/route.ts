@@ -61,25 +61,32 @@ async function upsertConversation(params: {
   skillSlug: string | null;
   modelId: string | null;
 }) {
+  // `title` and `model` are NOT NULL with no DB default — skipping them on
+  // INSERT fails the row and the conversation never lands in history.
+  // Fall back to stable sentinels; the title gets replaced asynchronously
+  // by /api/conversations/[id]/name, and model is overwritten below as
+  // soon as we know the real id.
   const base: Record<string, unknown> = {
     id: params.conversationId,
     brand_id: params.brandId,
     user_id: params.userId,
+    title: params.title ?? 'New chat',
+    model: params.modelId ?? 'anthropic/claude-opus-4.6',
     updated_at: new Date().toISOString(),
   };
-  if (params.title) base.title = params.title;
 
-  try {
-    await params.supabase.from('conversations').upsert(base, { onConflict: 'id' });
-  } catch (err) {
-    logger.warn('[chat] conversation base upsert failed:', err);
+  const { error: upsertErr } = await params.supabase
+    .from('conversations')
+    .upsert(base, { onConflict: 'id' });
+  if (upsertErr) {
+    logger.error('[chat] conversation base upsert failed:', upsertErr);
+    return;
   }
 
   // Optional columns — try once; if the column doesn't exist, ignore.
   try {
     const extra: Record<string, unknown> = {};
     if (params.skillSlug !== undefined) extra.skill_slug = params.skillSlug;
-    if (params.modelId) extra.model = params.modelId;
     if (Object.keys(extra).length > 0) {
       await params.supabase.from('conversations').update(extra).eq('id', params.conversationId);
     }
