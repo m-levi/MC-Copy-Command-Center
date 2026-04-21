@@ -1,16 +1,18 @@
-import { tool, generateText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import Anthropic from '@anthropic-ai/sdk';
+import { tool } from 'ai';
 import { z } from 'zod';
 import type { ToolContext } from './types';
 
 /**
- * Web search. Runs Anthropic's native `webSearch_20250305` tool through a
- * one-shot Haiku call against the Anthropic API directly (not the AI
- * Gateway — AI SDK v6 rejects provider-defined tool shapes coming back
- * through the gateway with "Unsupported tool type: provider-defined").
+ * Web search. Runs Anthropic's native `web_search_20250305` tool through
+ * a one-shot Haiku call using the raw @anthropic-ai/sdk (NOT the AI SDK
+ * layer — @ai-sdk/anthropic@2 emits v2-shaped provider tools which are
+ * incompatible with ai@6's v3 tool shape, and the gateway doesn't
+ * forward provider-defined tools either). We bypass both and call
+ * api.anthropic.com directly.
  *
- * Returns a compact list of hits as plain text so the caller can fold it
- * into its own reasoning without another tool round-trip.
+ * Returns a compact list of hits as plain text so the caller can fold
+ * it into its own reasoning without another tool round-trip.
  *
  * Requires ANTHROPIC_API_KEY.
  */
@@ -23,7 +25,8 @@ export function buildWebSearchTool(_ctx: ToolContext) {
       max_results: z.number().int().min(1).max(10).optional().default(5),
     }),
     execute: async ({ query, max_results }) => {
-      if (!process.env.ANTHROPIC_API_KEY) {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
         return {
           ok: false as const,
           message:
@@ -32,20 +35,40 @@ export function buildWebSearchTool(_ctx: ToolContext) {
       }
 
       try {
-        const { text } = await generateText({
-          model: anthropic('claude-haiku-4-5-20251001'),
+        const client = new Anthropic({ apiKey });
+        const response = await client.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 2048,
           system:
             'You are a web search assistant. Call web_search once for the user\'s query, ' +
             'then return the findings as a concise numbered list. Each entry: title on the ' +
             'first line, URL on the second line, a one-sentence summary on the third. ' +
             'No preamble, no closing remarks — just the list.',
-          prompt: `Search the web for: ${query}\nReturn at most ${max_results} results.`,
-          tools: {
-            web_search: anthropic.tools.webSearch_20250305({
-              maxUses: 1,
-            }),
-          },
+          // Cast: @anthropic-ai/sdk typings for the web_search tool vary
+          // across minor versions; the wire-format payload is stable, so
+          // we hand the SDK the documented shape and bypass the type
+          // checker for this one call.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 1 }] as any,
+          messages: [
+            {
+              role: 'user',
+              content: `Search the web for: ${query}\nReturn at most ${max_results} results.`,
+            },
+          ],
         });
+
+        const text = response.content
+          .map((block) => (block.type === 'text' ? (block as { text: string }).text : ''))
+          .filter((s) => s.length > 0)
+          .join('\n');
+
+        if (!text) {
+          return {
+            ok: false as const,
+            message: 'Search returned no text output.',
+          };
+        }
         return { ok: true as const, text };
       } catch (err) {
         return {
