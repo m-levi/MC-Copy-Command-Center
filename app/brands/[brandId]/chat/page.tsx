@@ -64,7 +64,7 @@ export default async function ChatPage({
         brandId={brandId}
         brandName={currentBrand?.name ?? "Client"}
         initialSkillSlug={null}
-        initialModelId={MODELS.CLAUDE_SONNET}
+        initialModelId={MODELS.CLAUDE_OPUS_46}
         skills={allSkills}
       />
     </ChatShell>

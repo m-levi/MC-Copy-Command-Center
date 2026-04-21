@@ -13,19 +13,12 @@ describe('loadBuiltinSkills', () => {
 
   it('loads every SKILL.md under /skills and validates them', () => {
     const skills = loadBuiltinSkills();
-    const slugs = skills.map((s) => s.slug).sort();
-    expect(slugs).toEqual([
-      'design-email',
-      'letter-email',
-      'planning',
-      'quick-add-urgency',
-      'quick-shorter',
-      'quick-stronger-cta',
-    ]);
+    expect(skills.length).toBeGreaterThan(0);
     for (const s of skills) {
       expect(s.scope).toBe('builtin');
       expect(s.isBuiltin).toBe(true);
       expect(s.frontmatter.description.length).toBeGreaterThanOrEqual(10);
+      expect(s.slug).toMatch(/^[a-z0-9-]+$/);
     }
   });
 

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import type { UIMessage } from "ai";
 import { nanoid } from "nanoid";
 import {
   Conversation,
@@ -23,18 +24,40 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import {
+  Sources,
+  SourcesTrigger,
+  SourcesContent,
+  Source,
+} from "@/components/ai-elements/sources";
 import { Loader } from "@/components/ai-elements/loader";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import {
+  OpenIn,
+  OpenInContent,
+  OpenInTrigger,
+  OpenInChatGPT,
+  OpenInClaude,
+  OpenInLabel,
+  OpenInSeparator,
+} from "@/components/ai-elements/open-in-chat";
 import { Streamdown } from "streamdown";
-import { AlertCircle, Sparkles } from "lucide-react";
+import { AlertCircle, MoreHorizontal, Sparkles, Copy, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ChatHeader } from "./ChatHeader";
 import { PromptBar } from "./PromptBar";
+import { QueuedPrompts } from "./QueuedPrompts";
+import { EmailVariants, type EmailVariantData } from "./EmailVariants";
+import { usePromptQueue } from "@/hooks/usePromptQueue";
 import type { SkillOption } from "./SkillPicker";
 
 interface PartLike {
   type: string;
   text?: string;
-  [k: string]: unknown;
+  state?: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
 }
 
 const SUGGESTION_PROMPTS = [
@@ -67,6 +90,7 @@ export function ChatArea({
   const [lockedSkill, setLockedSkill] = useState<string | null>(initialSkillSlug);
   const [modelId, setModelId] = useState<string>(initialModelId);
   const [input, setInput] = useState("");
+  const queueApi = usePromptQueue();
 
   const transport = useMemo(() => {
     // `@supermemory/tools` bundles its own copy of `ai`, so the branded
@@ -89,15 +113,12 @@ export function ChatArea({
     transport: transport as any,
   });
 
-  // Once the first user message has hit the server (= chat has anything
-  // in it), swap the URL in-place to the persisted conversation id so a
-  // reload returns to the same thread. Using history.replaceState avoids
-  // remounting the ChatArea, which would wipe useChat's in-memory state.
+  // Once the first user message has hit the server, swap the URL in
+  // place so a reload keeps the thread.
   useEffect(() => {
     if (urlHasIdRef.current || urlReplacedRef.current) return;
     if (chat.messages.length === 0) return;
-    const target = `/brands/${brandId}/chat/${conversationId}`;
-    window.history.replaceState(null, "", target);
+    window.history.replaceState(null, "", `/brands/${brandId}/chat/${conversationId}`);
     urlReplacedRef.current = true;
   }, [chat.messages.length, conversationId, brandId]);
 
@@ -107,9 +128,21 @@ export function ChatArea({
 
   const isBusy = chat.status === "streaming" || chat.status === "submitted";
 
+  // When the current turn wraps up, drain one prompt from the queue.
+  useEffect(() => {
+    queueApi.drain(isBusy, (text) => {
+      chat.sendMessage({ text });
+    });
+  }, [isBusy, chat, queueApi]);
+
   function onSend(text?: string) {
     const next = (text ?? input).trim();
-    if (!next || isBusy) return;
+    if (!next) return;
+    if (isBusy) {
+      queueApi.enqueue(next);
+      setInput("");
+      return;
+    }
     chat.sendMessage({ text: next });
     setInput("");
   }
@@ -160,22 +193,13 @@ export function ChatArea({
               </Suggestions>
             </div>
           ) : (
-            chat.messages.map((m) => {
-              const parts = (m.parts ?? []) as PartLike[];
-              return (
-                <Message key={m.id} from={m.role}>
-                  <MessageContent
-                    className={
-                      m.role === "user"
-                        ? "!bg-primary !text-primary-foreground !rounded-2xl !rounded-br-md !px-4 !py-2.5"
-                        : "!p-0"
-                    }
-                  >
-                    {parts.map((part, idx) => renderPart(part, idx, chat.status === "streaming"))}
-                  </MessageContent>
-                </Message>
-              );
-            })
+            chat.messages.map((m) => (
+              <MessageRow
+                key={m.id}
+                message={m}
+                isStreaming={chat.status === "streaming"}
+              />
+            ))
           )}
           {chat.status === "submitted" ? (
             <div className="mt-2 flex items-center gap-2 px-1 text-muted-foreground">
@@ -202,6 +226,12 @@ export function ChatArea({
         <ConversationScrollButton />
       </Conversation>
 
+      <QueuedPrompts
+        items={queueApi.queue}
+        onRemove={queueApi.dequeue}
+        onClear={queueApi.clear}
+      />
+
       <PromptBar
         value={input}
         onChange={setInput}
@@ -209,12 +239,91 @@ export function ChatArea({
         onStop={() => chat.stop()}
         isBusy={isBusy}
         placeholder={
-          lockedSkill
-            ? `Describe what you need for ${skills.find((s) => s.slug === lockedSkill)?.display_name}…`
-            : "Ask anything — Auto picks the right skill."
+          isBusy
+            ? "Type to queue another prompt…"
+            : lockedSkill
+              ? `Describe what you need for ${skills.find((s) => s.slug === lockedSkill)?.display_name}…`
+              : "Ask anything — Auto picks the right skill."
         }
       />
     </div>
+  );
+}
+
+function MessageRow({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
+  const parts = (message.parts ?? []) as PartLike[];
+  const isAssistant = message.role === "assistant";
+  const assistantText = useMemo(
+    () =>
+      isAssistant
+        ? parts
+            .filter((p) => p.type === "text")
+            .map((p) => p.text ?? "")
+            .join("\n\n")
+            .trim()
+        : "",
+    [isAssistant, parts],
+  );
+
+  return (
+    <Message from={message.role}>
+      <MessageContent
+        className={
+          message.role === "user"
+            ? "!bg-primary !text-primary-foreground !rounded-2xl !rounded-br-md !px-4 !py-2.5"
+            : "!p-0"
+        }
+      >
+        {parts.map((part, idx) => renderPart(part, idx, isStreaming))}
+        {isAssistant && assistantText.length > 120 ? (
+          <div className="mt-2 flex items-center gap-1.5">
+            <CopyButton text={assistantText} />
+            <OpenIn query={assistantText}>
+              <OpenInTrigger>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                  Open in
+                </Button>
+              </OpenInTrigger>
+              <OpenInContent>
+                <OpenInLabel>Continue this elsewhere</OpenInLabel>
+                <OpenInSeparator />
+                <OpenInChatGPT />
+                <OpenInClaude />
+              </OpenInContent>
+            </OpenIn>
+          </div>
+        ) : null}
+      </MessageContent>
+    </Message>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignored
+    }
+  }
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground"
+      onClick={copy}
+    >
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {copied ? "Copied" : "Copy"}
+    </Button>
   );
 }
 
@@ -227,6 +336,7 @@ function renderPart(part: PartLike, idx: number, isStreaming: boolean) {
       </div>
     );
   }
+
   if (part.type === "reasoning") {
     const text = String(part.text ?? "");
     return (
@@ -236,29 +346,77 @@ function renderPart(part: PartLike, idx: number, isStreaming: boolean) {
       </Reasoning>
     );
   }
-  if (typeof part.type === "string" && part.type.startsWith("tool-")) {
-    const name = part.type.replace(/^tool-/, "");
-    const toolPart = part as PartLike & {
-      state?: string;
-      input?: unknown;
-      output?: unknown;
-      errorText?: string;
-    };
-    const state = (toolPart.state ?? "input-available") as Parameters<typeof ToolHeader>[0]["state"];
+
+  if (part.type === "tool-web_search" && part.state === "output-available") {
+    const output = (part.output ?? {}) as { results?: Array<{ title: string; url: string; snippet?: string }> };
+    const results = output.results ?? [];
+    if (results.length > 0) {
+      return (
+        <Sources key={idx} className="not-prose my-3">
+          <SourcesTrigger count={results.length} />
+          <SourcesContent>
+            {results.map((r, i) => (
+              <Source key={i} href={r.url} title={r.title} />
+            ))}
+          </SourcesContent>
+        </Sources>
+      );
+    }
+    return renderGenericTool(part, idx);
+  }
+
+  if (part.type === "tool-brand_knowledge_search" && part.state === "output-available") {
+    const output = (part.output ?? {}) as { matches?: number };
     return (
-      <Tool key={idx} defaultOpen={false}>
-        <ToolHeader title={`Using ${name}`} type={part.type as `tool-${string}`} state={state} />
-        <ToolContent>
-          {toolPart.input ? <ToolInput input={toolPart.input} /> : null}
-          {toolPart.output !== undefined || toolPart.errorText ? (
-            <ToolOutput
-              output={toolPart.output !== undefined ? JSON.stringify(toolPart.output, null, 2) : null}
-              errorText={toolPart.errorText}
-            />
-          ) : null}
-        </ToolContent>
-      </Tool>
+      <div
+        key={idx}
+        className="text-muted-foreground not-prose my-2 inline-flex items-center gap-1.5 rounded-md bg-muted/60 px-2 py-0.5 text-[11px]"
+      >
+        <span className="size-1.5 rounded-full bg-primary/70" />
+        <span>Searched brand docs · {output.matches ?? 0} match{output.matches === 1 ? "" : "es"}</span>
+      </div>
     );
   }
+
+  if (part.type === "tool-generate_email_variants" && part.state === "output-available") {
+    const output = (part.output ?? {}) as { angle?: string; variants?: EmailVariantData[] };
+    if (output.variants?.length) {
+      return (
+        <EmailVariants key={idx} angle={output.angle} variants={output.variants} />
+      );
+    }
+  }
+
+  if (typeof part.type === "string" && part.type.startsWith("tool-")) {
+    return renderGenericTool(part, idx);
+  }
+
   return null;
+}
+
+function renderGenericTool(part: PartLike, idx: number) {
+  const name = part.type.replace(/^tool-/, "");
+  const state = (part.state ?? "input-available") as
+    | "input-streaming"
+    | "input-available"
+    | "output-available"
+    | "output-error";
+  return (
+    <Tool key={idx} defaultOpen={false}>
+      <ToolHeader title={`Using ${name}`} type={part.type as `tool-${string}`} state={state} />
+      <ToolContent>
+        {part.input !== undefined && part.input !== null ? (
+          <ToolInput input={part.input} />
+        ) : null}
+        {part.output !== undefined || part.errorText ? (
+          <ToolOutput
+            output={
+              part.output !== undefined ? JSON.stringify(part.output, null, 2) : null
+            }
+            errorText={part.errorText}
+          />
+        ) : null}
+      </ToolContent>
+    </Tool>
+  );
 }

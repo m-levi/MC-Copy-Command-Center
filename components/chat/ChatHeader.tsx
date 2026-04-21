@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ChevronRight, Share2, MoreHorizontal } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { ModelPicker } from "./ModelPicker";
+import { ModelSelectorButton } from "./ModelSelectorButton";
 import { SkillPicker, type SkillOption } from "./SkillPicker";
 
 export function ChatHeader({
@@ -48,7 +48,7 @@ export function ChatHeader({
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <SkillPicker locked={lockedSkill} skills={skills} onChange={onSkillChange} />
-        <ModelPicker value={model} onChange={onModelChange} />
+        <ModelSelectorButton value={model} onChange={onModelChange} />
         <Button
           variant="ghost"
           size="icon"

@@ -67,7 +67,7 @@ export default async function ConversationPage({
 
   const skillSlug = (conversation?.skill_slug as string | null | undefined) ?? null;
   const modelId =
-    (conversation?.model as string | null | undefined) ?? MODELS.CLAUDE_SONNET;
+    (conversation?.model as string | null | undefined) ?? MODELS.CLAUDE_OPUS_46;
   const title = (conversation?.title as string | null | undefined) ?? undefined;
 
   return (
