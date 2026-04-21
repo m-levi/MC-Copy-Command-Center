@@ -9,6 +9,7 @@ const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   website_url: z.string().max(500).optional(),
   brand_md: z.string().max(200_000).optional(),
+  scratchboard: z.string().max(200_000).optional(),
   brand_slug: z
     .string()
     .regex(/^[a-z0-9-]+$/, "kebab-case only")

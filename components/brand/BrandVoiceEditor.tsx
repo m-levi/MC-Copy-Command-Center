@@ -4,13 +4,15 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ChevronRight,
+  Brain,
   Check,
-  Loader2,
-  ExternalLink,
-  Trash2,
+  ChevronRight,
   Eye,
+  Loader2,
+  NotebookPen,
   PencilLine,
+  Speech,
+  Trash2,
 } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -33,13 +35,16 @@ import {
 } from "@/components/ui/dialog";
 import { Streamdown } from "streamdown";
 import { cn } from "@/lib/utils";
+import { BrandMemoryList } from "./BrandMemoryList";
+import { BrandScratchboard } from "./BrandScratchboard";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 /**
- * Brand overview page: header with breadcrumb + delete, inline-editable
- * brand name / website, Markdown editor for brand.md (tabs: Edit /
- * Preview). Autosaves ~600ms after typing stops.
+ * Brand workspace. Three tabs:
+ *   - Voice — the brand.md the AI uses on every chat turn.
+ *   - Memory — durable facts the AI recalls across chats.
+ *   - Scratchboard — operator notes the AI never sees.
  */
 export function BrandVoiceEditor({
   brandId,
@@ -47,12 +52,14 @@ export function BrandVoiceEditor({
   websiteUrl,
   brandSlug,
   initialMarkdown,
+  initialScratchboard,
 }: {
   brandId: string;
   brandName: string;
   websiteUrl: string;
   brandSlug: string;
   initialMarkdown: string;
+  initialScratchboard: string;
 }) {
   const [name, setName] = useState(brandName);
   const [website, setWebsite] = useState(websiteUrl);
@@ -60,7 +67,7 @@ export function BrandVoiceEditor({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const debounceRef = useRef<number | null>(null);
 
-  // Autosave on any field change
+  // Autosave on name / website / markdown change.
   useEffect(() => {
     if (
       name === brandName &&
@@ -154,70 +161,105 @@ export function BrandVoiceEditor({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between gap-2">
-              <div>
-                <div className="text-sm font-medium">Brand voice</div>
-                <p className="text-muted-foreground text-xs">
-                  The <code className="bg-muted rounded px-1 py-0.5 font-mono text-[11px]">brand.md</code> file
-                  that the chat loads as this client&rsquo;s voice profile. Full
-                  Markdown supported — headings, lists, quotes, bold.
-                </p>
-              </div>
-              <span className="text-muted-foreground font-mono text-[10px]">
-                brands/{brandSlug || "–"}/brand.md
-              </span>
-            </div>
+          <Tabs defaultValue="voice" className="gap-4">
+            <TabsList>
+              <TabsTrigger value="voice" className="gap-1.5">
+                <Speech className="size-3.5" />
+                Voice
+              </TabsTrigger>
+              <TabsTrigger value="memory" className="gap-1.5">
+                <Brain className="size-3.5" />
+                Memory
+              </TabsTrigger>
+              <TabsTrigger value="scratchboard" className="gap-1.5">
+                <NotebookPen className="size-3.5" />
+                Scratchboard
+              </TabsTrigger>
+            </TabsList>
 
-            <Tabs defaultValue="edit" className="gap-2">
-              <TabsList>
-                <TabsTrigger value="edit" className="gap-1.5">
-                  <PencilLine className="size-3.5" />
-                  Edit
-                </TabsTrigger>
-                <TabsTrigger value="preview" className="gap-1.5">
-                  <Eye className="size-3.5" />
-                  Preview
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="edit" className="m-0">
-                <textarea
-                  value={markdown}
-                  onChange={(e) => setMarkdown(e.target.value)}
-                  className={cn(
-                    "focus-visible:border-primary/50 focus-visible:ring-ring/50 min-h-[520px] w-full resize-y rounded-lg border bg-card p-4 font-mono text-[13px] leading-relaxed",
-                    "focus-visible:outline-none focus-visible:ring-[3px]",
-                  )}
-                  placeholder="# Your Brand Name&#10;&#10;## Essence&#10;&#10;Write the brand's core identity here…&#10;&#10;## Voice&#10;&#10;- **Is:** confident, warm, specific&#10;- **Is not:** stuffy, corporate, hype-y"
-                  spellCheck={false}
-                />
-              </TabsContent>
-              <TabsContent value="preview" className="m-0">
-                <div className="bg-card min-h-[520px] rounded-lg border p-6">
-                  {markdown.trim().length > 0 ? (
-                    <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <Streamdown>{markdown}</Streamdown>
-                    </div>
-                  ) : (
-                    <div className="text-muted-foreground flex h-full min-h-[460px] items-center justify-center text-sm">
-                      Nothing to preview yet. Start writing in the Edit tab.
-                    </div>
-                  )}
+            <TabsContent value="voice" className="m-0 flex flex-col gap-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <div>
+                  <div className="text-sm font-medium">Brand voice</div>
+                  <p className="text-muted-foreground text-xs">
+                    The{" "}
+                    <code className="bg-muted rounded px-1 py-0.5 font-mono text-[11px]">
+                      brand.md
+                    </code>{" "}
+                    profile loaded as this client&rsquo;s voice on every chat turn.
+                  </p>
                 </div>
-              </TabsContent>
-            </Tabs>
-          </div>
+                <span className="text-muted-foreground font-mono text-[10px]">
+                  brands/{brandSlug || "–"}/brand.md
+                </span>
+              </div>
+              <VoiceEditor
+                markdown={markdown}
+                onChange={setMarkdown}
+              />
+            </TabsContent>
 
-          <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
-            <ExternalLink className="size-3" />
-            <span>
-              Per-brand references (copy samples, lexicon, pre-send checklists) will
-              live here in a future update.
-            </span>
-          </div>
+            <TabsContent value="memory" className="m-0">
+              <BrandMemoryList brandId={brandId} />
+            </TabsContent>
+
+            <TabsContent value="scratchboard" className="m-0">
+              <BrandScratchboard brandId={brandId} initial={initialScratchboard} />
+            </TabsContent>
+          </Tabs>
         </div>
       </main>
     </div>
+  );
+}
+
+function VoiceEditor({
+  markdown,
+  onChange,
+}: {
+  markdown: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <Tabs defaultValue="edit" className="gap-2">
+      <TabsList>
+        <TabsTrigger value="edit" className="gap-1.5">
+          <PencilLine className="size-3.5" />
+          Edit
+        </TabsTrigger>
+        <TabsTrigger value="preview" className="gap-1.5">
+          <Eye className="size-3.5" />
+          Preview
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="edit" className="m-0">
+        <textarea
+          value={markdown}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn(
+            "focus-visible:border-primary/50 focus-visible:ring-ring/50 bg-card min-h-[520px] w-full resize-y rounded-lg border p-4 font-mono text-[13px] leading-relaxed",
+            "focus-visible:outline-none focus-visible:ring-[3px]",
+          )}
+          placeholder={
+            "# Your Brand Name\n\n## Essence\n\nWrite the brand's core identity here…\n\n## Voice\n\n- **Is:** confident, warm, specific\n- **Is not:** stuffy, corporate, hype-y"
+          }
+          spellCheck={false}
+        />
+      </TabsContent>
+      <TabsContent value="preview" className="m-0">
+        <div className="bg-card min-h-[520px] rounded-lg border p-6">
+          {markdown.trim().length > 0 ? (
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <Streamdown>{markdown}</Streamdown>
+            </div>
+          ) : (
+            <div className="text-muted-foreground flex h-full min-h-[460px] items-center justify-center text-sm">
+              Nothing to preview yet. Start writing in the Edit tab.
+            </div>
+          )}
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 

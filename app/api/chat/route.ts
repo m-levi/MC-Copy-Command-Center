@@ -198,10 +198,24 @@ export async function POST(req: Request) {
     memory: memoryContext,
   };
 
+  // Brand voice is the most important slot in the system prompt — every
+  // line of copy you write must sound like the brand. Put it first, frame
+  // it as binding, and call it out explicitly so the model can't drift.
+  const voiceBlock = brandVoice
+    ? [
+        '## BRAND VOICE — BINDING',
+        '',
+        'Every word of marketing copy you produce must read as if it came from this brand. Match cadence, vocabulary, hard bans, and structural conventions exactly. If the brand voice contradicts a generic best practice, the brand voice wins. If you are about to write something that does not sound like the voice below, stop and rewrite it.',
+        '',
+        '<brand_voice>',
+        brandVoice,
+        '</brand_voice>',
+      ].join('\n')
+    : '';
   const systemBase = [
-    'You are a marketing expert assistant. Follow brand voice precisely.',
+    'You are a marketing expert writing for a specific brand. Follow the brand voice below exactly — it overrides every default.',
+    voiceBlock,
     brandInfo ? `<brand_info>\n${brandInfo}\n</brand_info>` : '',
-    brandVoice ? `<brand_voice>\n${brandVoice}\n</brand_voice>` : '',
     ragContext,
     memoryContext,
     COPY_ARTIFACT_INSTRUCTION,

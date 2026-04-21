@@ -64,6 +64,7 @@ export default async function BrandDetailsPage({
         websiteUrl={brand.website_url ?? ""}
         brandSlug={brand.brand_slug ?? inferSlug(brand.name ?? "")}
         initialMarkdown={initialMd}
+        initialScratchboard={brand.scratchboard ?? ""}
       />
     </ChatShell>
   );
