@@ -114,7 +114,7 @@ Button: Describes the outcome, not the action. "Shop the Edit" not "Click Here."
 
 **TEXT.** Supporting copy. One idea per text block. Expands on a benefit, tells a micro-story, or addresses an objection.
 
-**BULLETS.** 2-3 bullets max. Use when listing distinct benefits, features, or steps. Each bullet is one short line. Don't use bullets when a sentence works better.
+**BULLETS.** 2-3 bullets max. Use when listing distinct benefits, features, or steps. Each bullet is one short line. Don't use bullets when a sentence works better. Output bullets as a markdown list — each item on its own line starting with `- ` (dash + space). Do **not** use `•` or separate bullets with spaces; the renderer flattens that into a single-line run-on.
 
 **TABLE.** Side-by-side comparison or specs. 2-3 rows max. Use when comparing options, showing before/after, or displaying simple data. Keep cell content to a few words.
 
@@ -122,15 +122,19 @@ Button: Describes the outcome, not the action. "Shop the Edit" not "Click Here."
 
 **PRODUCT CARD.** Product name, one-line description, price (if known). Use when featuring specific products.
 
-**PRODUCT GRID.** 3-4 products displayed together. Each product gets: name, one-line description or key detail, price (if known). One shared headline above the grid, one shared button below. Use for new arrivals, bestsellers, curated edits, or "shop by category" sections. Keep product descriptions to 5-8 words max.
+**PRODUCT GRID.** 3-4 products displayed together. Each product gets: name, one-line description or key detail, price (if known). One shared headline above the grid, one shared button below. Use for new arrivals, bestsellers, curated edits, or "shop by category" sections. Keep product descriptions to 5-8 words max. Output products as a markdown numbered list — each item on its own line starting with `1. ` / `2. ` / `3. `.
 
 ```
 [PRODUCT GRID]
+
 Headline: New This Week
+
 Products:
-  1. Product Name | One-line detail | $XX
-  2. Product Name | One-line detail | $XX
-  3. Product Name | One-line detail | $XX
+
+1. Product Name | One-line detail | $XX
+2. Product Name | One-line detail | $XX
+3. Product Name | One-line detail | $XX
+
 Button: Shop New Arrivals
 ```
 
@@ -203,6 +207,22 @@ These patterns make copy sound like AI wrote it. Avoid all of them.
 **Formatting rule (strict):** every labeled line — `Subject Line`, `Alt Subject 1`, `Alt Subject 2`, `Preview Text`, `Angle`, and every field inside a block (`Headline`, `Sub-Head`, `Body`, `Button`, `Bullets`, `Products`) — goes on its **own line with a blank line between it and the next field**. Markdown renderers collapse single newlines into spaces, which turns the copy into a single run-on paragraph. Double-newline between every field so each one visually stands alone.
 
 Block name (`[HERO]`, `[TEXT]`, `[CTA]`, etc.) is always on its own line with a blank line before the first field inside the block.
+
+**Lists (bullets / products / steps):** use markdown list syntax — each item on its own line starting with `- ` for bullets or `1. ` for numbered. **Never** run items together with `•` separators or spaces. Example of a correct BULLETS block:
+
+```
+[BULLETS]
+
+Headline: Built For The Call
+
+Bullets:
+
+- Professional-grade trauma supplies
+- MOLLE-compatible pouch
+- Pre-packed and ready to deploy
+
+Button: Find Your Kit
+```
 
 ```
 **Subject Line:** ...
