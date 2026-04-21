@@ -1,24 +1,9 @@
-// Chat components powered by AI Elements
-export { AIReasoning } from './AIReasoning';
-export { AIPromptInput } from './AIPromptInput';
-export { StreamingLoader } from './StreamingLoader';
-export { SpeechButton } from './SpeechButton';
-export { default as ChatMessageModern } from './ChatMessageModern';
-
-// Flow UI components
-export { FlowUIRenderer } from './FlowUIRenderer';
-
-// Email Version UI components
-export { EmailVersionRenderer } from './EmailVersionRenderer';
-
-// Structured Email Renderer
-export { default as StructuredEmailRenderer, isStructuredEmailCopy } from './StructuredEmailRenderer';
-
-// Memory components
-export { MemoryIndicator, MemoryBadge } from './MemoryIndicator';
-export { QuickAddMemory } from './QuickAddMemory';
-
-// Re-export existing chat components
-export { ChatMessageUser } from './ChatMessageUser';
-export { ChatMessageActions } from './ChatMessageActions';
-export { ProductLinksSection } from './ProductLinksSection';
+// Skills-first chat UI
+export { ChatShell } from './ChatShell';
+export { ChatSidebar } from './ChatSidebar';
+export { ChatArea } from './ChatArea';
+export { ChatList } from './ChatList';
+export { ClientSwitcher } from './ClientSwitcher';
+export { NewClientButton } from './NewClientButton';
+export { SkillPicker } from './SkillPicker';
+export { SkillEditor } from './SkillEditor';
