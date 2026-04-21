@@ -5,7 +5,7 @@ import { activateSkill, SkillActivationError } from '@/lib/skills/activation';
 import { buildAutoBaselineTools, buildSkillTools, type ToolBundle } from '@/lib/tools';
 import type { ToolContext } from '@/lib/tools/types';
 import { interpolate, type StandardScope } from './template-engine';
-import { createWebSearchTool, getProviderOptions } from '@/lib/ai-providers';
+import { getProviderOptions } from '@/lib/ai-providers';
 
 export interface RunSkillArgs {
   model: LanguageModel;
@@ -30,26 +30,18 @@ export interface RunSkillArgs {
 }
 
 /**
- * Build a provider-native web_search tool when the model supports one.
- * Anthropic exposes webSearch_20250305 directly; other providers handle
- * web search through provider options (see ai-providers.ts) so there is
- * no tool to register for them here.
- */
-function nativeWebSearchFor(modelId: string, websiteUrl?: string): ToolBundle {
-  if (!modelId.startsWith('anthropic/')) return {};
-  try {
-    const tool = createWebSearchTool(websiteUrl) as ToolBundle[string];
-    return { web_search: tool };
-  } catch {
-    return {};
-  }
-}
-
-/**
  * Ambient instructions that explain what the baseline tools are. Appended
  * to systemBase so the model knows — in every mode — that it can search
  * the web, pull brand docs, and recall/save memory. Skills can declare
  * the same names in their `tools:` frontmatter to take stronger control.
+ *
+ * NOTE: Anthropic's native `webSearch_20250305` provider-defined tool is
+ * NOT routable through the AI Gateway today (AI SDK v6 raises
+ * "Unsupported tool type: provider-defined" for provider tools coming
+ * back through the gateway). We use the cross-provider `web_search`
+ * tool (see /lib/tools/web-search.ts) instead; when a search backend
+ * isn't configured it returns a structured error and the model falls
+ * back to reasoning from context.
  */
 const BASELINE_TOOL_INSTRUCTIONS = `## Tools always available
 
@@ -89,21 +81,20 @@ export function runSkill(args: RunSkillArgs) {
   } = args;
   const maxSteps = args.maxSteps ?? 10;
   const providerOptions = getProviderOptions(modelId, 10_000);
-  const websiteUrl = ctx.brandWebsiteUrl;
 
   // Baseline tools are available in every mode so the model knows it can
-  // research before writing. Native web_search replaces our gateway stub
-  // whenever the underlying provider supports it.
+  // research before writing. We use the generic `web_search` tool rather
+  // than Anthropic's provider-defined `webSearch_20250305` because the
+  // Vercel AI Gateway does not forward provider-defined tool shapes and
+  // AI SDK v6 raises "Unsupported tool type: provider-defined".
   const baseline: ToolBundle = {
     ...buildAutoBaselineTools(ctx),
     ...buildSkillTools(ctx, [
+      'web_search',
       'brand_knowledge_search',
       'memory_recall',
       'memory_save',
-      // Our generic web_search used only for non-Anthropic providers.
-      ...(modelId.startsWith('anthropic/') ? [] : ['web_search']),
     ]),
-    ...nativeWebSearchFor(modelId, websiteUrl),
   };
 
   const systemWithTools = `${systemBase}\n\n${BASELINE_TOOL_INSTRUCTIONS}`;
