@@ -1,4 +1,4 @@
-import { streamText, stepCountIs, type LanguageModel, type ModelMessage } from 'ai';
+import { streamText, stepCountIs, type LanguageModel, type ModelMessage, type StreamTextOnFinishCallback, type ToolSet } from 'ai';
 import { buildDiscoveryBlock } from '@/lib/skills/discovery';
 import type { Skill } from '@/lib/skills/types';
 import { activateSkill, SkillActivationError } from '@/lib/skills/activation';
@@ -27,6 +27,12 @@ export interface RunSkillArgs {
   ctx: ToolContext;
   standardScope: StandardScope;
   maxSteps?: number;
+  /**
+   * Fires when the stream finishes (or errors out). The chat route uses
+   * this to persist the assistant's final text to the messages table so
+   * the conversation can be rehydrated on next page load.
+   */
+  onFinish?: StreamTextOnFinishCallback<ToolSet>;
 }
 
 /**
@@ -76,6 +82,7 @@ export function runSkill(args: RunSkillArgs) {
     lockedSkillVariables,
     ctx,
     standardScope,
+    onFinish,
   } = args;
   const maxSteps = args.maxSteps ?? 10;
   const providerOptions = getProviderOptions(modelId, 10_000);
@@ -117,6 +124,7 @@ export function runSkill(args: RunSkillArgs) {
       tools,
       stopWhen: stepCountIs(maxSteps),
       providerOptions,
+      onFinish,
     });
   }
 
@@ -132,6 +140,7 @@ export function runSkill(args: RunSkillArgs) {
     tools: baseline,
     stopWhen: stepCountIs(maxSteps),
     providerOptions,
+    onFinish,
     prepareStep: () => {
       if (ctx.dynamic.enabledSkillTools.size === 0) {
         return {};

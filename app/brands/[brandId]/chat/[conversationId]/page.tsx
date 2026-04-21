@@ -8,6 +8,7 @@ import { ChatArea } from "@/components/chat/ChatArea";
 import type { SkillOption } from "@/components/chat/SkillPicker";
 import type { ChatListItem } from "@/components/chat/ChatList";
 import type { BrandOption } from "@/components/chat/BrandSwitcher";
+import type { UIMessage } from "ai";
 import {
   loadSidebarData,
   loadScopedSkills,
@@ -49,6 +50,30 @@ export default async function ConversationPage({
     redirect(`/brands/${conversation.brand_id}/chat/${conversationId}`);
   }
 
+  // Rehydrate prior turns so deep-linking to a conversation actually
+  // shows its history. RLS gates the select, so an empty array here
+  // means either the conversation is new or the user can't read it.
+  const { data: messageRows } = await supabase
+    .from("messages")
+    .select("id, role, content, thinking, created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true });
+
+  const initialMessages: UIMessage[] = (messageRows ?? [])
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => {
+      const parts: UIMessage["parts"] = [];
+      if (m.thinking) {
+        parts.push({ type: "reasoning", text: String(m.thinking) });
+      }
+      parts.push({ type: "text", text: String(m.content ?? "") });
+      return {
+        id: String(m.id),
+        role: m.role as "user" | "assistant",
+        parts,
+      };
+    });
+
   const sidebar = await loadSidebarData(supabase, brandId);
   const skills = await loadScopedSkills(supabase, user.id, brandId);
   const currentBrand: BrandOption | null =
@@ -88,6 +113,7 @@ export default async function ConversationPage({
         conversationTitle={title}
         initialSkillSlug={skillSlug}
         initialModelId={modelId}
+        initialMessages={initialMessages}
         skills={allSkills}
       />
     </ChatShell>

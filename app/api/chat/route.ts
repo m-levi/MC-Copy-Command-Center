@@ -252,6 +252,22 @@ export async function POST(req: Request) {
       ? { copyBrief: userText, emailBrief: userText, userInput: userText, ...skillVariables }
       : skillVariables;
 
+  // Persist the incoming user turn right away so it's durable even if
+  // the stream fails partway through. Only the LAST user message is
+  // new — earlier ones are already in the DB from prior turns.
+  if (conversationId && lastUser && userText) {
+    try {
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: userText,
+        user_id: user.id,
+      });
+    } catch (err) {
+      logger.warn('[chat] user message insert failed:', err);
+    }
+  }
+
   try {
     const result = runSkill({
       model,
@@ -263,6 +279,21 @@ export async function POST(req: Request) {
       lockedSkillVariables: skillVariablesWithBrief,
       ctx,
       standardScope,
+      onFinish: async ({ text, reasoningText }) => {
+        if (!conversationId) return;
+        const finalText = (text ?? '').trim();
+        if (!finalText) return;
+        try {
+          await supabase.from('messages').insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: finalText,
+            thinking: reasoningText ?? null,
+          });
+        } catch (err) {
+          logger.warn('[chat] assistant message insert failed:', err);
+        }
+      },
     });
     return result.toUIMessageStreamResponse();
   } catch (err) {

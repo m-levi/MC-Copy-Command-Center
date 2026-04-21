@@ -70,6 +70,7 @@ export function ChatArea({
   conversationTitle,
   initialSkillSlug,
   initialModelId,
+  initialMessages,
   skills,
 }: {
   brandId: string;
@@ -78,6 +79,7 @@ export function ChatArea({
   conversationTitle?: string;
   initialSkillSlug: string | null;
   initialModelId: string;
+  initialMessages?: UIMessage[];
   skills: SkillOption[];
 }) {
   const [conversationId] = useState<string>(() => initialConversationId ?? nanoid());
@@ -116,6 +118,11 @@ export function ChatArea({
 
   const chat = useChat({
     id: conversationId,
+    // `@supermemory/tools` (and thus `@ai-sdk/react`) bundles its own
+    // copy of `ai`, so UIMessage types aren't nominally compatible
+    // across the duplicate. Same cast pattern as transport below.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    messages: initialMessages as any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     transport: transport as any,
   });
