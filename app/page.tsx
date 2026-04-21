@@ -39,7 +39,7 @@ export default async function HomePage() {
               <Sparkles className="size-4" />
             </span>
             <div>
-              <div className="text-lg font-semibold tracking-tight">Command Center</div>
+              <div className="text-lg font-semibold tracking-tight">Scribe</div>
               <div className="text-muted-foreground text-xs">
                 Pick a client to jump into their chat.
               </div>
@@ -150,7 +150,7 @@ function EmptyState() {
         </div>
         <div className="space-y-2">
           <h1 className="text-3xl font-semibold tracking-tight">
-            Welcome to Command Center
+            Welcome to Scribe
           </h1>
           <p className="text-muted-foreground text-balance">
             Start by adding your first client. You&rsquo;ll land in an Auto-routed chat where

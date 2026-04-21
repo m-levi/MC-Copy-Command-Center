@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Email Copywriter AI",
-  description: "AI-powered email copywriting tool for e-commerce brands",
+  title: "Scribe",
+  description: "Skills-first copy assistant for e-commerce brands.",
 };
 
 export default function RootLayout({

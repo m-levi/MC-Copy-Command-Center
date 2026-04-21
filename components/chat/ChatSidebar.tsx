@@ -47,7 +47,7 @@ export function ChatSidebar({
           <span className="bg-primary text-primary-foreground grid size-7 place-items-center rounded-md">
             <Sparkles className="size-4" />
           </span>
-          <span>Command Center</span>
+          <span>Scribe</span>
         </Link>
         <BrandSwitcher current={currentBrand} brands={brands} />
         <NewClientButton

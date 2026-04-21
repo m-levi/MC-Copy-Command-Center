@@ -11,6 +11,8 @@ import type { ToolContext } from '@/lib/tools/types';
 import { searchRelevantDocuments, buildRAGContext } from '@/lib/rag-service';
 import { searchMemories, isSupermemoryConfigured } from '@/lib/supermemory';
 import { formatBrandVoiceForPrompt } from '@/lib/chat-prompts';
+import { loadBrandVoiceMarkdown, inferSlug } from '@/lib/brand-voice';
+import { localMemorySearch } from '@/lib/memory-local';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -142,7 +144,20 @@ export async function POST(req: Request) {
   ]);
 
   const brandInfo = buildBrandInfoBlock(brand);
-  const brandVoice = brand.brand_voice ? formatBrandVoiceForPrompt(brand.brand_voice) : '';
+  // Prefer the new brand.md source of truth. Falls back to the legacy
+  // brand_voice JSON (via formatBrandVoiceForPrompt) if no brand.md is
+  // set yet, so nothing breaks for accounts still on the old schema.
+  const brandMd = loadBrandVoiceMarkdown({
+    brand_md: brand.brand_md ?? null,
+    brand_slug: brand.brand_slug ?? inferSlug(brand.name ?? ''),
+    name: brand.name,
+  });
+  const brandVoice =
+    brandMd.trim().length > 0
+      ? brandMd
+      : brand.brand_voice
+        ? formatBrandVoiceForPrompt(brand.brand_voice)
+        : '';
   const websiteUrl = brand.website_url ?? '';
 
   logger.log('[chat] request scope', {
@@ -267,20 +282,30 @@ async function buildRagContextFor(brandId: string, query: string): Promise<strin
 }
 
 async function buildMemoryContextFor(brandId: string, userId: string, query: string): Promise<string> {
-  if (!query || !isSupermemoryConfigured()) return '';
-  try {
-    const results = await searchMemories(brandId, userId, query, 5);
-    if (!results.length) return '';
-    const lines = results
-      .slice(0, 5)
-      .map((r) => `- ${r.content.slice(0, 300)}${r.content.length > 300 ? '…' : ''}`);
-    return `<memory_context>\nPreviously saved notes relevant to this brand/user:\n${lines.join(
-      '\n',
-    )}\n</memory_context>`;
-  } catch (err) {
-    logger.warn('[chat] memory failed:', err);
-    return '';
+  if (!query) return '';
+  let hits: Array<{ content: string }> = [];
+  if (isSupermemoryConfigured()) {
+    try {
+      hits = await searchMemories(brandId, userId, query, 5);
+    } catch (err) {
+      logger.warn('[chat] supermemory search failed, using local:', err);
+    }
   }
+  if (hits.length === 0) {
+    try {
+      const rows = await localMemorySearch(userId, brandId, query, 5);
+      hits = rows.map((r) => ({ content: r.content }));
+    } catch (err) {
+      logger.warn('[chat] local memory search failed:', err);
+    }
+  }
+  if (hits.length === 0) return '';
+  const lines = hits
+    .slice(0, 5)
+    .map((r) => `- ${r.content.slice(0, 300)}${r.content.length > 300 ? '…' : ''}`);
+  return `<memory_context>\nPreviously saved notes relevant to this brand/user:\n${lines.join(
+    '\n',
+  )}\n</memory_context>`;
 }
 
 // Suppress unused import warning while interpolate is available for future use

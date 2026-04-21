@@ -1,12 +1,14 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { searchMemories, isSupermemoryConfigured } from '@/lib/supermemory';
+import { localMemorySearch } from '@/lib/memory-local';
+import { logger } from '@/lib/logger';
 import type { ToolContext } from './types';
 
 /**
- * Pulls relevant memories for this brand + user from Supermemory. Memories
- * persist across sessions and are scoped with the composite key
- * `brand_{brandId}_user_{userId}`.
+ * Pulls relevant memories for this brand + user. Prefers Supermemory when
+ * configured; falls back to the DB-backed `memory_notes` table otherwise
+ * so memory still works even without an external provider.
  */
 export function buildMemoryRecallTool(ctx: ToolContext) {
   return tool({
@@ -17,17 +19,35 @@ export function buildMemoryRecallTool(ctx: ToolContext) {
       limit: z.number().int().min(1).max(20).optional().default(5),
     }),
     execute: async ({ query, limit }) => {
-      if (!ctx.brandId) {
-        return { ok: false as const, message: 'No brand is scoped to this request.' };
+      if (!ctx.brandId && !ctx.userId) {
+        return { ok: false as const, message: 'No user scope available.' };
       }
-      if (!isSupermemoryConfigured()) {
-        return { ok: false as const, message: 'Memory is not configured.' };
+      const n = limit ?? 5;
+      if (isSupermemoryConfigured() && ctx.brandId) {
+        try {
+          const results = await searchMemories(ctx.brandId, ctx.userId, query, n);
+          return {
+            ok: true as const,
+            source: 'supermemory' as const,
+            matches: results.length,
+            memories: results.map((m) => ({ id: m.id, content: m.content, score: m.score })),
+          };
+        } catch (err) {
+          logger.warn('[memory_recall] supermemory failed, falling back to local:', err);
+        }
       }
-      const results = await searchMemories(ctx.brandId, ctx.userId, query, limit ?? 5);
+      const rows = await localMemorySearch(ctx.userId, ctx.brandId ?? null, query, n);
       return {
         ok: true as const,
-        matches: results.length,
-        memories: results.map((m) => ({ id: m.id, content: m.content, score: m.score })),
+        source: 'local' as const,
+        matches: rows.length,
+        memories: rows.map((r) => ({
+          id: r.id,
+          content: r.content,
+          score: r.score ?? 1,
+          category: r.category,
+          title: r.title,
+        })),
       };
     },
   });

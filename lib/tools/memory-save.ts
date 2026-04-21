@@ -1,6 +1,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { addMemory, isSupermemoryConfigured } from '@/lib/supermemory';
+import { localMemoryAdd } from '@/lib/memory-local';
+import { logger } from '@/lib/logger';
 import type { ToolContext } from './types';
 
 const MEMORY_CATEGORIES = [
@@ -13,10 +15,11 @@ const MEMORY_CATEGORIES = [
 ] as const;
 
 /**
- * Persists a memory for this brand + user. Replaces the old inline
- * `[REMEMBER:key=value:category]` string protocol with a proper tool call,
- * which means the model only writes memory when it actually decides to —
- * not accidentally as part of formatted output.
+ * Persists a memory for this brand + user. Writes to Supermemory when
+ * configured, then mirrors to the local `memory_notes` table so the
+ * brand-scoped memory list in the UI always reflects everything saved
+ * in this app. When Supermemory isn't available, local is the only
+ * store.
  */
 export function buildMemorySaveTool(ctx: ToolContext) {
   return tool({
@@ -28,14 +31,35 @@ export function buildMemorySaveTool(ctx: ToolContext) {
       title: z.string().optional().describe('Short label for the memory.'),
     }),
     execute: async ({ content, category, title }) => {
-      if (!ctx.brandId) {
-        return { ok: false as const, message: 'No brand is scoped to this request.' };
+      if (!ctx.userId) {
+        return { ok: false as const, message: 'No user scope available.' };
       }
-      if (!isSupermemoryConfigured()) {
-        return { ok: false as const, message: 'Memory is not configured.' };
+      let supermemoryId: string | null = null;
+      if (isSupermemoryConfigured() && ctx.brandId) {
+        try {
+          const result = await addMemory(ctx.brandId, ctx.userId, content, { title, category });
+          supermemoryId = result.id;
+        } catch (err) {
+          logger.warn('[memory_save] supermemory failed, falling back to local:', err);
+        }
       }
-      const result = await addMemory(ctx.brandId, ctx.userId, content, { title, category });
-      return { ok: true as const, id: result.id, status: result.status };
+      try {
+        const { id } = await localMemoryAdd({
+          userId: ctx.userId,
+          brandId: ctx.brandId ?? null,
+          content,
+          category,
+          title,
+        });
+        return {
+          ok: true as const,
+          id,
+          supermemory_id: supermemoryId,
+          source: supermemoryId ? ('both' as const) : ('local' as const),
+        };
+      } catch (err) {
+        return { ok: false as const, message: (err as Error).message };
+      }
     },
   });
 }
