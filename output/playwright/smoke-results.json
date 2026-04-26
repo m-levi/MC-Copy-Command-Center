@@ -1,0 +1,81 @@
+{
+  "results": [
+    {
+      "name": "Unauthenticated root redirects to /login",
+      "ok": true,
+      "detail": "http://localhost:3000/login"
+    },
+    {
+      "name": "Login heading renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Login email input renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Login password input renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Login submit button renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Remember me checkbox can be checked",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Signup page renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Signup mismatch validation renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Forgot password page renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Forgot password email input renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Forgot password submit button renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Back to Login returns to login page",
+      "ok": true,
+      "detail": "http://localhost:3000/login"
+    },
+    {
+      "name": "Mobile login heading renders",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "No browser page errors during smoke",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "No actionable console errors/warnings during smoke",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "consoleEvents": [],
+  "pageErrors": []
+}
