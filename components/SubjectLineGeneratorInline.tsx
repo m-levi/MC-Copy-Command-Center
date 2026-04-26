@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
+import { getClientErrorMessage } from '@/lib/client-errors';
 
 interface SubjectLineOption {
   subject: string;
@@ -57,7 +58,7 @@ export default function SubjectLineGeneratorInline({ emailContent, isVisible = f
       }
     } catch (err) {
       console.error('Error generating subject lines:', err);
-      setError('Failed to generate subject lines. Please try again.');
+      setError(getClientErrorMessage(err, 'Failed to generate subject lines.'));
     } finally {
       setLoading(false);
     }

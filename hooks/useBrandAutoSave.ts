@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Brand } from '@/types';
 import { logger } from '@/lib/logger';
 import toast from 'react-hot-toast';
+import { getClientErrorMessage } from '@/lib/client-errors';
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -84,7 +85,7 @@ export function useBrandAutoSave({
         } catch (error) {
           logger.error('Error auto-saving brand:', error);
           setSaveStatus('error');
-          toast.error('Failed to save changes. Please try again.');
+          toast.error(getClientErrorMessage(error, 'Failed to save changes.'));
           
           // Reset to idle after showing error for 3 seconds
           setTimeout(() => {

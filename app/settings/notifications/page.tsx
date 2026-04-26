@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
+import { getClientErrorMessage } from '@/lib/client-errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -154,9 +155,9 @@ export default function NotificationsPage() {
         setTestResult('error');
         setTestMessage(data.error || data.details?.error || 'Failed to send test email');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setTestResult('error');
-      setTestMessage(error.message || 'Network error');
+      setTestMessage(getClientErrorMessage(error, 'Failed to send test email'));
     } finally {
       setSendingTest(false);
       // Reset the result after 5 seconds
