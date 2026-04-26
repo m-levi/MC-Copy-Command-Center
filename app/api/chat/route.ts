@@ -46,10 +46,9 @@ function deriveTitle(messages: UIMessage[]): string | null {
 
 /**
  * Persist (or refresh) the conversation row. Idempotent upsert keyed on
- * the client-generated conversation id. We only touch columns that are
- * guaranteed to exist on any deployed schema; optional columns are
- * written on a best-effort basis and errors are swallowed so a partial
- * schema never breaks a chat.
+ * the client-generated conversation id. Newer schemas have extra metadata
+ * columns that keep threads visible and editable, so write them when they
+ * exist and retry without any optional column that is missing.
  */
 async function upsertConversation(params: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,42 +56,64 @@ async function upsertConversation(params: {
   conversationId: string;
   brandId: string;
   userId: string;
+  createdByName: string | null;
   title: string | null;
   skillSlug: string | null;
   modelId: string | null;
 }) {
-  // `title` and `model` are NOT NULL with no DB default — skipping them on
-  // INSERT fails the row and the conversation never lands in history.
-  // Fall back to stable sentinels; the title gets replaced asynchronously
-  // by /api/conversations/[id]/name, and model is overwritten below as
-  // soon as we know the real id.
+  // `title` and `model` are NOT NULL with no DB default on the deployed
+  // schema — skipping them on INSERT fails the row and the conversation
+  // never lands in history. Fall back to stable sentinels.
+  const now = new Date().toISOString();
   const base: Record<string, unknown> = {
     id: params.conversationId,
     brand_id: params.brandId,
     user_id: params.userId,
+    created_by: params.userId,
+    created_by_name: params.createdByName,
     title: params.title ?? 'New chat',
     model: params.modelId ?? 'anthropic/claude-opus-4.6',
-    updated_at: new Date().toISOString(),
+    conversation_type: 'email',
+    mode: 'email_copy',
+    skill_slug: params.skillSlug,
+    last_message_preview: params.title ?? null,
+    last_message_at: now,
+    updated_at: now,
   };
 
-  const { error: upsertErr } = await params.supabase
-    .from('conversations')
-    .upsert(base, { onConflict: 'id' });
-  if (upsertErr) {
-    logger.error('[chat] conversation base upsert failed:', upsertErr);
-    return;
+  const optionalColumns = new Set([
+    'created_by',
+    'created_by_name',
+    'conversation_type',
+    'mode',
+    'skill_slug',
+    'last_message_preview',
+    'last_message_at',
+  ]);
+  const payload = { ...base };
+
+  for (let attempt = 0; attempt <= optionalColumns.size; attempt += 1) {
+    const { error } = await params.supabase
+      .from('conversations')
+      .upsert({ ...payload }, { onConflict: 'id' });
+    if (!error) return;
+
+    const missingColumn = getMissingColumnName(error);
+    if (missingColumn && optionalColumns.has(missingColumn) && missingColumn in payload) {
+      delete payload[missingColumn];
+      logger.warn(`[chat] retrying conversation upsert without missing column: ${missingColumn}`);
+      continue;
+    }
+
+    if (await conversationExists(params.supabase, params.conversationId)) {
+      logger.warn('[chat] conversation upsert failed, but existing row is readable:', error);
+      return;
+    }
+
+    throw error;
   }
 
-  // Optional columns — try once; if the column doesn't exist, ignore.
-  try {
-    const extra: Record<string, unknown> = {};
-    if (params.skillSlug !== undefined) extra.skill_slug = params.skillSlug;
-    if (Object.keys(extra).length > 0) {
-      await params.supabase.from('conversations').update(extra).eq('id', params.conversationId);
-    }
-  } catch (err) {
-    logger.warn('[chat] conversation optional-column update skipped:', err);
-  }
+  throw new Error('Conversation upsert failed after schema compatibility retries');
 }
 
 export async function POST(req: Request) {
@@ -188,10 +209,21 @@ export async function POST(req: Request) {
       conversationId,
       brandId: brand.id,
       userId: user.id,
+      createdByName:
+        (user.user_metadata?.full_name as string | undefined) ??
+        (user.user_metadata?.name as string | undefined) ??
+        user.email ??
+        null,
       title,
       skillSlug: skillSlug ?? null,
       modelId: modelId ?? null,
-    }).catch((err) => logger.warn('[chat] conversation upsert async error:', err));
+    });
+    try {
+      await conversationUpsertPromise;
+    } catch (err) {
+      logger.error('[chat] conversation upsert failed:', err);
+      return new Response('Failed to save conversation', { status: 500 });
+    }
   }
 
   const standardScope = {
@@ -259,14 +291,16 @@ export async function POST(req: Request) {
   if (conversationId && lastUser && userText) {
     try {
       await conversationUpsertPromise;
-      await supabase.from('messages').insert({
+      const { error: messageInsertError } = await supabase.from('messages').insert({
         conversation_id: conversationId,
         role: 'user',
         content: userText,
         user_id: user.id,
       });
+      if (messageInsertError) throw messageInsertError;
     } catch (err) {
-      logger.warn('[chat] user message insert failed:', err);
+      logger.error('[chat] user message insert failed:', err);
+      return new Response('Failed to save message', { status: 500 });
     }
   }
 
@@ -310,6 +344,34 @@ function uiMessageText(m: UIMessage): string {
     if (p.type === 'text') parts.push(p.text);
   }
   return parts.join('\n');
+}
+
+function getMissingColumnName(error: unknown): string | null {
+  const message =
+    typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as { message?: unknown }).message)
+      : String(error ?? '');
+  const match =
+    /Could not find the '([^']+)' column/.exec(message) ??
+    /column ['"]([^'"]+)['"]/.exec(message);
+  return match?.[1] ?? null;
+}
+
+async function conversationExists(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  conversationId: string,
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .maybeSingle();
+    return !error && Boolean(data?.id);
+  } catch {
+    return false;
+  }
 }
 
 function buildBrandInfoBlock(brand: Record<string, unknown>): string {

@@ -5,6 +5,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import { nanoid } from "nanoid";
+import { useRouter } from "next/navigation";
 import {
   Conversation,
   ConversationContent,
@@ -83,8 +84,10 @@ export function ChatArea({
   skills: SkillOption[];
 }) {
   const [conversationId] = useState<string>(() => initialConversationId ?? nanoid());
+  const router = useRouter();
   const urlHasIdRef = useRef<boolean>(Boolean(initialConversationId));
   const urlReplacedRef = useRef<boolean>(false);
+  const sidebarRefreshRef = useRef<boolean>(false);
   const [lockedSkill, setLockedSkill] = useState<string | null>(initialSkillSlug);
   const [modelId, setModelId] = useState<string>(initialModelId);
   const [input, setInput] = useState("");
@@ -135,6 +138,15 @@ export function ChatArea({
     window.history.replaceState(null, "", `/brands/${brandId}/chat/${conversationId}`);
     urlReplacedRef.current = true;
   }, [chat.messages.length, conversationId, brandId]);
+
+  useEffect(() => {
+    if (urlHasIdRef.current || sidebarRefreshRef.current) return;
+    if (!urlReplacedRef.current) return;
+    if (chat.status === "submitted" || chat.status === "streaming") return;
+    if (chat.error) return;
+    sidebarRefreshRef.current = true;
+    router.refresh();
+  }, [chat.status, chat.error, router]);
 
   useEffect(() => {
     setLockedSkill(initialSkillSlug);

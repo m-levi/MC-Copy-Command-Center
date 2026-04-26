@@ -185,7 +185,7 @@ export const POST = withErrorHandling(async (
     .eq('id', conversation.brand_id)
     .single();
 
-  const conversationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/brands/${conversation.brand_id}/chat?conversation=${conversationId}`;
+  const conversationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/brands/${conversation.brand_id}/chat/${conversationId}`;
   const commenterName = profile?.full_name || user.email || 'Someone';
 
   // Create notification for conversation owner (if not the commenter)
@@ -197,7 +197,7 @@ export const POST = withErrorHandling(async (
       type: 'comment_added',
       title: 'New Comment',
       message: `${commenterName} commented on your conversation`,
-      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+      link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
       metadata: {
         conversation_id: conversationId,
         comment_id: comment.id,
@@ -257,7 +257,7 @@ export const POST = withErrorHandling(async (
       type: 'comment_assigned',
       title: 'Comment Assigned to You',
       message: `${commenterName} assigned you a comment`,
-      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+      link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
       metadata: {
         conversation_id: conversationId,
         comment_id: comment.id,
@@ -338,7 +338,7 @@ export const POST = withErrorHandling(async (
                 type: 'comment_mention',
                 title: 'You were mentioned',
                 message: `${commenterName} mentioned you in a comment`,
-                link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+                link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
                 metadata: {
                   conversation_id: conversationId,
                   comment_id: comment.id,
@@ -513,7 +513,6 @@ async function checkSharePermission(
     (!share.expires_at || new Date(share.expires_at) > new Date())
   );
 }
-
 
 
 

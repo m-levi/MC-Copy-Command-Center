@@ -23,10 +23,21 @@ export const dynamic = "force-dynamic";
  */
 export default async function ChatPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ brandId: string }>;
+  searchParams?: Promise<{ conversation?: string | string[] }>;
 }) {
   const { brandId } = await params;
+  const query = await searchParams;
+  const legacyConversationId = Array.isArray(query?.conversation)
+    ? query?.conversation[0]
+    : query?.conversation;
+
+  if (legacyConversationId) {
+    redirect(`/brands/${brandId}/chat/${encodeURIComponent(legacyConversationId)}`);
+  }
+
   const supabase = await createClient();
   const { data: userRes } = await supabase.auth.getUser();
   const user = userRes?.user;

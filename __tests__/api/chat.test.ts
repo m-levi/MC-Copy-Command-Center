@@ -81,12 +81,17 @@ function createSupabaseMock({
     organization_id: null,
   },
   skills = [],
+  conversationsUpsertMock,
+  existingConversation = null,
 }: {
-  user?: { id: string } | null;
+  user?: { id: string; email?: string; user_metadata?: Record<string, unknown> } | null;
   brand?: Record<string, unknown> | null;
   skills?: Array<Record<string, unknown>>;
+  conversationsUpsertMock?: jest.Mock;
+  existingConversation?: { id: string } | null;
 } = {}) {
-  const conversationsUpsert = jest.fn().mockResolvedValue({ error: null });
+  const conversationsUpsert =
+    conversationsUpsertMock ?? jest.fn().mockResolvedValue({ error: null });
   const conversationsUpdateEq = jest.fn().mockResolvedValue({ error: null });
   const messagesInsert = jest.fn().mockResolvedValue({ error: null });
 
@@ -119,6 +124,14 @@ function createSupabaseMock({
       if (table === 'conversations') {
         return {
           upsert: conversationsUpsert,
+          select: jest.fn().mockReturnValue({
+            eq: jest.fn().mockReturnValue({
+              maybeSingle: jest.fn().mockResolvedValue({
+                data: existingConversation,
+                error: null,
+              }),
+            }),
+          }),
           update: jest.fn().mockReturnValue({
             eq: conversationsUpdateEq,
           }),
@@ -241,6 +254,8 @@ describe('/api/chat', () => {
         brand_id: 'brand-123',
         user_id: 'user-123',
         title: 'Create an email',
+        conversation_type: 'email',
+        mode: 'email_copy',
       }),
       { onConflict: 'id' },
     );
@@ -252,5 +267,79 @@ describe('/api/chat', () => {
         user_id: 'user-123',
       }),
     );
+  });
+
+  it('retries conversation persistence without missing optional columns', async () => {
+    const conversationsUpsert = jest
+      .fn()
+      .mockResolvedValueOnce({
+        error: {
+          message: "Could not find the 'created_by' column of 'conversations' in the schema cache",
+        },
+      })
+      .mockResolvedValueOnce({ error: null });
+    const { supabase } = createSupabaseMock({ conversationsUpsertMock: conversationsUpsert });
+    mockCreateClient.mockResolvedValue(supabase as any);
+
+    const response = await POST(
+      request({
+        brandId: 'brand-123',
+        conversationId: 'conv-123',
+        messages: [uiText('Create an email')],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(conversationsUpsert).toHaveBeenCalledTimes(2);
+    expect(conversationsUpsert.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ created_by: 'user-123' }),
+    );
+    expect(conversationsUpsert.mock.calls[1][0]).not.toHaveProperty('created_by');
+  });
+
+  it('returns 500 instead of streaming an unsaved conversation when persistence fails', async () => {
+    const conversationsUpsert = jest.fn().mockResolvedValue({
+      error: { message: 'new row violates row-level security policy' },
+    });
+    const { supabase, messagesInsert } = createSupabaseMock({
+      conversationsUpsertMock: conversationsUpsert,
+    });
+    mockCreateClient.mockResolvedValue(supabase as any);
+
+    const response = await POST(
+      request({
+        brandId: 'brand-123',
+        conversationId: 'conv-123',
+        messages: [uiText('Create an email')],
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe('Failed to save conversation');
+    expect(messagesInsert).not.toHaveBeenCalled();
+    expect(mockRunSkill).not.toHaveBeenCalled();
+  });
+
+  it('continues when updating an already-readable conversation is blocked', async () => {
+    const conversationsUpsert = jest.fn().mockResolvedValue({
+      error: { message: 'new row violates row-level security policy' },
+    });
+    const { supabase, messagesInsert } = createSupabaseMock({
+      conversationsUpsertMock: conversationsUpsert,
+      existingConversation: { id: 'conv-123' },
+    });
+    mockCreateClient.mockResolvedValue(supabase as any);
+
+    const response = await POST(
+      request({
+        brandId: 'brand-123',
+        conversationId: 'conv-123',
+        messages: [uiText('Create an email')],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(messagesInsert).toHaveBeenCalled();
+    expect(mockRunSkill).toHaveBeenCalled();
   });
 });

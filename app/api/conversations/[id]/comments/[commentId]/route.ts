@@ -262,7 +262,7 @@ export const PATCH = withErrorHandling(async (
         type: 'comment_assigned',
         title: 'Comment Assigned to You',
         message: `${userName} assigned you a comment`,
-        link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+        link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
         metadata: {
           conversation_id: conversationId,
           comment_id: commentId,
@@ -278,7 +278,7 @@ export const PATCH = withErrorHandling(async (
         type: 'comment_unassigned',
         title: 'Comment Unassigned',
         message: `${userName} reassigned a comment you were assigned to`,
-        link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+        link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
         metadata: {
           conversation_id: conversationId,
           comment_id: commentId,
@@ -295,7 +295,7 @@ export const PATCH = withErrorHandling(async (
       type: 'comment_resolved',
       title: 'Comment Resolved',
       message: `${userName} resolved a comment assigned to you`,
-      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+      link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
       metadata: {
         conversation_id: conversationId,
         comment_id: commentId,
@@ -311,7 +311,7 @@ export const PATCH = withErrorHandling(async (
       type: 'comment_resolved',
       title: 'Your Comment Was Resolved',
       message: `${userName} resolved your comment`,
-      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+      link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
       metadata: {
         conversation_id: conversationId,
         comment_id: commentId,
@@ -395,4 +395,3 @@ export const DELETE = withErrorHandling(async (
 
   return NextResponse.json({ success: true });
 });
-

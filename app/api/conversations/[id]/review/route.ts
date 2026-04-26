@@ -126,7 +126,7 @@ export const POST = withErrorHandling(async (
     throw updateError;
   }
 
-  const conversationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/brands/${conversation.brand_id}/chat?conversation=${conversationId}`;
+  const conversationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/brands/${conversation.brand_id}/chat/${conversationId}`;
 
   // Create notifications and send emails to reviewers
   const serviceClient = getServiceClient();
@@ -140,7 +140,7 @@ export const POST = withErrorHandling(async (
       type: 'review_requested',
       title: 'Review Requested',
       message: `${requesterName} is requesting your review on "${conversation.title || 'an email'}"`,
-      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+      link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
       metadata: {
         conversation_id: conversationId,
         requester_id: user.id,
@@ -249,7 +249,7 @@ export const PUT = withErrorHandling(async (
     throw updateError;
   }
 
-  const conversationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/brands/${conversation.brand_id}/chat?conversation=${conversationId}`;
+  const conversationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/brands/${conversation.brand_id}/chat/${conversationId}`;
 
   // Notify the person who requested the review
   if (conversation.review_requested_by && conversation.review_requested_by !== user.id) {
@@ -260,7 +260,7 @@ export const PUT = withErrorHandling(async (
       type: 'review_completed',
       title: status === 'approved' ? 'Email Approved' : 'Changes Requested',
       message: `${reviewerName} ${statusText} "${conversation.title || 'your email'}"`,
-      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+      link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
       metadata: {
         conversation_id: conversationId,
         reviewer_id: user.id,
@@ -304,7 +304,7 @@ export const PUT = withErrorHandling(async (
       type: 'review_completed',
       title: status === 'approved' ? 'Email Approved' : 'Changes Requested',
       message: `${reviewerName} ${statusText} "${conversation.title || 'your email'}"`,
-      link: `/brands/${conversation.brand_id}/chat?conversation=${conversationId}`,
+      link: `/brands/${conversation.brand_id}/chat/${conversationId}`,
       metadata: {
         conversation_id: conversationId,
         reviewer_id: user.id,
@@ -441,7 +441,6 @@ export const DELETE = withErrorHandling(async (
     message: 'Review request cancelled',
   });
 });
-
 
 
 

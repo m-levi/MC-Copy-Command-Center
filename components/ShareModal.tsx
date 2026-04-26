@@ -16,7 +16,8 @@ export default function ShareModal({ conversationId, isOpen, onClose }: ShareMod
   const [isGenerating, setIsGenerating] = useState(false);
 
   const handleCopyTeamLink = async () => {
-    const teamLink = `${window.location.origin}${window.location.pathname}?conversation=${conversationId}`;
+    const chatBasePath = window.location.pathname.replace(/\/chat(?:\/[^/]+)?$/, '/chat');
+    const teamLink = `${window.location.origin}${chatBasePath}/${conversationId}`;
     await navigator.clipboard.writeText(teamLink);
     toast.success('Team link copied!');
   };
@@ -41,7 +42,7 @@ export default function ShareModal({ conversationId, isOpen, onClose }: ShareMod
         try {
           const data = JSON.parse(errorText);
           errorMessage = data.error || data.message || errorMessage;
-        } catch (e) {
+        } catch {
           errorMessage = `Failed to create link (${response.status})`;
         }
         throw new Error(errorMessage);

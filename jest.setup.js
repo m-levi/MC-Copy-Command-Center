@@ -7,6 +7,7 @@ jest.mock('next/navigation', () => ({
     return {
       push: jest.fn(),
       replace: jest.fn(),
+      refresh: jest.fn(),
       prefetch: jest.fn(),
       back: jest.fn(),
       pathname: '/',
@@ -47,7 +48,6 @@ beforeAll(() => {
 afterAll(() => {
   console.error = originalError
 })
-
 
 
 

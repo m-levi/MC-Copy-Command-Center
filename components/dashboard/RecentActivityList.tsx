@@ -117,7 +117,7 @@ export default function RecentActivityList() {
         {conversations.map((conv) => (
           <div
             key={conv.id}
-            onClick={() => router.push(`/brands/${conv.brand_id}/chat?conversation=${conv.id}`)}
+            onClick={() => router.push(`/brands/${conv.brand_id}/chat/${conv.id}`)}
             className="group flex flex-col w-[220px] shrink-0 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all cursor-pointer border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
           >
             <div className="flex items-center justify-between mb-2">

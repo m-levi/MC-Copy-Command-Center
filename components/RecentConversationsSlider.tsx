@@ -109,7 +109,7 @@ export default function RecentConversationsSlider() {
           {conversations.map((conv) => (
             <div
               key={conv.id}
-              onClick={() => router.push(`/brands/${conv.brand_id}/chat?conversation=${conv.id}`)}
+              onClick={() => router.push(`/brands/${conv.brand_id}/chat/${conv.id}`)}
               className="snap-start shrink-0 w-[280px] bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500 transition-all cursor-pointer group/card flex flex-col"
             >
               <div className="flex items-center justify-between mb-3">
@@ -158,4 +158,3 @@ export default function RecentConversationsSlider() {
     </div>
   );
 }
-
