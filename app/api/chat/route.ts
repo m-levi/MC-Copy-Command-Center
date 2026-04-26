@@ -27,6 +27,12 @@ interface Body {
   skillVariables?: Record<string, unknown>;
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 /**
  * Derive a short human-readable title from the first user message.
  * Trims and clamps to ~60 characters so the sidebar stays tidy.
@@ -127,6 +133,9 @@ export async function POST(req: Request) {
 
   if (!messages?.length) return new Response('Missing messages', { status: 400 });
   if (!brandId) return new Response('Missing brandId', { status: 400 });
+  if (conversationId && !isUuid(conversationId)) {
+    return new Response('Invalid conversationId', { status: 400 });
+  }
 
   const supabase = await createClient();
   const { data: userRes } = await supabase.auth.getUser();

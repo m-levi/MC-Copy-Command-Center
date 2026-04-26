@@ -17,6 +17,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 /**
  * Deep-link to a specific conversation. Robust to partial schema: if
  * the row doesn't exist yet (race with the first-message upsert) we
@@ -30,6 +36,10 @@ export default async function ConversationPage({
   params: Promise<{ brandId: string; conversationId: string }>;
 }) {
   const { brandId, conversationId } = await params;
+  if (!isUuid(conversationId)) {
+    redirect(`/brands/${brandId}/chat`);
+  }
+
   const supabase = await createClient();
   const { data: userRes } = await supabase.auth.getUser();
   const user = userRes?.user;

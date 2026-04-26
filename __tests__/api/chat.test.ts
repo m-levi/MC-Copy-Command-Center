@@ -53,6 +53,7 @@ const mockSearchRelevantDocuments = searchRelevantDocuments as jest.MockedFuncti
   typeof searchRelevantDocuments
 >;
 const mockBuildRAGContext = buildRAGContext as jest.MockedFunction<typeof buildRAGContext>;
+const VALID_CONVERSATION_ID = '0ae2b5a1-1389-42dd-992e-a9a88f8b8116';
 
 function uiText(text: string): UIMessage {
   return {
@@ -196,6 +197,20 @@ describe('/api/chat', () => {
     expect(response.status).toBe(404);
   });
 
+  it('returns 400 when the conversation id is not a UUID', async () => {
+    const response = await POST(
+      request({
+        brandId: 'brand-123',
+        conversationId: 'not-a-uuid',
+        messages: [uiText('Create an email')],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe('Invalid conversationId');
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
   it('builds RAG context and runs the selected model', async () => {
     const { supabase } = createSupabaseMock();
     mockCreateClient.mockResolvedValue(supabase as any);
@@ -243,14 +258,14 @@ describe('/api/chat', () => {
     await POST(
       request({
         brandId: 'brand-123',
-        conversationId: 'conv-123',
+        conversationId: VALID_CONVERSATION_ID,
         messages: [uiText('Create an email')],
       }),
     );
 
     expect(conversationsUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: 'conv-123',
+        id: VALID_CONVERSATION_ID,
         brand_id: 'brand-123',
         user_id: 'user-123',
         title: 'Create an email',
@@ -261,7 +276,7 @@ describe('/api/chat', () => {
     );
     expect(messagesInsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        conversation_id: 'conv-123',
+        conversation_id: VALID_CONVERSATION_ID,
         role: 'user',
         content: 'Create an email',
         user_id: 'user-123',
@@ -284,7 +299,7 @@ describe('/api/chat', () => {
     const response = await POST(
       request({
         brandId: 'brand-123',
-        conversationId: 'conv-123',
+        conversationId: VALID_CONVERSATION_ID,
         messages: [uiText('Create an email')],
       }),
     );
@@ -309,7 +324,7 @@ describe('/api/chat', () => {
     const response = await POST(
       request({
         brandId: 'brand-123',
-        conversationId: 'conv-123',
+        conversationId: VALID_CONVERSATION_ID,
         messages: [uiText('Create an email')],
       }),
     );
@@ -326,14 +341,14 @@ describe('/api/chat', () => {
     });
     const { supabase, messagesInsert } = createSupabaseMock({
       conversationsUpsertMock: conversationsUpsert,
-      existingConversation: { id: 'conv-123' },
+      existingConversation: { id: VALID_CONVERSATION_ID },
     });
     mockCreateClient.mockResolvedValue(supabase as any);
 
     const response = await POST(
       request({
         brandId: 'brand-123',
-        conversationId: 'conv-123',
+        conversationId: VALID_CONVERSATION_ID,
         messages: [uiText('Create an email')],
       }),
     );
