@@ -13,6 +13,12 @@ export interface RetryOptions {
   jitter?: boolean; // Add random jitter to prevent thundering herd
 }
 
+export interface CircuitBreakerOptions {
+  threshold?: number;
+  timeout?: number;
+  resetTimeout?: number;
+}
+
 export class RetryError extends Error {
   constructor(
     message: string,
@@ -22,6 +28,73 @@ export class RetryError extends Error {
     super(message);
     this.name = 'RetryError';
   }
+}
+
+function toError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === 'string') return new Error(error);
+  return new Error('Unknown error');
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    typeof (error as { status?: unknown }).status === 'number'
+  ) {
+    return (error as { status: number }).status;
+  }
+  return undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+  ) {
+    return (error as { message: string }).message;
+  }
+  return '';
+}
+
+function getErrorName(error: unknown): string {
+  if (error instanceof Error) return error.name;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    typeof (error as { name?: unknown }).name === 'string'
+  ) {
+    return (error as { name: string }).name;
+  }
+  return '';
+}
+
+async function runWithTimeout<T>(fn: () => Promise<T>, timeout: number): Promise<T> {
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    return fn();
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Request timeout')), timeout);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function delayFor(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
 /**
@@ -47,20 +120,13 @@ export async function retryWithBackoff<T>(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Add timeout to the function call
-      const result = await Promise.race([
-        fn(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Request timeout')), timeout)
-        ),
-      ]);
-      return result;
+      return await runWithTimeout(fn, timeout);
     } catch (error) {
-      lastError = error as Error;
+      lastError = toError(error);
 
       // Check if we should retry this error
       if (!shouldRetry(lastError)) {
-        throw lastError;
+        throw error;
       }
 
       // Don't retry on last attempt
@@ -80,7 +146,7 @@ export async function retryWithBackoff<T>(
       }
 
       // Wait with exponential backoff
-      await new Promise((resolve) => setTimeout(resolve, currentDelay));
+      await delayFor(currentDelay);
       delay = Math.min(delay * backoffMultiplier, maxDelay);
     }
   }
@@ -95,29 +161,33 @@ export async function retryWithBackoff<T>(
 /**
  * Check if an error is retryable
  */
-export function isRetryableError(error: any): boolean {
+export function isRetryableError(error: unknown): boolean {
+  const message = getErrorMessage(error);
+  const status = getErrorStatus(error);
+  const name = getErrorName(error);
+
   // Network errors
-  if (error.message?.includes('fetch failed')) return true;
-  if (error.message?.includes('network')) return true;
-  if (error.message?.includes('NetworkError')) return true;
-  if (error.message?.includes('ERR_NETWORK')) return true;
+  if (message.includes('fetch failed')) return true;
+  if (message.toLowerCase().includes('network')) return true;
+  if (message.includes('NetworkError')) return true;
+  if (message.includes('ERR_NETWORK')) return true;
   
   // Rate limiting
-  if (error.status === 429) return true;
+  if (status === 429) return true;
   
   // Server errors (but not client errors)
-  if (error.status >= 500 && error.status < 600) return true;
+  if (status !== undefined && status >= 500 && status < 600) return true;
   
   // Timeout errors
-  if (error.message?.includes('timeout')) return true;
-  if (error.message?.includes('ETIMEDOUT')) return true;
+  if (message.toLowerCase().includes('timeout')) return true;
+  if (message.includes('ETIMEDOUT')) return true;
   
   // Connection errors
-  if (error.message?.includes('ECONNREFUSED')) return true;
-  if (error.message?.includes('ECONNRESET')) return true;
+  if (message.includes('ECONNREFUSED')) return true;
+  if (message.includes('ECONNRESET')) return true;
   
   // Abort errors (might be retryable)
-  if (error.name === 'AbortError') return false; // User-initiated, don't retry
+  if (name === 'AbortError') return false; // User-initiated, don't retry
   
   return false;
 }
@@ -125,10 +195,11 @@ export function isRetryableError(error: any): boolean {
 /**
  * Check if error is a client error (not retryable)
  */
-export function isClientError(error: any): boolean {
-  if (error.status >= 400 && error.status < 500) {
+export function isClientError(error: unknown): boolean {
+  const status = getErrorStatus(error);
+  if (status !== undefined && status >= 400 && status < 500) {
     // Except 429 (rate limit)
-    return error.status !== 429;
+    return status !== 429;
   }
   return false;
 }
@@ -160,17 +231,15 @@ export async function retryWithStrategy<T>(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const result = await Promise.race([
-        fn(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Request timeout')), timeout)
-        ),
-      ]);
-      return result;
+      return await runWithTimeout(fn, timeout);
     } catch (error) {
-      lastError = error as Error;
+      lastError = toError(error);
 
-      if (!shouldRetry(lastError) || attempt === maxRetries) {
+      if (!shouldRetry(lastError)) {
+        throw error;
+      }
+
+      if (attempt === maxRetries) {
         break;
       }
 
@@ -186,7 +255,7 @@ export async function retryWithStrategy<T>(
       }
 
       delay = Math.min(delay, maxDelay);
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await delayFor(delay);
     }
   }
 
@@ -204,12 +273,26 @@ export class CircuitBreaker {
   private failures: number = 0;
   private lastFailureTime: number = 0;
   private state: 'closed' | 'open' | 'half-open' = 'closed';
+  private readonly threshold: number;
+  private readonly timeout: number;
+  private readonly resetTimeout: number;
 
   constructor(
-    private threshold: number = 5,
-    private timeout: number = 60000, // 1 minute
-    private resetTimeout: number = 30000 // 30 seconds
-  ) {}
+    optionsOrThreshold: CircuitBreakerOptions | number = {},
+    timeout: number = 60000, // 1 minute
+    resetTimeout: number = 30000 // 30 seconds
+  ) {
+    if (typeof optionsOrThreshold === 'number') {
+      this.threshold = optionsOrThreshold;
+      this.timeout = timeout;
+      this.resetTimeout = resetTimeout;
+      return;
+    }
+
+    this.threshold = optionsOrThreshold.threshold ?? 5;
+    this.timeout = optionsOrThreshold.timeout ?? timeout;
+    this.resetTimeout = optionsOrThreshold.resetTimeout ?? resetTimeout;
+  }
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     if (this.state === 'open') {
@@ -222,13 +305,11 @@ export class CircuitBreaker {
     }
 
     try {
-      const result = await fn();
+      const result = await runWithTimeout(fn, this.timeout);
       
       // Success - reset circuit breaker
-      if (this.state === 'half-open') {
-        this.state = 'closed';
-        this.failures = 0;
-      }
+      this.state = 'closed';
+      this.failures = 0;
       
       return result;
     } catch (error) {
@@ -253,5 +334,3 @@ export class CircuitBreaker {
     this.state = 'closed';
   }
 }
-
-

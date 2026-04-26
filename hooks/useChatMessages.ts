@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Message } from '@/types';
 import { 
@@ -9,7 +9,6 @@ import {
 } from '@/lib/cache-manager';
 import { RequestCoalescer } from '@/lib/performance-utils';
 import { trackPerformance } from '@/lib/analytics';
-import { loadDraft } from '@/hooks/useDraftSave';
 import toast from 'react-hot-toast';
 import { logger } from '@/lib/logger';
 
@@ -19,14 +18,28 @@ import { logger } from '@/lib/logger';
 export function useChatMessages(conversationId: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
-  const supabase = createClient();
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   const requestCoalescerRef = useRef(new RequestCoalescer());
+  const loadSeqRef = useRef(0);
+
+  const getSupabase = useCallback(() => {
+    if (!supabaseRef.current) {
+      supabaseRef.current = createClient();
+    }
+    return supabaseRef.current;
+  }, []);
 
   /**
    * Load messages for current conversation
    */
   const loadMessages = useCallback(async () => {
-    if (!conversationId) return;
+    const loadSeq = ++loadSeqRef.current;
+
+    if (!conversationId) {
+      setMessages([]);
+      setLoading(false);
+      return;
+    }
 
     const startTime = performance.now();
     setLoading(true);
@@ -38,6 +51,7 @@ export function useChatMessages(conversationId: string | null) {
           // Check cache first
           const cached = getCachedMessages(conversationId);
           if (cached && cached.length > 0) {
+            if (loadSeq !== loadSeqRef.current) return;
             setMessages(cached);
             trackPerformance('load_messages', performance.now() - startTime, { 
               source: 'cache',
@@ -45,6 +59,8 @@ export function useChatMessages(conversationId: string | null) {
             });
             return;
           }
+
+          const supabase = getSupabase();
 
           // Load from database with selective fields
           const { data: messagesData, error } = await supabase
@@ -54,6 +70,7 @@ export function useChatMessages(conversationId: string | null) {
             .order('created_at', { ascending: true });
 
           if (error) throw error;
+          if (loadSeq !== loadSeqRef.current) return;
           
           if (messagesData) {
             // Fetch user profiles for user messages
@@ -68,6 +85,7 @@ export function useChatMessages(conversationId: string | null) {
                 .from('profiles')
                 .select('user_id, email, full_name, avatar_url')
                 .in('user_id', userIds);
+              if (loadSeq !== loadSeqRef.current) return;
                 
               if (profiles) {
                 messagesWithUsers = messagesData.map(msg => {
@@ -91,12 +109,19 @@ export function useChatMessages(conversationId: string | null) {
         conversationId
       );
     } catch (error) {
+      if (loadSeq !== loadSeqRef.current) return;
       logger.error('Error loading messages:', error);
       toast.error('Failed to load messages');
     } finally {
-      setLoading(false);
+      if (loadSeq === loadSeqRef.current) {
+        setLoading(false);
+      }
     }
-  }, [conversationId, supabase]);
+  }, [conversationId, getSupabase]);
+
+  useEffect(() => {
+    void loadMessages();
+  }, [loadMessages]);
 
   /**
    * Add a message optimistically (before DB confirmation)
@@ -112,19 +137,21 @@ export function useChatMessages(conversationId: string | null) {
    * Update a message (e.g., during streaming)
    */
   const updateMessage = useCallback((messageId: string, updates: Partial<Message>) => {
-    setMessages(prev => 
-      prev.map(msg => 
-        msg.id === messageId ? { ...msg, ...updates } : msg
-      )
-    );
-    
-    if (conversationId) {
-      const updatedMessage = messages.find(m => m.id === messageId);
-      if (updatedMessage) {
-        updateCachedMessage(conversationId, { ...updatedMessage, ...updates });
+    setMessages(prev => {
+      let nextMessage: Message | null = null;
+      const next = prev.map(msg => {
+        if (msg.id !== messageId) return msg;
+        nextMessage = { ...msg, ...updates };
+        return nextMessage;
+      });
+
+      if (conversationId && nextMessage) {
+        updateCachedMessage(conversationId, nextMessage);
       }
-    }
-  }, [conversationId, messages]);
+
+      return next;
+    });
+  }, [conversationId]);
 
   /**
    * Replace a message (e.g., replace placeholder with saved message)
@@ -133,19 +160,21 @@ export function useChatMessages(conversationId: string | null) {
     setMessages(prev => {
       // Remove any duplicates and replace the old message
       const filtered = prev.filter(msg => msg.id !== newMessage.id);
-      return filtered.map(msg => msg.id === oldId ? newMessage : msg);
+      const next = filtered.map(msg => msg.id === oldId ? newMessage : msg);
+      if (conversationId) {
+        cacheMessages(conversationId, next);
+      }
+      return next;
     });
-    
-    if (conversationId) {
-      addCachedMessage(conversationId, newMessage);
-    }
   }, [conversationId]);
 
   /**
    * Clear messages (when switching conversations)
    */
   const clearMessages = useCallback(() => {
+    loadSeqRef.current += 1;
     setMessages([]);
+    setLoading(false);
   }, []);
 
   return {
@@ -159,4 +188,3 @@ export function useChatMessages(conversationId: string | null) {
     setMessages
   };
 }
-

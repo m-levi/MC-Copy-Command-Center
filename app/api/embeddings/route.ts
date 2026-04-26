@@ -1,4 +1,4 @@
-import { addBrandDocument } from '@/lib/rag-service';
+import { addBrandDocument, BRAND_DOCUMENT_TYPES } from '@/lib/rag-service';
 import { createClient } from '@/lib/supabase/server';
 import {
   validationError,
@@ -8,6 +8,7 @@ import {
   databaseError,
   withErrorHandling,
 } from '@/lib/api-error';
+import type { BrandDocumentType } from '@/types';
 
 export const runtime = 'edge';
 
@@ -19,6 +20,16 @@ export const POST = withErrorHandling(async (req: Request) => {
     return validationError(
       'Missing required fields',
       'brandId, docType, title, and content are all required'
+    );
+  }
+
+  if (
+    typeof docType !== 'string' ||
+    !BRAND_DOCUMENT_TYPES.includes(docType as BrandDocumentType)
+  ) {
+    return validationError(
+      'Invalid document type',
+      `docType must be one of: ${BRAND_DOCUMENT_TYPES.join(', ')}`
     );
   }
 
@@ -57,7 +68,7 @@ export const POST = withErrorHandling(async (req: Request) => {
   try {
     const document = await addBrandDocument(
       brandId,
-      docType,
+      docType as BrandDocumentType,
       title,
       content,
       apiKey
@@ -78,5 +89,4 @@ export const POST = withErrorHandling(async (req: Request) => {
     throw error; // Let withErrorHandling catch it
   }
 });
-
 

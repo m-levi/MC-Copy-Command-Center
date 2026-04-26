@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { createClient } from '@/lib/supabase/client';
 import * as cacheManager from '@/lib/cache-manager';
@@ -11,6 +11,7 @@ import * as cacheManager from '@/lib/cache-manager';
 jest.mock('@/lib/supabase/client');
 jest.mock('@/lib/cache-manager');
 jest.mock('react-hot-toast', () => ({
+  __esModule: true,
   default: {
     error: jest.fn(),
   },
@@ -35,6 +36,19 @@ const mockCacheMessages = cacheManager.cacheMessages as jest.MockedFunction<
 describe('useChatMessages', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetCachedMessages.mockReturnValue(null);
+    mockCreateClient.mockReturnValue({
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            order: jest.fn().mockResolvedValue({
+              data: [],
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    } as any);
   });
 
   it('should initialize with empty messages', () => {
@@ -104,7 +118,7 @@ describe('useChatMessages', () => {
     expect(mockCacheMessages).toHaveBeenCalledWith('conv-1', dbMessages);
   });
 
-  it('should add message optimistically', () => {
+  it('should add message optimistically', async () => {
     const { result } = renderHook(() => useChatMessages('conv-1'));
 
     const newMessage = {
@@ -115,12 +129,18 @@ describe('useChatMessages', () => {
       created_at: new Date().toISOString(),
     };
 
-    result.current.addMessage(newMessage as any);
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      result.current.addMessage(newMessage as any);
+    });
 
     expect(result.current.messages).toContainEqual(newMessage);
   });
 
-  it('should update message', () => {
+  it('should update message', async () => {
     const initialMessages = [
       {
         id: 'msg-1',
@@ -135,11 +155,15 @@ describe('useChatMessages', () => {
 
     const { result } = renderHook(() => useChatMessages('conv-1'));
 
-    waitFor(() => {
+    await waitFor(() => {
+      expect(result.current.messages).toEqual(initialMessages);
+    });
+
+    await act(async () => {
       result.current.updateMessage('msg-1', { content: 'Updated' });
     });
 
-    waitFor(() => {
+    await waitFor(() => {
       expect(result.current.messages[0].content).toBe('Updated');
     });
   });
@@ -169,9 +193,6 @@ describe('useChatMessages', () => {
     });
   });
 });
-
-
-
 
 
 

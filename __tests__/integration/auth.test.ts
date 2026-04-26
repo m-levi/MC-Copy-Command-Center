@@ -26,7 +26,7 @@ describe('Auth Integration Tests', () => {
 
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({
+          getUser: jest.fn().mockResolvedValue({
             data: { user: mockUser },
             error: null,
           }),
@@ -45,7 +45,7 @@ describe('Auth Integration Tests', () => {
     it('should handle unauthenticated user', async () => {
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({
+          getUser: jest.fn().mockResolvedValue({
             data: { user: null },
             error: { message: 'Not authenticated' },
           }),
@@ -72,7 +72,7 @@ describe('Auth Integration Tests', () => {
 
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({
+          getUser: jest.fn().mockResolvedValue({
             data: { user: { id: 'user-123' } },
             error: null,
           }),
@@ -81,7 +81,7 @@ describe('Auth Integration Tests', () => {
           select: jest.fn().mockReturnValue({
             eq: jest.fn().mockReturnValue({
               eq: jest.fn().mockReturnValue({
-                single: jest.fn().resolves({
+                single: jest.fn().mockResolvedValue({
                   data: mockBrand,
                   error: null,
                 }),
@@ -109,7 +109,7 @@ describe('Auth Integration Tests', () => {
     it('should deny access to brand user does not own', async () => {
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({
+          getUser: jest.fn().mockResolvedValue({
             data: { user: { id: 'user-123' } },
             error: null,
           }),
@@ -118,7 +118,7 @@ describe('Auth Integration Tests', () => {
           select: jest.fn().mockReturnValue({
             eq: jest.fn().mockReturnValue({
               eq: jest.fn().mockReturnValue({
-                single: jest.fn().resolves({
+                single: jest.fn().mockResolvedValue({
                   data: null,
                   error: null,
                 }),

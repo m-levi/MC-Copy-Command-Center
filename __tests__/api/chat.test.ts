@@ -2,133 +2,255 @@
  * @jest-environment node
  */
 
+import type { UIMessage } from 'ai';
 import { POST } from '@/app/api/chat/route';
-import { getModelById } from '@/lib/ai-models';
-import { extractConversationContext } from '@/lib/conversation-memory';
+import { createClient } from '@/lib/supabase/server';
+import { gateway } from '@/lib/ai-providers';
+import { normalizeModelId } from '@/lib/ai-models';
 import { searchRelevantDocuments, buildRAGContext } from '@/lib/rag-service';
+import { runSkill } from '@/lib/workflows/run-skill';
 
-// Mock dependencies
-jest.mock('@/lib/ai-models');
-jest.mock('@/lib/conversation-memory');
+jest.mock('@/lib/supabase/server');
+jest.mock('@/lib/ai-providers', () => ({
+  gateway: jest.fn(() => ({ id: 'mock-model' })),
+}));
+jest.mock('@/lib/ai-models', () => ({
+  normalizeModelId: jest.fn((modelId?: string) => modelId ?? 'anthropic/claude-opus-4.6'),
+}));
+jest.mock('@/lib/skills/registry', () => ({
+  loadBuiltinSkills: jest.fn(() => []),
+  mergeSkills: jest.fn((builtin, custom) => [...builtin, ...custom]),
+}));
+jest.mock('@/lib/workflows/run-skill');
 jest.mock('@/lib/rag-service');
-jest.mock('@/lib/flow-prompts');
-jest.mock('@/lib/chat-prompts');
-jest.mock('@/lib/unified-stream-handler');
+jest.mock('@/lib/supermemory', () => ({
+  isSupermemoryConfigured: jest.fn(() => false),
+  searchMemories: jest.fn(),
+}));
+jest.mock('@/lib/memory-local', () => ({
+  localMemorySearch: jest.fn(() => Promise.resolve([])),
+}));
+jest.mock('@/lib/brand-voice', () => ({
+  loadBrandVoiceMarkdown: jest.fn(() => ''),
+  inferSlug: jest.fn(() => 'test-brand'),
+}));
+jest.mock('@/lib/chat-prompts', () => ({
+  formatBrandVoiceForPrompt: jest.fn(() => 'formatted brand voice'),
+}));
+jest.mock('@/lib/logger', () => ({
+  logger: {
+    log: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  },
+}));
 
-const mockGetModelById = getModelById as jest.MockedFunction<typeof getModelById>;
-const mockExtractConversationContext = extractConversationContext as jest.MockedFunction<
-  typeof extractConversationContext
->;
+const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
+const mockGateway = gateway as jest.MockedFunction<typeof gateway>;
+const mockNormalizeModelId = normalizeModelId as jest.MockedFunction<typeof normalizeModelId>;
+const mockRunSkill = runSkill as jest.MockedFunction<typeof runSkill>;
 const mockSearchRelevantDocuments = searchRelevantDocuments as jest.MockedFunction<
   typeof searchRelevantDocuments
 >;
+const mockBuildRAGContext = buildRAGContext as jest.MockedFunction<typeof buildRAGContext>;
+
+function uiText(text: string): UIMessage {
+  return {
+    id: 'msg-1',
+    role: 'user',
+    parts: [{ type: 'text', text }],
+  };
+}
+
+function request(body: unknown) {
+  return new Request('http://localhost/api/chat', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+function createSupabaseMock({
+  user = { id: 'user-123' },
+  brand = {
+    id: 'brand-123',
+    name: 'Test Brand',
+    brand_details: 'Premium goods',
+    brand_guidelines: 'Keep it warm',
+    brand_voice: null,
+    brand_slug: 'test-brand',
+    organization_id: null,
+  },
+  skills = [],
+}: {
+  user?: { id: string } | null;
+  brand?: Record<string, unknown> | null;
+  skills?: Array<Record<string, unknown>>;
+} = {}) {
+  const conversationsUpsert = jest.fn().mockResolvedValue({ error: null });
+  const conversationsUpdateEq = jest.fn().mockResolvedValue({ error: null });
+  const messagesInsert = jest.fn().mockResolvedValue({ error: null });
+
+  const supabase = {
+    auth: {
+      getUser: jest.fn().mockResolvedValue({ data: { user }, error: null }),
+    },
+    from: jest.fn((table: string) => {
+      if (table === 'brands') {
+        return {
+          select: jest.fn().mockReturnValue({
+            eq: jest.fn().mockReturnValue({
+              single: jest.fn().mockResolvedValue({
+                data: brand,
+                error: brand ? null : new Error('not found'),
+              }),
+            }),
+          }),
+        };
+      }
+
+      if (table === 'skills') {
+        return {
+          select: jest.fn().mockReturnValue({
+            or: jest.fn().mockResolvedValue({ data: skills, error: null }),
+          }),
+        };
+      }
+
+      if (table === 'conversations') {
+        return {
+          upsert: conversationsUpsert,
+          update: jest.fn().mockReturnValue({
+            eq: conversationsUpdateEq,
+          }),
+        };
+      }
+
+      if (table === 'messages') {
+        return {
+          insert: messagesInsert,
+        };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    }),
+  };
+
+  return { supabase, conversationsUpsert, messagesInsert };
+}
 
 describe('/api/chat', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.OPENAI_API_KEY = 'test-openai-key';
-    process.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
+    mockSearchRelevantDocuments.mockResolvedValue([]);
+    mockBuildRAGContext.mockReturnValue('<brand_knowledge>docs</brand_knowledge>');
+    mockRunSkill.mockReturnValue({
+      toUIMessageStreamResponse: () => new Response('ok', { status: 200 }),
+    } as ReturnType<typeof runSkill>);
   });
 
-  describe('POST', () => {
-    it('should return 400 for invalid model', async () => {
-      mockGetModelById.mockReturnValue(null as any);
+  it('returns 400 when messages are missing', async () => {
+    const response = await POST(request({ brandId: 'brand-123', messages: [] }));
 
-      const req = new Request('http://localhost/api/chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          messages: [],
-          modelId: 'invalid-model',
-        }),
-      });
+    expect(response.status).toBe(400);
+  });
 
-      const response = await POST(req);
+  it('returns 401 when the user is not authenticated', async () => {
+    const { supabase } = createSupabaseMock({ user: null });
+    mockCreateClient.mockResolvedValue(supabase as any);
 
-      expect(response.status).toBe(400);
-    });
+    const response = await POST(
+      request({
+        brandId: 'brand-123',
+        messages: [uiText('Create an email')],
+      }),
+    );
 
-    it('should extract conversation context', async () => {
-      const mockModel = {
-        id: 'gpt-5',
-        name: 'GPT-5',
-        provider: 'openai',
-      };
+    expect(response.status).toBe(401);
+  });
 
-      mockGetModelById.mockReturnValue(mockModel as any);
-      mockExtractConversationContext.mockReturnValue({
-        goals: [],
-        keyPoints: [],
-      });
+  it('returns 404 when the brand cannot be loaded', async () => {
+    const { supabase } = createSupabaseMock({ brand: null });
+    mockCreateClient.mockResolvedValue(supabase as any);
 
-      const req = new Request('http://localhost/api/chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          messages: [
-            {
-              role: 'user',
-              content: 'Create an email',
-            },
-          ],
-          modelId: 'gpt-5',
-        }),
-      });
+    const response = await POST(
+      request({
+        brandId: 'missing-brand',
+        messages: [uiText('Create an email')],
+      }),
+    );
 
-      // Mock the unified stream handler
-      const { handleUnifiedStream } = require('@/lib/unified-stream-handler');
-      handleUnifiedStream.mockResolvedValue(
-        new Response('test response', { status: 200 })
-      );
+    expect(response.status).toBe(404);
+  });
 
-      await POST(req);
+  it('builds RAG context and runs the selected model', async () => {
+    const { supabase } = createSupabaseMock();
+    mockCreateClient.mockResolvedValue(supabase as any);
+    mockSearchRelevantDocuments.mockResolvedValue([
+      {
+        id: 'doc-1',
+        brand_id: 'brand-123',
+        doc_type: 'example',
+        title: 'Reference',
+        content: 'Reference copy',
+        created_at: new Date().toISOString(),
+      },
+    ]);
 
-      expect(mockExtractConversationContext).toHaveBeenCalled();
-    });
+    const response = await POST(
+      request({
+        brandId: 'brand-123',
+        modelId: 'openai/gpt-5.1',
+        messages: [uiText('Create an email')],
+      }),
+    );
 
-    it('should search RAG documents when brand context is provided', async () => {
-      const mockModel = {
-        id: 'gpt-5',
-        name: 'GPT-5',
-        provider: 'openai',
-      };
+    expect(response.status).toBe(200);
+    expect(mockNormalizeModelId).toHaveBeenCalledWith('openai/gpt-5.1');
+    expect(mockGateway).toHaveBeenCalledWith('openai/gpt-5.1');
+    expect(mockSearchRelevantDocuments).toHaveBeenCalledWith(
+      'brand-123',
+      'Create an email',
+      'test-openai-key',
+      3,
+    );
+    expect(mockBuildRAGContext).toHaveBeenCalled();
+    expect(mockRunSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: 'openai/gpt-5.1',
+        systemBase: expect.stringContaining('Brand Name: Test Brand'),
+      }),
+    );
+  });
 
-      mockGetModelById.mockReturnValue(mockModel as any);
-      mockExtractConversationContext.mockReturnValue({
-        goals: [],
-        keyPoints: [],
-      });
-      mockSearchRelevantDocuments.mockResolvedValue([]);
+  it('persists the conversation before inserting the user turn', async () => {
+    const { supabase, conversationsUpsert, messagesInsert } = createSupabaseMock();
+    mockCreateClient.mockResolvedValue(supabase as any);
 
-      const req = new Request('http://localhost/api/chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          messages: [
-            {
-              role: 'user',
-              content: 'Create an email',
-            },
-          ],
-          modelId: 'gpt-5',
-          brandContext: {
-            id: 'brand-123',
-            name: 'Test Brand',
-          },
-        }),
-      });
+    await POST(
+      request({
+        brandId: 'brand-123',
+        conversationId: 'conv-123',
+        messages: [uiText('Create an email')],
+      }),
+    );
 
-      const { handleUnifiedStream } = require('@/lib/unified-stream-handler');
-      handleUnifiedStream.mockResolvedValue(
-        new Response('test response', { status: 200 })
-      );
-
-      await POST(req);
-
-      expect(mockSearchRelevantDocuments).toHaveBeenCalled();
-    });
+    expect(conversationsUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'conv-123',
+        brand_id: 'brand-123',
+        user_id: 'user-123',
+        title: 'Create an email',
+      }),
+      { onConflict: 'id' },
+    );
+    expect(messagesInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation_id: 'conv-123',
+        role: 'user',
+        content: 'Create an email',
+        user_id: 'user-123',
+      }),
+    );
   });
 });
-
-
-
-
-
-

@@ -23,6 +23,14 @@ const messageCache = new Map<string, CacheEntry<Message[]>>();
 const conversationCache = new Map<string, CacheEntry<Conversation[]>>();
 const conversationMetadataCache = new Map<string, CacheEntry<{ preview: string; lastMessageAt: string }>>();
 
+function cloneMessages(messages: Message[]): Message[] {
+  return messages.map((message) => ({ ...message }));
+}
+
+function cloneConversations(conversations: Conversation[]): Conversation[] {
+  return conversations.map((conversation) => ({ ...conversation }));
+}
+
 /**
  * Get cached messages for a conversation
  */
@@ -37,7 +45,7 @@ export function getCachedMessages(conversationId: string): Message[] | null {
     return null;
   }
   
-  return entry.data;
+  return cloneMessages(entry.data);
 }
 
 /**
@@ -53,7 +61,7 @@ export function cacheMessages(conversationId: string, messages: Message[]): void
   }
   
   messageCache.set(conversationId, {
-    data: messages,
+    data: cloneMessages(messages),
     timestamp: Date.now(),
     ttl: MESSAGE_CACHE_TTL,
   });
@@ -66,8 +74,8 @@ export function addCachedMessage(conversationId: string, message: Message): void
   const entry = messageCache.get(conversationId);
   
   if (entry) {
-    // Add message to existing cache
-    entry.data.push(message);
+    // Add message to existing cache without mutating the cached array in place.
+    entry.data = [...entry.data.filter((m) => m.id !== message.id), { ...message }];
     entry.timestamp = Date.now(); // Refresh timestamp
   }
 }
@@ -81,7 +89,9 @@ export function updateCachedMessage(conversationId: string, updatedMessage: Mess
   if (entry) {
     const index = entry.data.findIndex(m => m.id === updatedMessage.id);
     if (index !== -1) {
-      entry.data[index] = updatedMessage;
+      entry.data = entry.data.map((message, messageIndex) =>
+        messageIndex === index ? { ...updatedMessage } : message
+      );
       entry.timestamp = Date.now(); // Refresh timestamp
     }
   }
@@ -108,7 +118,7 @@ export function getCachedConversations(brandId: string): Conversation[] | null {
     return null;
   }
   
-  return entry.data;
+  return cloneConversations(entry.data);
 }
 
 /**
@@ -124,7 +134,7 @@ export function cacheConversations(brandId: string, conversations: Conversation[
   }
   
   conversationCache.set(brandId, {
-    data: conversations,
+    data: cloneConversations(conversations),
     timestamp: Date.now(),
     ttl: CONVERSATION_CACHE_TTL,
   });
@@ -237,4 +247,3 @@ export function getCacheStats() {
     },
   };
 }
-

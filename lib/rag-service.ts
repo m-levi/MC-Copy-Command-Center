@@ -1,6 +1,15 @@
-import { BrandDocument } from '@/types';
+import { BrandDocument, BRAND_DOCUMENT_TYPES } from '@/types';
 import { createClient } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
+
+export { BRAND_DOCUMENT_TYPES };
+
+const DOC_TYPE_LABELS: Record<BrandDocument['doc_type'], string> = {
+  example: 'Example Email',
+  competitor: 'Competitor Analysis',
+  research: 'Research',
+  testimonial: 'Customer Testimonial',
+};
 
 /**
  * Generate embeddings using OpenAI
@@ -81,6 +90,10 @@ export async function addBrandDocument(
   apiKey: string
 ): Promise<BrandDocument | null> {
   try {
+    if (!BRAND_DOCUMENT_TYPES.includes(docType)) {
+      throw new Error(`Unsupported brand document type: ${docType}`);
+    }
+
     // Generate embedding for the content
     const embedding = await generateEmbedding(content, apiKey);
     
@@ -163,13 +176,8 @@ export function buildRAGContext(documents: BrandDocument[]): string {
     return '';
   }
 
-  const sections = documents.map((doc, index) => {
-    const typeLabel = {
-      example: 'Example Email',
-      competitor: 'Competitor Analysis',
-      research: 'Research',
-      testimonial: 'Customer Testimonial',
-    }[doc.doc_type];
+  const sections = documents.map((doc) => {
+    const typeLabel = DOC_TYPE_LABELS[doc.doc_type] ?? 'Brand Document';
 
     return `### ${typeLabel}: ${doc.title}\n${doc.content}`;
   });
@@ -182,5 +190,3 @@ ${sections.join('\n\n---\n\n')}
 </brand_knowledge>
 `;
 }
-
-

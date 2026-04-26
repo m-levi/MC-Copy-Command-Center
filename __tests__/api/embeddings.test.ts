@@ -8,7 +8,10 @@ import { addBrandDocument } from '@/lib/rag-service';
 
 // Mock dependencies
 jest.mock('@/lib/supabase/server');
-jest.mock('@/lib/rag-service');
+jest.mock('@/lib/rag-service', () => ({
+  addBrandDocument: jest.fn(),
+  BRAND_DOCUMENT_TYPES: ['example', 'competitor', 'research', 'testimonial'],
+}));
 
 const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
 const mockAddBrandDocument = addBrandDocument as jest.MockedFunction<typeof addBrandDocument>;
@@ -40,7 +43,7 @@ describe('/api/embeddings', () => {
     it('should return 401 if user is not authenticated', async () => {
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({ data: { user: null }, error: null }),
+          getUser: jest.fn().mockResolvedValue({ data: { user: null }, error: null }),
         },
       };
       mockCreateClient.mockResolvedValue(mockSupabase as any);
@@ -49,7 +52,7 @@ describe('/api/embeddings', () => {
         method: 'POST',
         body: JSON.stringify({
           brandId: 'test-brand-id',
-          docType: 'style_guide',
+          docType: 'example',
           title: 'Test Document',
           content: 'Test content',
         }),
@@ -65,7 +68,7 @@ describe('/api/embeddings', () => {
     it('should return 403 if user does not have access to brand', async () => {
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({
+          getUser: jest.fn().mockResolvedValue({
             data: { user: { id: 'user-123' } },
             error: null,
           }),
@@ -74,7 +77,7 @@ describe('/api/embeddings', () => {
           select: jest.fn().mockReturnValue({
             eq: jest.fn().mockReturnValue({
               eq: jest.fn().mockReturnValue({
-                single: jest.fn().resolves({ data: null, error: null }),
+                single: jest.fn().mockResolvedValue({ data: null, error: null }),
               }),
             }),
           }),
@@ -86,7 +89,7 @@ describe('/api/embeddings', () => {
         method: 'POST',
         body: JSON.stringify({
           brandId: 'test-brand-id',
-          docType: 'style_guide',
+          docType: 'example',
           title: 'Test Document',
           content: 'Test content',
         }),
@@ -104,7 +107,7 @@ describe('/api/embeddings', () => {
 
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({
+          getUser: jest.fn().mockResolvedValue({
             data: { user: { id: 'user-123' } },
             error: null,
           }),
@@ -113,7 +116,7 @@ describe('/api/embeddings', () => {
           select: jest.fn().mockReturnValue({
             eq: jest.fn().mockReturnValue({
               eq: jest.fn().mockReturnValue({
-                single: jest.fn().resolves({
+                single: jest.fn().mockResolvedValue({
                   data: { id: 'brand-123' },
                   error: null,
                 }),
@@ -128,7 +131,7 @@ describe('/api/embeddings', () => {
         method: 'POST',
         body: JSON.stringify({
           brandId: 'test-brand-id',
-          docType: 'style_guide',
+          docType: 'example',
           title: 'Test Document',
           content: 'Test content',
         }),
@@ -145,7 +148,7 @@ describe('/api/embeddings', () => {
       const mockDocument = {
         id: 'doc-123',
         brand_id: 'brand-123',
-        doc_type: 'style_guide',
+        doc_type: 'example',
         title: 'Test Document',
         content: 'Test content',
         created_at: new Date().toISOString(),
@@ -155,7 +158,7 @@ describe('/api/embeddings', () => {
 
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({
+          getUser: jest.fn().mockResolvedValue({
             data: { user: { id: 'user-123' } },
             error: null,
           }),
@@ -164,7 +167,7 @@ describe('/api/embeddings', () => {
           select: jest.fn().mockReturnValue({
             eq: jest.fn().mockReturnValue({
               eq: jest.fn().mockReturnValue({
-                single: jest.fn().resolves({
+                single: jest.fn().mockResolvedValue({
                   data: { id: 'brand-123' },
                   error: null,
                 }),
@@ -179,7 +182,7 @@ describe('/api/embeddings', () => {
         method: 'POST',
         body: JSON.stringify({
           brandId: 'brand-123',
-          docType: 'style_guide',
+          docType: 'example',
           title: 'Test Document',
           content: 'Test content',
         }),
@@ -191,7 +194,7 @@ describe('/api/embeddings', () => {
       expect(response.status).toBe(201);
       expect(mockAddBrandDocument).toHaveBeenCalledWith(
         'brand-123',
-        'style_guide',
+        'example',
         'Test Document',
         'Test content',
         'test-openai-key'
@@ -206,7 +209,7 @@ describe('/api/embeddings', () => {
 
       const mockSupabase = {
         auth: {
-          getUser: jest.fn().resolves({
+          getUser: jest.fn().mockResolvedValue({
             data: { user: { id: 'user-123' } },
             error: null,
           }),
@@ -215,7 +218,7 @@ describe('/api/embeddings', () => {
           select: jest.fn().mockReturnValue({
             eq: jest.fn().mockReturnValue({
               eq: jest.fn().mockReturnValue({
-                single: jest.fn().resolves({
+                single: jest.fn().mockResolvedValue({
                   data: { id: 'brand-123' },
                   error: null,
                 }),
@@ -230,7 +233,7 @@ describe('/api/embeddings', () => {
         method: 'POST',
         body: JSON.stringify({
           brandId: 'brand-123',
-          docType: 'style_guide',
+          docType: 'example',
           title: 'Test Document',
           content: 'Test content',
         }),
@@ -245,7 +248,6 @@ describe('/api/embeddings', () => {
     });
   });
 });
-
 
 
 

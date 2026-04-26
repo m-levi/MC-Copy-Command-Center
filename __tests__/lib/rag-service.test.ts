@@ -128,7 +128,7 @@ describe('rag-service', () => {
       const mockDocument = {
         id: 'doc-1',
         brand_id: 'brand-123',
-        doc_type: 'style_guide',
+        doc_type: 'example',
         title: 'Test Doc',
         content: 'Test content',
         embedding: Array(1536).fill(0.1),
@@ -158,7 +158,7 @@ describe('rag-service', () => {
 
       const result = await addBrandDocument(
         'brand-123',
-        'style_guide',
+        'example',
         'Test Doc',
         'Test content',
         'test-key'

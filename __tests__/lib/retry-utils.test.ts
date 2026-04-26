@@ -89,10 +89,13 @@ describe('retry-utils', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 3,
         initialDelay: 100,
+        jitter: false,
       });
 
-      // Fast-forward timers
-      await jest.advanceTimersByTimeAsync(300);
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(200);
 
       const result = await promise;
 
@@ -106,11 +109,14 @@ describe('retry-utils', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 2,
         initialDelay: 100,
+        jitter: false,
       });
+      const assertion = expect(promise).rejects.toThrow(RetryError);
 
+      await Promise.resolve();
       await jest.advanceTimersByTimeAsync(500);
 
-      await expect(promise).rejects.toThrow(RetryError);
+      await assertion;
       expect(fn).toHaveBeenCalledTimes(3); // Initial + 2 retries
     });
 
@@ -133,9 +139,11 @@ describe('retry-utils', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 3,
         initialDelay: 100,
+        jitter: false,
         onRetry,
       });
 
+      await Promise.resolve();
       await jest.advanceTimersByTimeAsync(200);
 
       await promise;
@@ -152,12 +160,15 @@ describe('retry-utils', () => {
 
       const promise = retryWithBackoff(fn, {
         maxRetries: 1,
+        initialDelay: 100,
         timeout: 1000,
       });
+      const assertion = expect(promise).rejects.toThrow(RetryError);
 
-      await jest.advanceTimersByTimeAsync(2000);
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(2500);
 
-      await expect(promise).rejects.toThrow('Request timeout');
+      await assertion;
     });
   });
 
@@ -173,14 +184,16 @@ describe('retry-utils', () => {
     it('should use exponential backoff for exponential strategy', async () => {
       const fn = jest
         .fn()
-        .mockRejectedValueOnce(new Error('error'))
+        .mockRejectedValueOnce(new Error('network error'))
         .mockResolvedValueOnce('success');
 
       const promise = retryWithStrategy(fn, 'exponential', {
         maxRetries: 1,
         initialDelay: 100,
+        jitter: false,
       });
 
+      await Promise.resolve();
       await jest.advanceTimersByTimeAsync(300);
 
       await promise;
@@ -191,7 +204,7 @@ describe('retry-utils', () => {
     it('should use linear backoff for linear strategy', async () => {
       const fn = jest
         .fn()
-        .mockRejectedValueOnce(new Error('error'))
+        .mockRejectedValueOnce(new Error('network error'))
         .mockResolvedValueOnce('success');
 
       const promise = retryWithStrategy(fn, 'linear', {
@@ -199,6 +212,7 @@ describe('retry-utils', () => {
         initialDelay: 100,
       });
 
+      await Promise.resolve();
       await jest.advanceTimersByTimeAsync(300);
 
       await promise;
@@ -209,7 +223,7 @@ describe('retry-utils', () => {
     it('should use fixed delay for fixed strategy', async () => {
       const fn = jest
         .fn()
-        .mockRejectedValueOnce(new Error('error'))
+        .mockRejectedValueOnce(new Error('network error'))
         .mockResolvedValueOnce('success');
 
       const promise = retryWithStrategy(fn, 'fixed', {
@@ -217,6 +231,7 @@ describe('retry-utils', () => {
         initialDelay: 100,
       });
 
+      await Promise.resolve();
       await jest.advanceTimersByTimeAsync(300);
 
       await promise;
@@ -295,8 +310,6 @@ describe('retry-utils', () => {
     });
   });
 });
-
-
 
 
 

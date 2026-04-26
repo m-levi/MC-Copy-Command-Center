@@ -39,7 +39,13 @@ export function extractConversationContext(messages: Message[]): ConversationCon
       if (content.includes('increase') || content.includes('boost')) {
         context.goals?.push('increase_engagement');
       }
-      if (content.includes('convert') || content.includes('purchase')) {
+      if (
+        content.includes('convert') ||
+        content.includes('conversion') ||
+        content.includes('purchase') ||
+        content.includes('sales') ||
+        content.includes('revenue')
+      ) {
         context.goals?.push('drive_conversions');
       }
     }
@@ -178,7 +184,7 @@ export async function getLatestSummary(
 
     if (error) throw error;
     return data;
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -199,5 +205,3 @@ export function shouldCreateSummary(
   
   return messageCount - lastSummaryMessageCount >= summaryInterval;
 }
-
-

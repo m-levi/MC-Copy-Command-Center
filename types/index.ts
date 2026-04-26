@@ -246,10 +246,19 @@ export interface AutomationEmail {
 }
 
 // Brand Documents for RAG
+export const BRAND_DOCUMENT_TYPES = [
+  'example',
+  'competitor',
+  'research',
+  'testimonial',
+] as const;
+
+export type BrandDocumentType = (typeof BRAND_DOCUMENT_TYPES)[number];
+
 export interface BrandDocument {
   id: string;
   brand_id: string;
-  doc_type: 'example' | 'competitor' | 'research' | 'testimonial';
+  doc_type: BrandDocumentType;
   title: string;
   content: string;
   embedding?: number[];
@@ -426,5 +435,4 @@ export type ConversationSortOption =
   | 'title' 
   | 'message_count' 
   | 'creator';
-
 

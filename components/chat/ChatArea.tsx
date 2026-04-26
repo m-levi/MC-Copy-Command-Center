@@ -276,7 +276,7 @@ function MessageRow({
   isStreaming: boolean;
   showThinking: boolean;
 }) {
-  const parts = (message.parts ?? []) as PartLike[];
+  const parts = useMemo(() => (message.parts ?? []) as PartLike[], [message.parts]);
   const isAssistant = message.role === "assistant";
   const assistantText = useMemo(
     () =>
@@ -330,11 +330,24 @@ function MessageRow({
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
   async function copy() {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch {
       // ignored
     }
@@ -351,8 +364,6 @@ function CopyButton({ text }: { text: string }) {
     </Button>
   );
 }
-
-let copyBlockCounter = 0;
 
 function renderPart(
   part: PartLike,
@@ -372,7 +383,7 @@ function renderPart(
       );
     }
     // Reset counter per part so variants A/B/C number as 1/2/3 each turn.
-    copyBlockCounter = 0;
+    let copyBlockCounter = 0;
     return (
       <div key={idx} className="flex flex-col gap-2">
         {segments.map((seg, si) => {

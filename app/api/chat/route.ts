@@ -179,10 +179,11 @@ export async function POST(req: Request) {
   });
 
   // Persist the conversation row so the sidebar can list it immediately.
-  // Fire-and-forget — a DB hiccup shouldn't block the stream.
+  // Keep the promise around so message inserts don't race the conversation FK.
+  let conversationUpsertPromise: Promise<void> | null = null;
   if (conversationId) {
     const title = deriveTitle(messages);
-    upsertConversation({
+    conversationUpsertPromise = upsertConversation({
       supabase,
       conversationId,
       brandId: brand.id,
@@ -257,6 +258,7 @@ export async function POST(req: Request) {
   // new — earlier ones are already in the DB from prior turns.
   if (conversationId && lastUser && userText) {
     try {
+      await conversationUpsertPromise;
       await supabase.from('messages').insert({
         conversation_id: conversationId,
         role: 'user',
